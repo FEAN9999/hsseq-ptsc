@@ -46,4 +46,20 @@ pytest
 
 ## Kết nối Supabase
 
-_(Task 2 điền chuỗi kết nối Supabase chạy được vào đây.)_
+Tạo project Supabase và nhập mật khẩu database là việc của Chồng yêu — hành động ngoài máy này, không phải việc của subagent.
+
+Checklist khi dựng:
+
+- [ ] Tạo project Supabase, region Singapore. Lưu lại mật khẩu database (Supabase chỉ hiện một lần).
+- [ ] Supabase → Connect → chọn **Session pooler**, cổng **5432** (host dạng `aws-0-<region>.pooler.supabase.com`).
+  - **Không** dùng *Direct connection* — chỉ IPv6, Render free không ra được.
+  - **Không** dùng *Transaction pooler* (cổng **6543**) — không hợp với connection pool của SQLAlchemy ở `app/core/db.py`.
+- [ ] Giữ `?sslmode=require` ở cuối chuỗi.
+- [ ] Thử tại chỗ bằng `create_engine` + `select version()`; kỳ vọng in ra `PostgreSQL 15.x ...`. Lỗi `Network is unreachable` nghĩa là đang cầm nhầm chuỗi Direct connection — quay lại bước chọn pooler.
+- [ ] Dán chuỗi đã chạy được vào đây, **che mật khẩu**:
+
+  ```
+  postgresql+psycopg://postgres.<project-ref>:***@aws-0-<region>.pooler.supabase.com:5432/postgres?sslmode=require
+  ```
+
+  _(placeholder — chưa có project Supabase thật nên chưa có chuỗi thật để dán)_

@@ -19,4 +19,10 @@ dev = ["pytest>=8.3", "httpx>=0.28"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-filterwarnings = ["error::DeprecationWarning"]
+pythonpath = ["."]
+filterwarnings = [
+  "error::DeprecationWarning",
+  # starlette's TestClient vẫn tham chiếu alias cũ anyio.abc.BlockingPortal,
+  # bản thân anyio đã deprecate alias đó — lỗi ở thư viện bên thứ ba, không phải code của mình.
+  "ignore:The anyio.abc.BlockingPortal alias is deprecated:DeprecationWarning",
+]
