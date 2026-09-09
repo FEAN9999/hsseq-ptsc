@@ -1,0 +1,28 @@
+# infra/docker-compose.yml — bản on-prem; nginx cho FE thêm sau demo
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: hseq
+      POSTGRES_PASSWORD: hseq
+      POSTGRES_DB: hseq
+    ports: ["5432:5432"]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hseq"]
+      interval: 5s
+      retries: 10
+  api:
+    build: { context: ../backend }
+    environment:
+      DATABASE_URL: postgresql+psycopg://hseq:hseq@db:5432/hseq
+      JWT_SECRET: local-dev-secret-do-not-use-in-production-01
+      CORS_ORIGINS: http://localhost:5173
+      APP_ENV: local
+    ports: ["8000:8000"]
+    depends_on:
+      db: { condition: service_healthy }
+volumes:
+  pgdata:
