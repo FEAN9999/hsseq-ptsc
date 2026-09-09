@@ -247,9 +247,14 @@ def export_catalog_json(db, path: str) -> None:
         .order_by(TemplateSection.sort_order).all()
     )
     ma_section_theo_id = {s.id: s.code for s in sections}
-    indicators = (
-        db.query(Indicator).filter_by(template_id=tpl.id, active=True)
-        .order_by(Indicator.sort_order).all()
+    # Indicator.sort_order chỉ duy nhất TRONG TỪNG section (reset về 1 ở mỗi
+    # nhóm) — sắp toàn cục theo mỗi mình nó làm các nhóm trộn vào nhau. Phải
+    # sắp theo section trước (TemplateSection.sort_order), rồi mới tới
+    # Indicator.sort_order.
+    section_sort_theo_id = {s.id: s.sort_order for s in sections}
+    indicators = sorted(
+        db.query(Indicator).filter_by(template_id=tpl.id, active=True).all(),
+        key=lambda i: (section_sort_theo_id[i.section_id], i.sort_order),
     )
     text_fields = (
         db.query(TemplateTextField).filter_by(template_id=tpl.id)
