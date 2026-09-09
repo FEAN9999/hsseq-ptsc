@@ -1,0 +1,131 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+
+# Python test & lint caches
+.pytest_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+backend/coverage.xml
+frontend/coverage/
+
+# Local DB / temp test outputs
+*.sqlite
+*.sqlite3
+*.db
+junit*.xml
+*.lcov
+
+# Node — monorepo (root + all sub-packages)
+**/node_modules/
+.pnpm-store/
+
+# Vite build output
+**/dist/
+**/.vite/
+
+# TypeScript incremental build cache
+*.tsbuildinfo
+
+# Playwright artifacts
+# anh/ là ảnh chụp màn do e2e/anh-man-hinh.spec.ts sinh ra để soi thiết kế —
+# công cụ, không phải sản phẩm.
+frontend/anh/
+**/test-results/
+**/playwright-report/
+**/playwright/.cache/
+tests/e2e/critical-report.json
+tests/e2e/noncritical-report.json
+
+# Environment variables — cấu hình nằm ở env/local/ và env/production/.
+# Chỉ backend.env chứa bí mật thật. Mọi tệp env còn lại trong env/ đều commit:
+# *.example là mẫu, backend.thu-tai-cho.env là giá trị GIẢ để `make prod-len`
+# chạy được ngay trên bản clone mới, còn frontend.env vốn công khai vì biến
+# VITE_* nằm sẵn trong bundle JS.
+env/**/backend.env
+
+# Lưới an toàn. Cấu trúc mới không sinh ra tệp nào dạng .env — mấy dòng này chỉ
+# để một tệp bỏ quên (hay thói quen cũ) không lọt vào history.
+.env
+.env.*
+.envrc
+env/**/backend.env
+
+# Seed danh sách hội viên: tệp này nhúng thẳng họ tên, ngày sinh, số điện thoại
+# của 126 người thật để dựng chỗ ở tạm (docs/host-tam-windows.md bước 7). History
+# của git không xoá được, nên nó phải ở ngoài repo — chép sang máy khác bằng USB
+# hay kênh riêng.
+backend/scripts/seed_hoi_vien.py
+
+# Thư mục vào của scripts/nap_anh_dai_dien.py: ảnh chân dung hội viên, cùng loại
+# dữ liệu cá nhân với tệp trên và cùng lý do phải nằm ngoài history.
+backend/scripts/anh_dai_dien/
+
+# Local secrets / certs
+*.pem
+*.key
+*.crt
+*.p12
+# Hai thư mục stack prod dựng tại chỗ tự sinh ra. Cert tự ký đã bị *.pem bắt,
+# nhưng chặn cả thư mục để lỡ có tệp định dạng khác thì cũng không lọt.
+deploy/certs-local/
+deploy/certbot-www/
+
+# AI / Agent tooling
+# ─────────────────────────────────────────────
+# .claude/ and .specify/ contain skills/templates that are safe to commit.
+# Only ignore per-user / sensitive runtime configs:
+.claude/settings.local.json
+.specify/init-options.json
+.specify/integration.json
+# .specify/
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+.gstack/
+
+# Superpowers brainstorm visual companion (per-session HTML mockups)
+.superpowers/
+.ds-sync/
+ds-bundle/
+.design-sync/.cache/
+.design-sync/learnings/
+.design-sync/node_modules
+frontend/.ds-tw-entry.css
+frontend/.ds-compiled-tw.css
+frontend/.ds-compiled.css
+frontend/.ds-tsconfig.json
+# Khai báo kiểu sinh bởi .design-sync/tsconfig.ds.json
+frontend/.ds-types/
+frontend/index.d.ts
+# File tạm của build-styles.mjs — chỉ còn lại nếu tiến trình bị giết giữa chừng
+frontend/src/styles/.ds-entry.css
+# .ds-entry.tsx CÓ commit: nó là danh sách component của design system, mất nó
+# thì bản clone mới không sync lại được. (Trước đây bị bỏ qua vì chỉ là entry rỗng.)
+!frontend/.ds-entry.tsx
+design-drafts/
+
+# graphify — knowledge graph artifacts (sinh lại được bằng `/graphify .`)
+# Ignore sạch, giống repo của chính tác giả graphify. README upstream khuyên
+# commit để chia sẻ cho team, nhưng ở đây là công cụ cá nhân nên không cần.
+# .graphify_python / .graphify_root chứa ĐƯỜNG DẪN TUYỆT ĐỐI của máy — luôn phải ignore.
+graphify-out/
+.graphify_*.json
+.graphify_python

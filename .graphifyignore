@@ -1,0 +1,55 @@
+# .graphifyignore — phạm vi quét của `/graphify`
+#
+# ⚠️ File này THAY THẾ `.gitignore` ở cùng thư mục (không cộng dồn) — xem
+# https://github.com/safishamsi/graphify/discussions/1137. Vì vậy mọi thứ nặng
+# phải khai LẠI ở đây; xoá một dòng dưới đây không làm graphify rơi về
+# `.gitignore`, nó chỉ khiến thư mục đó bị quét.
+#
+# Cú pháp theo đúng gitignore: last-match-wins, `!` phủ định, `/` neo thư mục.
+
+# ── Bắt buộc giữ: dependency & build output (chép từ .gitignore) ──
+**/node_modules/
+.pnpm-store/
+**/dist/
+**/.vite/
+build/
+.venv/
+venv/
+__pycache__/
+*.egg-info/
+
+# ── Bắt buộc giữ: cache & artifact của test/lint ──
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+htmlcov/
+frontend/coverage/
+**/test-results/
+**/playwright-report/
+**/playwright/.cache/
+
+# ── Bắt buộc giữ: output của chính graphify (tự quét mình = vòng lặp) ──
+graphify-out/
+
+# ── Loại khỏi đồ thị kiến trúc: tầng test ──
+# Lý do: test fan-in chi phối clustering. Khi còn tests/, 4/10 god node là
+# fixture (`make_user()` 617 cạnh) và community mang tên `tests/test/comment`
+# thay vì tên module. Bỏ ra thì god node là `ok()`, `Task`, `Base` — kiến trúc thật.
+tests/
+backend/tests/
+frontend/tests/
+frontend/src/test/
+**/*.test.ts
+**/*.test.tsx
+**/*.spec.ts
+**/*.spec.tsx
+
+# ── Loại khỏi đồ thị kiến trúc: seeder & script vận hành ──
+backend/scripts/
+scripts/
+
+# ── Loại: không phải mã sản phẩm ──
+video/
+.design-sync/
+design-drafts/
+perf/

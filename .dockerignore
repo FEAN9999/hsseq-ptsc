@@ -1,0 +1,37 @@
+.git
+.gitignore
+.pytest_cache
+.ruff_cache
+.superpowers
+backend
+# KHÔNG loại cả deploy/: ảnh web build với bối cảnh gốc repo và cần chép
+# deploy/nginx/default.conf.template vào. Chỉ loại hai thứ không được phép nằm
+# trong ảnh — khoá riêng của chứng chỉ, và thư mục thử thách ACME.
+deploy/certs-local
+deploy/certbot-www
+docs
+infra
+scripts
+tests
+# Đồ nghề đồng bộ hệ thống thiết kế và của trợ lý — không tệp nào trong đây là
+# đầu vào của bản dựng. frontend/src/styles/fonts.css có nhắc .design-sync trong
+# một dòng chú thích, nhưng nó là bản SINH RA, đã nằm sẵn trong frontend/.
+.design-sync
+.ds-sync
+ds-bundle
+.gstack
+**/__pycache__
+**/.pytest_cache
+**/.ruff_cache
+**/node_modules
+**/dist
+**/.env
+**/.env.*
+# Bí mật prod. Tên KHÔNG bắt đầu bằng .env nên hai luật trên không bắt được, mà
+# ảnh web lại build với bối cảnh gốc repo. Không loại cả env/: bước COPY trong
+# frontend/Dockerfile cần env/production/frontend.env.
+env/**/backend.env
+backend/.venv
+frontend/test-results
+frontend/playwright-report
+*.log

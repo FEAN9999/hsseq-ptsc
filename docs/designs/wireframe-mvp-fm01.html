@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<title>Wireframe HSEQ Platform PTSC - 3 màn hình</title>
+<!--
+  WIREFRAME THÔ, KHÔNG PHẢI THIẾT KẾ CUỐI.
+  Mục đích: kiểm tra phân cấp thông tin và luồng của 3 màn hình MVP.
+  Quyết định thiết kế:
+  - Sidebar liệt kê cả module giai đoạn 2 (Quản trị mẫu báo cáo, Quy trình) ở dạng mờ
+    để kể câu chuyện nền tảng (phương án B) mà không phải làm màn hình đó trước demo.
+  - Dashboard: 6 KPI + ô "Đã nộp" là thứ Trưởng Ban nhìn đầu tiên. Mỗi KPI hậu quả
+    (LTI, FAT) đứng cạnh KPI dẫn báo (Near miss, HAZOB) theo best practice.
+  - Tình trạng nộp: lưới đơn vị x kỳ, mỗi ô là trạng thái workflow, click mở báo cáo.
+  - Form FM01: đơn vị chỉ nhập "Tháng này" cho chỉ tiêu cộng dồn; các chỉ tiêu bộ đếm
+    (B-17..B-20) nhập tay ô lũy kế và hệ thống hiện chênh lệch nếu lệch.
+  Trạng thái chưa vẽ: loading (skeleton xám), rỗng ("Chưa có báo cáo kỳ này"),
+  lỗi ("Không tải được số liệu, thử lại"), tên đơn vị dài 47 ký tự (cắt bằng dấu ...).
+-->
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; color: #222; background: #fafafa; font-size: 13px; }
+  .screen { width: 1200px; margin: 24px auto; border: 2px solid #999; background: #fff; }
+  .screen-title { background: #eee; border-bottom: 1px dashed #999; padding: 6px 12px; font-weight: bold; font-size: 12px; letter-spacing: .5px; }
+  .app { display: flex; min-height: 560px; }
+  .sidebar { width: 210px; border-right: 1px solid #bbb; padding: 12px; }
+  .brand { font-weight: bold; margin-bottom: 14px; border: 1px solid #bbb; padding: 6px; text-align: center; }
+  .nav a { display: block; padding: 6px 8px; border: 1px solid transparent; color: #222; text-decoration: none; }
+  .nav a.active { border: 1px solid #333; font-weight: bold; }
+  .nav .group { margin-top: 12px; font-size: 11px; color: #777; text-transform: uppercase; }
+  .nav a.dim { color: #aaa; border-style: dashed; }
+  .main { flex: 1; padding: 14px 18px; }
+  .topbar { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #bbb; padding-bottom: 8px; margin-bottom: 12px; }
+  .select { border: 1px solid #888; padding: 4px 8px; display: inline-block; }
+  .user { border: 1px solid #bbb; padding: 4px 8px; font-size: 12px; }
+  .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 14px; }
+  .kpi { border: 1px solid #888; padding: 10px; min-height: 84px; }
+  .kpi .label { font-size: 11px; color: #555; }
+  .kpi .value { font-size: 26px; font-weight: bold; margin: 4px 0; }
+  .kpi .delta { font-size: 11px; color: #666; }
+  .kpi.attn { border-width: 2px; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { border: 1px solid #bbb; padding: 5px 7px; text-align: left; vertical-align: top; }
+  th { background: #f1f1f1; font-weight: 600; font-size: 12px; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .badge { border: 1px solid #555; padding: 1px 6px; font-size: 11px; border-radius: 10px; white-space: nowrap; }
+  .badge.ok { background: #ddd; }
+  .badge.warn { border-style: dashed; }
+  .badge.none { color: #999; border-color: #ccc; }
+  .section { border: 1px solid #999; margin-bottom: 10px; }
+  .section h4 { margin: 0; padding: 6px 10px; background: #f1f1f1; border-bottom: 1px solid #bbb; font-size: 12px; }
+  .section h4 .toggle { float: right; color: #777; font-weight: normal; }
+  input.cell { width: 100%; border: 1px solid #888; padding: 3px 5px; font: inherit; text-align: right; }
+  input.cell[readonly] { border-style: dashed; background: #f6f6f6; color: #666; }
+  textarea { width: 100%; height: 56px; border: 1px solid #888; font: inherit; }
+  .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 10px; }
+  .btn { border: 1px solid #333; padding: 6px 14px; background: #fff; font: inherit; }
+  .btn.primary { background: #333; color: #fff; }
+  .note { font-size: 11px; color: #777; }
+  .warn-text { font-size: 11px; color: #333; border: 1px dashed #333; padding: 1px 4px; }
+  .legend span { margin-right: 10px; }
+  .muted { color: #999; }
+</style>
+</head>
+<body>
+
+<!-- ===================== MÀN 1: DASHBOARD LÃNH ĐẠO ===================== -->
+<div class="screen">
+  <div class="screen-title">MÀN 1 / 3 · DASHBOARD SKATMT · vai trò: Lãnh đạo (xem), Admin Ban ATCL</div>
+  <div class="app">
+    <div class="sidebar">
+      <div class="brand">HSEQ Platform<br><span class="note">Ban ATCL · PTSC</span></div>
+      <div class="nav">
+        <a class="active">Dashboard SKATMT</a>
+        <a>Báo cáo của tôi</a>
+        <a>Tình trạng nộp</a>
+        <a>Duyệt báo cáo</a>
+        <div class="group">Quản trị nền tảng</div>
+        <a class="dim">Mẫu báo cáo (FM01, FM02...)</a>
+        <a class="dim">Quy trình &amp; trạng thái</a>
+        <a class="dim">Người dùng &amp; vai trò</a>
+        <a class="dim">Sơ đồ tổ chức</a>
+      </div>
+      <p class="note" style="margin-top:16px">Mục mờ = có trong kiến trúc, màn hình làm sau demo.</p>
+    </div>
+    <div class="main">
+      <div class="topbar">
+        <div>
+          <b>Báo cáo tháng công tác SKATMT · Toàn Tổng công ty</b><br>
+          <span class="note">Kỳ: </span><span class="select">Tháng 08/2026 ▾</span>
+          <span class="note" style="margin-left:8px">Phạm vi: </span><span class="select">Tất cả 22 đơn vị ▾</span>
+        </div>
+        <div class="user">Nguyễn Văn A · Trưởng Ban ATCL ▾</div>
+      </div>
+
+      <div class="kpis">
+        <div class="kpi"><div class="label">Tổng giờ công (tháng)</div><div class="value">1.284.500</div><div class="delta">Lũy kế năm: 9,86 triệu giờ</div></div>
+        <div class="kpi attn"><div class="label">LTI (tháng) · FAT</div><div class="value">1 · 0</div><div class="delta">PTSC Miền Trung, 12/08. Lũy kế năm: 3 LTI</div></div>
+        <div class="kpi"><div class="label">Giờ an toàn kể từ LTI cuối</div><div class="value">312.400</div><div class="delta">Kỷ lục năm: 4,1 triệu giờ</div></div>
+        <div class="kpi"><div class="label">Ngày làm việc an toàn không LTI</div><div class="value">28</div><div class="delta">Toàn TCT, tính từ 12/08</div></div>
+        <div class="kpi"><div class="label">Near miss · HAZOB card</div><div class="value">42 · 1.318</div><div class="delta">Dẫn báo: tăng 9% so tháng trước</div></div>
+        <div class="kpi"><div class="label">Lượt đào tạo, hướng dẫn AT</div><div class="value">2.410</div><div class="delta">Diễn tập: 19 lượt</div></div>
+        <div class="kpi"><div class="label">Sự cố không thương tật</div><div class="value">4</div><div class="delta">Tràn dầu 0 · Cháy nổ 0 · Giao thông 1 · Tài sản 3</div></div>
+        <div class="kpi attn"><div class="label">Đơn vị đã nộp kỳ này</div><div class="value">18 / 22</div><div class="delta">4 chưa nộp · 2 đang chờ duyệt · hạn 05/09</div></div>
+      </div>
+
+      <table>
+        <thead>
+          <tr><th>Đơn vị / Ban dự án</th><th class="num">Giờ công</th><th class="num">LTI</th><th class="num">Near miss</th><th class="num">HAZOB</th><th class="num">Đào tạo</th><th>Trạng thái</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>PTSC M&amp;C</td><td class="num">412.300</td><td class="num">0</td><td class="num">14</td><td class="num">402</td><td class="num">610</td><td><span class="badge ok">Đã duyệt</span></td></tr>
+          <tr><td>PTSC Miền Trung</td><td class="num">98.700</td><td class="num"><b>1</b></td><td class="num">3</td><td class="num">96</td><td class="num">120</td><td><span class="badge ok">Đã duyệt</span></td></tr>
+          <tr><td>PTSC Supply Base</td><td class="num">61.200</td><td class="num">0</td><td class="num">5</td><td class="num">130</td><td class="num">85</td><td><span class="badge">Đã nộp</span></td></tr>
+          <tr><td>PTSC Thanh Hoá</td><td class="num">44.900</td><td class="num">0</td><td class="num">2</td><td class="num">77</td><td class="num">64</td><td><span class="badge ok">Đã duyệt</span></td></tr>
+          <tr><td>Ban QLDA Lô B - Ô Môn (tên dài để thử cắt chữ...)</td><td class="num">120.400</td><td class="num">0</td><td class="num">6</td><td class="num">210</td><td class="num">300</td><td><span class="badge warn">Trả lại</span></td></tr>
+          <tr><td>PTSC Đình Vũ</td><td class="num muted">—</td><td class="num muted">—</td><td class="num muted">—</td><td class="num muted">—</td><td class="num muted">—</td><td><span class="badge none">Chưa nộp</span></td></tr>
+          <tr><td class="muted" colspan="7">... 16 dòng nữa. Click một dòng mở báo cáo FM01 gốc của đơn vị đó (drill-down).</td></tr>
+        </tbody>
+      </table>
+      <p class="note">Số liệu tổng chỉ cộng các báo cáo "Đã duyệt". Báo cáo "Đã nộp" hiển thị riêng, không vào tổng cho tới khi Ban ATCL duyệt.</p>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== MÀN 2: TÌNH TRẠNG NỘP (ADMIN) ===================== -->
+<div class="screen">
+  <div class="screen-title">MÀN 2 / 3 · TÌNH TRẠNG NỘP BÁO CÁO · vai trò: Admin Ban ATCL</div>
+  <div class="app">
+    <div class="sidebar">
+      <div class="brand">HSEQ Platform<br><span class="note">Ban ATCL · PTSC</span></div>
+      <div class="nav">
+        <a>Dashboard SKATMT</a>
+        <a>Báo cáo của tôi</a>
+        <a class="active">Tình trạng nộp</a>
+        <a>Duyệt báo cáo</a>
+        <div class="group">Quản trị nền tảng</div>
+        <a class="dim">Mẫu báo cáo (FM01, FM02...)</a>
+        <a class="dim">Quy trình &amp; trạng thái</a>
+        <a class="dim">Người dùng &amp; vai trò</a>
+        <a class="dim">Sơ đồ tổ chức</a>
+      </div>
+    </div>
+    <div class="main">
+      <div class="topbar">
+        <div>
+          <b>Tình trạng nộp · Mẫu FM01 (tháng)</b><br>
+          <span class="note">Mẫu: </span><span class="select">FM01 Báo cáo tháng SKATMT ▾</span>
+          <span class="note" style="margin-left:8px">Từ: </span><span class="select">03/2026 ▾</span>
+          <span class="note"> đến </span><span class="select">08/2026 ▾</span>
+        </div>
+        <div><span class="btn">Xuất danh sách chưa nộp</span></div>
+      </div>
+      <p class="legend note">
+        <span class="badge ok">Đã duyệt</span> <span class="badge">Đã nộp, chờ duyệt</span> <span class="badge warn">Trả lại</span> <span class="badge none">Chưa nộp</span> <span class="badge none" style="border-style:dotted">Nháp</span>
+      </p>
+      <table>
+        <thead>
+          <tr><th>Đơn vị / Ban dự án</th><th>03/26</th><th>04/26</th><th>05/26</th><th>06/26</th><th>07/26</th><th>08/26</th><th>Nộp muộn (6 kỳ)</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>PTSC M&amp;C</td><td><span class="badge ok">Duyệt</span></td><td><span class="badge ok">Duyệt</span></td><td><span class="badge ok">Duyệt</span></td><td><span class="badge ok">Duyệt</span></td><td><span class="badge ok">Duyệt</span></td><td><span class="badge ok">Duyệt</span></td><td class="num">0</td></tr>
+          <tr><td>PTSC Miền Trung</td><td><span class="badge ok">Duyệt</span></td><td><span class="badge ok">Duyệt</span></td><td><span class="badge ok">Duyệt</span></td><td><span class="badge ok">Duyệt</span></td><td><span class="badge ok">Duyệt</span></td><td><span class="badge ok">Duyệt</span></td><td class="num">1</td></tr>
+          <tr><td>PTSC Supply Base</td><td><span class="badge ok">Duyệt</span></td><td><span class="badge ok">Duyệt</span></td><td><span class="badge ok">Duyệt</span></td><td><span class="badge ok">Duyệt</span></td><td><span class="badge ok">Duyệt</span></td><td><span class="badge">Đã nộp</span></td><td class="num">0</td></tr>
+          <tr><td>Ban QLDA Lô B - Ô Môn</td><td><span class="badge ok">Duyệt</span></td><td><span class="badge ok">Duyệt</span></td><td><span class="badge warn">Trả lại</span></td><td><span class="badge ok">Duyệt</span></td><td><span class="badge ok">Duyệt</span></td><td><span class="badge warn">Trả lại</span></td><td class="num">2</td></tr>
+          <tr><td>PTSC Đình Vũ</td><td><span class="badge ok">Duyệt</span></td><td><span class="badge ok">Duyệt</span></td><td><span class="badge ok">Duyệt</span></td><td><span class="badge none">Chưa nộp</span></td><td><span class="badge ok">Duyệt</span></td><td><span class="badge none">Chưa nộp</span></td><td class="num">3</td></tr>
+          <tr><td>PTSC Quảng Ngãi</td><td><span class="badge ok">Duyệt</span></td><td><span class="badge ok">Duyệt</span></td><td><span class="badge ok">Duyệt</span></td><td><span class="badge ok">Duyệt</span></td><td><span class="badge ok">Duyệt</span></td><td><span class="badge none" style="border-style:dotted">Nháp</span></td><td class="num">1</td></tr>
+          <tr><td class="muted" colspan="8">... 16 dòng nữa. Click một ô mở báo cáo của đơn vị ở kỳ đó; ô "Chưa nộp" mở hộp thoại ghi chú đôn đốc (giai đoạn 2: gửi email nhắc).</td></tr>
+        </tbody>
+      </table>
+      <p class="note">Hàng cuối: tổng hợp theo cột "Đã nộp 18/22 · Đã duyệt 16 · Chưa nộp 4". Sắp xếp mặc định: đơn vị nộp muộn nhiều nhất lên đầu.</p>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== MÀN 3: FORM FM01 (NGƯỜI NHẬP) ===================== -->
+<div class="screen">
+  <div class="screen-title">MÀN 3 / 3 · NHẬP BÁO CÁO FM01 · vai trò: Người nhập tại Đơn vị / Ban dự án</div>
+  <div class="app">
+    <div class="sidebar">
+      <div class="brand">HSEQ Platform<br><span class="note">PTSC Miền Trung</span></div>
+      <div class="nav">
+        <a>Dashboard đơn vị</a>
+        <a class="active">Báo cáo của tôi</a>
+      </div>
+      <p class="note" style="margin-top:16px">Người nhập chỉ thấy đơn vị của mình. Menu quản trị ẩn hoàn toàn.</p>
+    </div>
+    <div class="main">
+      <div class="topbar">
+        <div>
+          <b>FM01 · Báo cáo tháng công tác SKATMT · Tháng 08/2026</b><br>
+          <span class="note">Đơn vị: PTSC Miền Trung · Địa điểm: Quảng Ngãi · Số báo cáo: MT-2026-08 · Trạng thái: </span><span class="badge none" style="border-style:dotted">Nháp</span>
+          <span class="note"> · tự lưu 2 phút trước</span>
+        </div>
+        <div class="user">Trần Thị B · Chuyên viên ATMT ▾</div>
+      </div>
+
+      <div class="section">
+        <h4>B-1 · Tổng giờ công (Total Man Hours) <span class="toggle">▲ thu gọn</span></h4>
+        <table>
+          <thead><tr><th style="width:36%">Chỉ tiêu</th><th>ĐVT</th><th class="num">Lũy kế tháng trước</th><th class="num">Tháng này</th><th class="num">Cộng dồn</th><th>Ghi chú</th></tr></thead>
+          <tbody>
+            <tr><td>TCT PTSC</td><td>Giờ</td><td><input class="cell" readonly value="1.120.400"></td><td><input class="cell" value="12.300"></td><td><input class="cell" readonly value="1.132.700"></td><td><input class="cell" style="text-align:left" placeholder=""></td></tr>
+            <tr><td>Đơn vị thuộc PTSC</td><td>Giờ</td><td><input class="cell" readonly value="640.100"></td><td><input class="cell" value="71.200"></td><td><input class="cell" readonly value="711.300"></td><td><input class="cell" style="text-align:left"></td></tr>
+            <tr><td>Nhà thầu phụ</td><td>Giờ</td><td><input class="cell" readonly value="210.900"></td><td><input class="cell" value="15.200"></td><td><input class="cell" readonly value="226.100"></td><td><input class="cell" style="text-align:left"></td></tr>
+            <tr><td><b>Tổng giờ công</b> <span class="note">(tự tính = 3 dòng trên)</span></td><td>Giờ</td><td><input class="cell" readonly value="1.971.400"></td><td><input class="cell" readonly value="98.700"></td><td><input class="cell" readonly value="2.070.100"></td><td></td></tr>
+            <tr><td>Tổng giờ công an toàn không xảy ra LTI <span class="note">(bộ đếm, reset khi có LTI)</span></td><td>Giờ</td><td><input class="cell" readonly value="1.860.000"></td><td><input class="cell" value="98.700"></td><td><input class="cell" value="46.500"></td><td><span class="warn-text">Lệch so với tính: −1.912.200. Có LTI ngày 12/08?</span></td></tr>
+            <tr><td>Tổng số ngày làm việc an toàn không LTI <span class="note">(bộ đếm)</span></td><td>Ngày</td><td><input class="cell" readonly value="212"></td><td><input class="cell" readonly value="—"></td><td><input class="cell" value="19"></td><td><input class="cell" style="text-align:left" value="LTI 12/08, đếm lại từ 13/08"></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="section">
+        <h4>B-2-1 · Thương tật được ghi nhận (Recordable) <span class="toggle">▲ thu gọn</span></h4>
+        <table>
+          <thead><tr><th style="width:36%">Chỉ tiêu</th><th>ĐVT</th><th class="num">Lũy kế tháng trước</th><th class="num">Tháng này</th><th class="num">Cộng dồn</th><th>Ghi chú</th></tr></thead>
+          <tbody>
+            <tr><td>Chết người (FAT)</td><td>Vụ</td><td><input class="cell" readonly value="0"></td><td><input class="cell" value="0"></td><td><input class="cell" readonly value="0"></td><td><input class="cell" style="text-align:left"></td></tr>
+            <tr><td>Thương tật mất thời gian (LTI)</td><td>Vụ</td><td><input class="cell" readonly value="2"></td><td><input class="cell" value="1"></td><td><input class="cell" readonly value="3"></td><td><input class="cell" style="text-align:left" value="Ngã cao 12/08, đã báo cáo Sở LĐTBXH"></td></tr>
+            <tr><td>Số ngày công bị mất</td><td>Ngày</td><td><input class="cell" readonly value="14"></td><td><input class="cell" value="9"></td><td><input class="cell" readonly value="23"></td><td><input class="cell" style="text-align:left"></td></tr>
+            <tr><td class="muted" colspan="6">... RWDC, số ngày hạn chế, MTC, Khác</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="section"><h4>B-2-2 · Không ghi nhận (FAC, Khác) <span class="toggle">▼ mở</span></h4></div>
+      <div class="section"><h4>B-2-3 · Sự cố không gây thương tật (Near miss, HAZOB, cháy nổ, tràn dầu...) <span class="toggle">▼ mở</span></h4></div>
+      <div class="section"><h4>B-3 · Đào tạo, huấn luyện &nbsp;·&nbsp; B-4 · Diễn tập &nbsp;·&nbsp; B-5 · Họp an toàn &nbsp;·&nbsp; B-6 · Kiểm tra &nbsp;·&nbsp; B-7 · Báo cáo cơ quan chức năng &nbsp;·&nbsp; B-8 · Môi trường &nbsp;·&nbsp; B-9 · Khác <span class="toggle">▼ mở từng nhóm</span></h4></div>
+
+      <div class="section">
+        <h4>C · Hoạt động nổi bật</h4>
+        <div style="padding:8px 10px; display:grid; grid-template-columns: 1fr 1fr 1fr; gap:10px">
+          <div><div class="note">C-1 Nổi bật tháng này</div><textarea>Hoàn thành diễn tập PCCC toàn công trường 20/08...</textarea></div>
+          <div><div class="note">C-2 Dự kiến tháng tới</div><textarea>Huấn luyện làm việc trên cao đợt 2...</textarea></div>
+          <div><div class="note">C-3 Kiến nghị</div><textarea></textarea></div>
+        </div>
+      </div>
+
+      <div class="actions">
+        <span class="note" style="align-self:center">Thiếu 3 ô bắt buộc ở B-8 · 1 cảnh báo lệch lũy kế (không chặn nộp)</span>
+        <span class="btn">Lưu nháp</span>
+        <span class="btn primary">Nộp báo cáo →</span>
+      </div>
+      <p class="note">Sau khi nộp: khoá chỉnh sửa, Ban ATCL duyệt hoặc trả lại kèm ghi chú; trả lại thì mở khoá và hiện ghi chú ở đầu form. Đơn vị nộp muộn quá hạn vẫn nộp được, hệ thống ghi "nộp muộn".</p>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

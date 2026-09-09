@@ -1,0 +1,51 @@
+# Dependencies
+**/node_modules/
+.pnpm-store/
+backend/.venv/
+backend/venv/
+
+# Build output
+**/dist/
+**/.vite/
+build/
+
+# Lock files (large, not useful for context)
+pnpm-lock.yaml
+backend/uv.lock
+
+# Caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+backend/.env
+frontend/.env
+
+# AI / Agent tooling
+.claude/
+.specify/
+.gstack/
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+
+# Logs
+*.log
+npm-debug.log*
