@@ -30,6 +30,8 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from app.domain.report_rules import qua_thap_phan
+
 log = logging.getLogger(__name__)
 VN = ZoneInfo("Asia/Ho_Chi_Minh")
 MAC_DINH = Path(__file__).parent / "fixtures" / "fm01_2026-06_2026-08.csv"
@@ -62,6 +64,7 @@ class _Dong:
     indicator_code: str
     indicator_id: int
     agg_type: str
+    decimals: int
     this_period: Decimal
     acc_prev: Decimal
     acc_total: Decimal
@@ -97,15 +100,6 @@ def load_fixture(db, tpl, path: str | None = None) -> LoadResult:
     kq.skipped = so_bo_qua
     _ghi_audit_sha(db, tpl, sha)
     return kq
-
-
-def _qua_thap_phan(v: Decimal, decimals: int) -> bool:
-    """Số chữ số thập phân của `v` vượt `decimals` khai báo của chỉ tiêu.
-
-    Chép NGUYÊN VĂN logic của `report_rules._qua_thap_phan` — cố tình không
-    import (report_rules.py không được đụng theo ràng buộc brief task-7-fix1;
-    hàm đó cũng phục vụ ngữ cảnh khác hẳn, payload PUT một phần)."""
-    return -v.as_tuple().exponent > decimals
 
 
 def _doc_va_kiem(db, tpl, p: Path) -> tuple[list[_Dong], list[str], int]:
@@ -177,7 +171,7 @@ def _doc_va_kiem(db, tpl, p: Path) -> tuple[list[_Dong], list[str], int]:
                         f"{ten_cot} = {gia_tri} không được âm"
                     )
                     co_loi_so = True
-                elif _qua_thap_phan(gia_tri, ind.decimals):
+                elif qua_thap_phan(gia_tri, ind.decimals):
                     loi.append(
                         f"dòng {so_dong} ({org_code},{period_key},{indicator_code}): "
                         f"{ten_cot} = {gia_tri} quá {ind.decimals} chữ số thập phân"
@@ -190,6 +184,7 @@ def _doc_va_kiem(db, tpl, p: Path) -> tuple[list[_Dong], list[str], int]:
                 so_dong=so_dong, org_code=org_code, org_id=org.id,
                 period_key=period_key, period_id=period.id, period_start=period.start_date,
                 indicator_code=indicator_code, indicator_id=ind.id, agg_type=ind.agg_type,
+                decimals=ind.decimals,
                 this_period=this_period, acc_prev=acc_prev, acc_total=acc_total, note=note,
             ))
 
@@ -284,6 +279,19 @@ def _nguoi_nhap_theo_org(db) -> dict[int, int]:
     return {org_id: user_id for org_id, user_id in hang}
 
 
+def _quantize(v: Decimal, decimals: int) -> Decimal:
+    """Chuẩn hoá `v` về đúng `decimals` chữ số thập phân trước khi lưu.
+
+    CSV kiểu Excel ghi "3.00" cho chỉ tiêu decimals=0; lưu vào report_value
+    phải là "3", không phải "3.00" — đường CSV làm giống đường API PUT
+    /reports/{id}/values ("server quantize theo indicator.decimals", spec
+    dòng 231 docs/designs/hseq-platform-mvp-fm01.md). Gọi sau khi đã qua
+    `qua_thap_phan()` nên không bao giờ làm tròn mất số có nghĩa — chỉ đổi
+    hình dạng exponent.
+    """
+    return v.quantize(Decimal(1).scaleb(-decimals))
+
+
 def _ghi(db, tpl, rows: list[_Dong]) -> int:
     from app.models import AuditLog, OpeningBalance, Report, ReportValue, WorkflowState
 
@@ -317,15 +325,18 @@ def _ghi(db, tpl, rows: list[_Dong]) -> int:
 
     for report, nhom in bao_cao_moi:
         for d in nhom:
+            this_period = _quantize(d.this_period, d.decimals)
+            acc_prev = _quantize(d.acc_prev, d.decimals)
+            acc_total = _quantize(d.acc_total, d.decimals)
             db.add(ReportValue(
                 report_id=report.id, indicator_id=d.indicator_id,
-                this_period=d.this_period, acc_prev_entered=d.acc_prev,
-                acc_total_entered=d.acc_total, note=d.note,
+                this_period=this_period, acc_prev_entered=acc_prev,
+                acc_total_entered=acc_total, note=d.note,
             ))
             if d.period_start == ky_dau_start:
                 db.add(OpeningBalance(
                     org_unit_id=d.org_id, indicator_id=d.indicator_id,
-                    period_id=d.period_id, value=d.acc_prev, source="seed",
+                    period_id=d.period_id, value=acc_prev, source="seed",
                 ))
         db.add(AuditLog(
             entity="report", entity_id=report.id, action="seed_import",

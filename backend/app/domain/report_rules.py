@@ -64,8 +64,24 @@ def editable_columns(agg_type: str) -> set[str]:
     return COT_NHAP_DUOC.get(agg_type, set())
 
 
-def _qua_thap_phan(v: Decimal, decimals: int) -> bool:
-    return -v.as_tuple().exponent > decimals
+def qua_thap_phan(v: Decimal, decimals: int) -> bool:
+    """Số chữ số thập phân THỰC SỰ của `v` (sau khi bỏ số 0 thừa ở cuối) có
+    vượt `decimals` khai báo của chỉ tiêu hay không.
+
+    Chuẩn hoá bằng `.normalize()` trước khi đếm — KHÔNG đếm trực tiếp trên
+    `.as_tuple().exponent` của giá trị gốc, vì exponent đó phản ánh ĐỊNH DẠNG
+    chuỗi Excel xuất ra (Excel luôn xuất 2 chữ số thập phân, kể cả "0.00",
+    "3.00"), không phải số chữ số thập phân CÓ NGHĨA của giá trị. "3.00" là
+    số 3, hợp lệ với decimals=0; "1.50" mới thực sự có 2 chữ số thập phân,
+    vượt decimals=0.
+
+    Bẫy của `Decimal.normalize()`: với số nguyên lớn nó trả dạng mũ
+    (`Decimal("100").normalize()` → `Decimal("1E+2")`, exponent +2). Khi đó
+    `-exponent` âm, luôn nhỏ hơn mọi `decimals >= 0` nên vẫn ra `False` đúng
+    — nhưng test_so_khong_va_so_tron_viet_kieu_excel_van_hop_le khẳng định
+    bằng giá trị cụ thể ("100.00" → hợp lệ), không chỉ tin vào suy luận này.
+    """
+    return -v.normalize().as_tuple().exponent > decimals
 
 
 def validate_values(
@@ -99,7 +115,7 @@ def validate_values(
             if v < 0:
                 loi.append(FieldError(ma, "Số không được âm"))
                 break
-            if _qua_thap_phan(v, spec.decimals):
+            if qua_thap_phan(v, spec.decimals):
                 loi.append(FieldError(
                     ma, f"Chỉ nhận tối đa {spec.decimals} chữ số thập phân"))
                 break

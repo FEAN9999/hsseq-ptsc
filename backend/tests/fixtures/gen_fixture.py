@@ -34,6 +34,12 @@ xem app/seed/fixture.py::_assert_luy_ke). Vì mọi cặp (đơn vị, chỉ ti�
 có đủ 3 kỳ nên lưới luôn đầy hình chữ nhật — không bao giờ phạm kiểm "số dư
 đầu tiên không rơi vào kỳ đầu fixture".
 
+Mọi ô ghi 2 chữ số thập phân (`_dinh_dang`), kể cả với chỉ tiêu `decimals=0`
+("0.00", "3.00") — đúng hình dạng Excel xuất ra, không phải hình dạng
+`decimals` khai báo của từng chỉ tiêu (task-7-fix2: bản cũ ghi "5" cho
+decimals=0 nên né mất lỗi đếm chữ số thập phân theo định dạng chuỗi thay vì
+theo giá trị — xem task-7-fix2-brief.md).
+
 Chạy độc lập để sinh lại `full_synthetic.csv`:
 
     cd backend && .venv/bin/python tests/fixtures/gen_fixture.py
@@ -67,7 +73,7 @@ def danh_muc_khong_computed() -> list[dict]:
          reset_rule, decimals, required) in INDICATORS:
         if agg_type == "computed":
             continue
-        ds.append({"code": code, "agg_type": agg_type, "decimals": decimals})
+        ds.append({"code": code, "agg_type": agg_type})
     return ds
 
 
@@ -75,10 +81,11 @@ def _delta(org_idx: int, ind_idx: int, ky_idx: int) -> int:
     return 1 + (org_idx + ind_idx + ky_idx) % 5
 
 
-def _dinh_dang(so: int, decimals: int) -> str:
-    if decimals == 0:
-        return str(so)
-    return str(Decimal(so).quantize(Decimal("1." + "0" * decimals)))
+def _dinh_dang(so: int) -> str:
+    """Sheet Excel thật ghi 2 chữ số thập phân cho MỌI ô, bất kể `decimals`
+    khai báo của chỉ tiêu (kể cả decimals=0: "0.00", "3.00") — bộ sinh phải
+    né đúng hình dạng đó thay vì tránh nó, xem task-7-fix2-brief.md."""
+    return str(Decimal(so).quantize(Decimal("0.01")))
 
 
 def generate_rows() -> list[list[str]]:
@@ -94,9 +101,9 @@ def generate_rows() -> list[list[str]]:
                 acc_prev, acc_total = acc, acc + d
                 rows.append([
                     org_code, period_key, ct["code"],
-                    _dinh_dang(d, ct["decimals"]),
-                    _dinh_dang(acc_prev, ct["decimals"]),
-                    _dinh_dang(acc_total, ct["decimals"]),
+                    _dinh_dang(d),
+                    _dinh_dang(acc_prev),
+                    _dinh_dang(acc_total),
                     "",
                 ])
                 acc = acc_total

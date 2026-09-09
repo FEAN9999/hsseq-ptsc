@@ -295,6 +295,108 @@ def test_qua_thap_phan_bi_tu_choi_khong_nap_nua_chung(db, tmp_path):
     assert db.query(Report).count() == truoc, "đã nạp nửa chừng"
 
 
+def test_quantize_ve_dung_decimals_cua_chi_tieu():
+    """Đơn vị cho `_quantize()` — hàm loader gọi ngay trước khi tạo
+    ReportValue/OpeningBalance (Thay đổi 3). Kiểm ở tầng hàm thuần, KHÔNG qua
+    report_value: cột đó khai `Numeric(18, 2)` — Postgres luôn trả về đúng 2
+    chữ số thập phân bất kể lưu Decimal("3") hay Decimal("3.00") (đã tự kiểm
+    chứng bằng SQL thô, xem báo cáo), nên exponent không thể quan sát được
+    qua report_value; phải kiểm trực tiếp trên hàm."""
+    from app.seed.fixture import _quantize
+    assert _quantize(Decimal("3.00"), 0) == Decimal("3")
+    assert _quantize(Decimal("3.00"), 0).as_tuple().exponent == 0
+    assert _quantize(Decimal("0.00"), 0).as_tuple().exponent == 0
+    assert _quantize(Decimal("12.3"), 2) == Decimal("12.30")
+    assert _quantize(Decimal("12.3"), 2).as_tuple().exponent == -2
+
+
+def test_ghi_thuc_su_goi_quantize_truoc_khi_flush_reportvalue(db, tmp_path):
+    """_quantize() đúng (test trên) không tự chứng minh `_ghi()` THỰC SỰ gọi
+    nó — xoá lời gọi quantize trong `_ghi()` (giữ nguyên hàm `_quantize`) vẫn
+    lọt qua mọi test đọc report_value bằng SELECT tươi, vì cột Numeric(18,2)
+    tự làm tròn về 2 chữ số thập phân bất kể Python gửi lên "3" hay "3.00"
+    (mutation M-H). Bắt đúng lúc bằng sự kiện before_flush của SQLAlchemy —
+    object ReportValue lúc đó vẫn còn nguyên trong bộ nhớ, CHƯA qua DB."""
+    from sqlalchemy import event
+
+    from app.models import ReportValue
+
+    _seed_khung(db)
+    tpl = _tpl(db)
+    csv_path = tmp_path / "kieu_excel_quantize.csv"
+    csv_path.write_text(
+        "org_code,period,indicator_code,this_period,acc_prev,acc_total,note\n"
+        "U01,2026-06,B-2.1,3.00,0.00,3.00,\n",
+        encoding="utf-8",
+    )
+
+    bat_duoc: list[Decimal] = []
+
+    def _bat(session, flush_context, instances):
+        for obj in session.new:
+            if isinstance(obj, ReportValue):
+                bat_duoc.append(obj.this_period)
+
+    event.listen(db, "before_flush", _bat)
+    try:
+        load_fixture(db, tpl, str(csv_path))
+    finally:
+        event.remove(db, "before_flush", _bat)
+
+    assert bat_duoc, "phải bắt được ReportValue trước lúc flush"
+    assert bat_duoc[0] == Decimal("3")
+    assert bat_duoc[0].as_tuple().exponent == 0, \
+        "this_period phải được quantize về 0 chữ số thập phân TRƯỚC khi flush, không giữ 3.00"
+
+
+def test_nap_file_kieu_excel_moi_o_2_chu_so_thap_phan(db, tmp_path):
+    """File thật Ban ATCL dán vào tuần 2 sẽ đúng hình dạng này: Excel xuất
+    MỌI ô 2 chữ số thập phân, kể cả B-2.1 (decimals=0). File phải nạp được,
+    và giá trị lưu vào report_value phải ĐÚNG bằng số đã nhập (3, không phải
+    1.50 hay bị từ chối) — hành vi quantize tự nó được kiểm riêng ở
+    test_quantize_ve_dung_decimals_cua_chi_tieu vì report_value.this_period
+    khai Numeric(18, 2) cố định, không thể phân biệt "3" với "3.00" qua giá
+    trị đọc lại."""
+    from app.models import Indicator, ReportValue
+    _seed_khung(db)
+    tpl = _tpl(db)
+    csv_path = tmp_path / "kieu_excel.csv"
+    csv_path.write_text(
+        "org_code,period,indicator_code,this_period,acc_prev,acc_total,note\n"
+        "U01,2026-06,B-2.1,3.00,0.00,3.00,\n",
+        encoding="utf-8",
+    )
+    kq = load_fixture(db, tpl, str(csv_path))
+    assert kq.created_reports == 1, "file kiểu Excel phải nạp được, không bị từ chối"
+
+    ind = db.query(Indicator).filter_by(template_id=tpl.id, code="B-2.1").one()
+    assert ind.decimals == 0
+    v = db.query(ReportValue).filter_by(indicator_id=ind.id).one()
+    assert (v.this_period, v.acc_prev_entered, v.acc_total_entered) == \
+        (Decimal("3"), Decimal("0"), Decimal("3"))
+
+
+def test_nap_file_kieu_excel_gia_tri_le_that_van_bi_tu_choi(db, tmp_path):
+    """Cùng hình dạng Excel (2 chữ số thập phân ở mọi ô), nhưng 1.50 là thập
+    phân lẻ THẬT của B-2.1 (decimals=0) — khác với 3.00 chỉ là cách Excel
+    viết tròn số — nên vẫn phải bị từ chối."""
+    from app.models import Report
+    _seed_khung(db)
+    tpl = _tpl(db)
+    truoc = db.query(Report).count()
+    csv_path = tmp_path / "kieu_excel_le.csv"
+    csv_path.write_text(
+        "org_code,period,indicator_code,this_period,acc_prev,acc_total,note\n"
+        "U01,2026-06,B-2.1,1.50,0.00,1.50,\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(FixtureError) as e:
+        load_fixture(db, tpl, str(csv_path))
+    thong_diep = str(e.value)
+    assert "1.50" in thong_diep and "thập phân" in thong_diep
+    assert db.query(Report).count() == truoc, "đã nạp nửa chừng"
+
+
 def test_chi_tieu_la_bi_bat(db, tmp_path):
     _seed_khung(db)
     tpl = _tpl(db)

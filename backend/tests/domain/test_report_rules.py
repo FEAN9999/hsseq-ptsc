@@ -166,3 +166,16 @@ def test_ma_vang_mat_trong_payload_khong_bi_bao_thieu():
 def test_evaluate_computed_formula_rong_va_none():
     assert evaluate_computed("", {"B-1.1": Decimal("9")}) == Decimal("0")
     assert evaluate_computed(None, {"B-1.1": Decimal("9")}) == Decimal("0")
+
+
+def test_so_khong_va_so_tron_viet_kieu_excel_van_hop_le():
+    """Excel xuất mọi ô 2 chữ số thập phân: 0.00, 3.00. Đó là số 0 và số 3,
+    hợp lệ cho chỉ tiêu decimals=0. Kiểm GIÁ TRỊ, không kiểm ĐỊNH DẠNG."""
+    for chuoi in ("0.00", "3.00", "100.00", "0.0"):
+        loi = validate_values([_spec(decimals=0)],
+                              {"B-2.1": CellValues(Decimal(chuoi), None, None)})
+        assert loi == [], f"{chuoi} phải hợp lệ với decimals=0"
+    for chuoi in ("1.50", "0.01", "12.345"):
+        loi = validate_values([_spec(decimals=0)],
+                              {"B-2.1": CellValues(Decimal(chuoi), None, None)})
+        assert [e.indicator_code for e in loi] == ["B-2.1"], f"{chuoi} phải bị từ chối"
