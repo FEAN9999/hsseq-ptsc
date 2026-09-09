@@ -8,7 +8,7 @@ Nền tảng báo cáo HSEQ nội bộ PTSC — FastAPI + Postgres (backend), Re
 docker compose -f infra/docker-compose.yml up -d
 ```
 
-- `db`: Postgres 16, cổng `5432`, database `hseq` (user/pass `hseq`).
+- `db`: Postgres 16, cổng `55432` (55432 là cổng host vì cổng 5432 đã bị dự án khác chiếm), database `hseq` (user/pass `hseq`).
 - `api`: cổng `8000` → http://localhost:8000.
 
 Dừng: `docker compose -f infra/docker-compose.yml down`.
@@ -34,7 +34,7 @@ docker compose -f infra/docker-compose.yml up -d
 
 ## Chạy test
 
-Test chạy trên database riêng `hseq_test`, qua cổng host `5432` — chỉ cần service `db`, không cần `api`:
+Test chạy trên database riêng `hseq_test`, qua cổng host `55432` — chỉ cần service `db`, không cần `api`:
 
 ```bash
 docker compose -f infra/docker-compose.yml up -d db
