@@ -19,6 +19,7 @@ from app.models import (
     Indicator,
     OrgUnit,
     Permission,
+    Report,
     ReportingPeriod,
     ReportTemplate,
     Role,
@@ -30,6 +31,7 @@ from app.models import (
     WorkflowTransition,
 )
 from app.seed.catalog_fm01 import INDICATORS, SECTIONS, TEXT_FIELDS
+from app.seed.fixture import load_fixture
 
 VN = ZoneInfo("Asia/Ho_Chi_Minh")
 
@@ -226,6 +228,36 @@ def _seed_periods(db, tpl: ReportTemplate) -> None:
         )
 
 
+def _nhap_don_vi_22(db, tpl) -> None:
+    """Đơn vị thứ 22 ở kỳ 08/2026 là nháp, có đủ số thật của chính nó.
+
+    Đường demo phân đoạn 2: người demo chỉ sửa vài ô rồi nộp, không vướng ô
+    bắt buộc — vì thế KHÔNG xoá report_value, chỉ đổi trạng thái + nguồn của
+    chính báo cáo đó. Chỉ đổi khi report.source vẫn còn "seed" (insert-if-
+    absent tinh thần chung của seed_all): nếu đã là "live" — do chính hàm
+    này chạy lần trước, hoặc do người dùng thật đã thao tác — thì bỏ qua,
+    không ghi đè tiến độ demo/live đang có.
+    """
+    donvi_22 = (
+        db.query(OrgUnit).filter_by(is_reporting=True).order_by(OrgUnit.id).all()
+    )[21]  # thứ 22, 0-based index 21
+    ky_08 = db.query(ReportingPeriod).filter_by(template_id=tpl.id, period_key="2026-08").one()
+    bc = db.query(Report).filter_by(
+        template_id=tpl.id, org_unit_id=donvi_22.id, period_id=ky_08.id
+    ).one_or_none()
+    if bc is None or bc.source != "seed":
+        return
+    draft = db.query(WorkflowState).filter_by(template_id=tpl.id, code="draft").one()
+    bc.state_id = draft.id
+    bc.source = "live"
+    bc.decided_at = None
+    bc.decided_by = None
+    bc.submitted_at = None
+    bc.first_submitted_at = None
+    bc.is_late = False
+    db.flush()
+
+
 def seed_all(db) -> None:
     _seed_org(db)
     _seed_rbac(db)
@@ -233,10 +265,9 @@ def seed_all(db) -> None:
     tpl = _seed_template(db)
     _seed_workflow(db, tpl)
     _seed_periods(db, tpl)
+    load_fixture(db, tpl)
+    _nhap_don_vi_22(db, tpl)
     db.commit()
-
-# Task 7 sẽ nối thêm `load_fixture(db, tpl)` vào cuối seed_all. Task 6 KHÔNG
-# import app.seed.fixture — module đó chưa tồn tại, import sớm làm vỡ cả 7 test.
 
 
 def export_catalog_json(db, path: str) -> None:

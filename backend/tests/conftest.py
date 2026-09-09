@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 os.environ.setdefault("JWT_SECRET", "test-secret-chi-dung-trong-pytest-0123456789")
 os.environ.setdefault("APP_ENV", "test")
@@ -9,6 +10,11 @@ os.environ.setdefault(
         "postgresql+psycopg://hseq:hseq@localhost:55432/hseq_test",
     ),
 )
+# seed_all() gọi load_fixture() ngầm — trỏ CHẮC CHẮN sang bộ số tổng hợp giả
+# (tests/fixtures/full_synthetic.csv, sinh bởi gen_fixture.py), không phải
+# setdefault: nếu để lọt biến FIXTURE_CSV thật từ môi trường ngoài, test sẽ
+# nạp nhầm file thật (hoặc rỗng) và đỏ khó hiểu.
+os.environ["FIXTURE_CSV"] = str(Path(__file__).parent / "fixtures" / "full_synthetic.csv")
 
 import pytest
 from fastapi.testclient import TestClient
