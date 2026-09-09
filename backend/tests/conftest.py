@@ -19,10 +19,20 @@ from app.main import app
 
 @pytest.fixture()
 def db():
-    """Mỗi test một transaction, rollback ở cuối — không dọn tay."""
+    """Mỗi test một transaction, rollback ở cuối — không dọn tay.
+
+    `join_transaction_mode="create_savepoint"` là bắt buộc, không phải trang trí.
+    Mặc định của SQLAlchemy 2.0 là `conditional_savepoint`, và với `conn.begin()`
+    thường nó rơi về `rollback_only`: `db.commit()` không chạm DB (chỗ này an
+    toàn), NHƯNG `db.rollback()` huỷ luôn transaction ngoài của fixture. Mọi thứ
+    ghi sau lần rollback đó nằm ngoài tầm `trans.rollback()` và rò thẳng vào
+    `hseq_test`. Code thật có gọi rollback (nhánh `except` của handler, audit lỗi
+    trong `apply_transition`), nên đây là đường rò có thật, đo được: 1 dòng rò ở
+    chế độ mặc định, 0 dòng với `create_savepoint`.
+    """
     conn = engine.connect()
     trans = conn.begin()
-    session = SessionLocal(bind=conn)
+    session = SessionLocal(bind=conn, join_transaction_mode="create_savepoint")
     try:
         yield session
     finally:
