@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import health
+from app.api import auth, health
 from app.core.config import settings
 
 app = FastAPI(title="HSEQ PTSC", docs_url="/docs")
@@ -13,3 +13,4 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(health.router, prefix="/api/v1")
+app.include_router(auth.router, prefix="/api/v1")
