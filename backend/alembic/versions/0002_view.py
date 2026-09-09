@@ -28,27 +28,30 @@ WITH counted AS (
       JOIN workflow_state ws  ON ws.id = r.state_id AND ws.counts_in_totals
       JOIN reporting_period p ON p.id  = r.period_id
 ),
+counted_reports AS (
+    SELECT r.org_unit_id, r.template_id, r.period_id, p.start_date
+      FROM report r
+      JOIN workflow_state ws  ON ws.id = r.state_id AND ws.counts_in_totals
+      JOIN reporting_period p ON p.id  = r.period_id
+),
 ctx AS (
     SELECT rv.report_id, rv.indicator_id, rv.this_period,
            r.org_unit_id, r.template_id, p.start_date,
-           (SELECT op.start_date
-              FROM opening_balance o
-              JOIN reporting_period op ON op.id = o.period_id
-             WHERE o.org_unit_id  = r.org_unit_id
-               AND o.indicator_id = rv.indicator_id
-               AND op.start_date <= p.start_date
-             ORDER BY op.start_date DESC LIMIT 1) AS ob_start,
-           (SELECT o.value
-              FROM opening_balance o
-              JOIN reporting_period op ON op.id = o.period_id
-             WHERE o.org_unit_id  = r.org_unit_id
-               AND o.indicator_id = rv.indicator_id
-               AND op.start_date <= p.start_date
-             ORDER BY op.start_date DESC LIMIT 1) AS ob_value
+           o.ob_start, o.ob_value
       FROM report_value rv
       JOIN indicator i        ON i.id  = rv.indicator_id AND i.agg_type = 'sum'
       JOIN report r           ON r.id  = rv.report_id
       JOIN reporting_period p ON p.id  = r.period_id
+      LEFT JOIN LATERAL (
+          SELECT op.start_date AS ob_start, o2.value AS ob_value
+            FROM opening_balance o2
+            JOIN reporting_period op ON op.id = o2.period_id
+           WHERE o2.org_unit_id  = r.org_unit_id
+             AND o2.indicator_id = rv.indicator_id
+             AND op.start_date  <= p.start_date
+           ORDER BY op.start_date DESC
+           LIMIT 1
+      ) o ON TRUE
 )
 SELECT c.report_id,
        c.indicator_id,
@@ -76,9 +79,9 @@ SELECT c.report_id,
                   WHERE k2.org_unit_id  = c.org_unit_id
                     AND k2.indicator_id = c.indicator_id))
          AND NOT EXISTS (
-                 SELECT 1 FROM counted k3
+                 SELECT 1 FROM counted_reports k3
                   WHERE k3.org_unit_id  = c.org_unit_id
-                    AND k3.indicator_id = c.indicator_id
+                    AND k3.template_id  = c.template_id
                     AND k3.period_id    = mp.id)
   ) m;
 """
