@@ -3,8 +3,10 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import auth, health
 from app.core.config import settings
+from app.core.errors import dang_ky_handler
 
 app = FastAPI(title="HSEQ PTSC", docs_url="/docs")
+dang_ky_handler(app)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_list,
