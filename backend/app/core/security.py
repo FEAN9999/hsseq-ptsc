@@ -37,7 +37,13 @@ def tao_token(user_id: int) -> str:
 
 def doc_token(token: str) -> int | None:
     try:
-        payload = jwt.decode(token, settings.JWT_SECRET, algorithms=[THUAT_TOAN])
+        # PyJWT chỉ kiểm "exp" KHI NÓ CÓ MẶT trong payload — thiếu options
+        # này, một token bị cắt/tạo thủ công không có "exp" sống vĩnh viễn,
+        # biến hạn 12 giờ (HAN_GIO) của spec thành có điều kiện.
+        payload = jwt.decode(
+            token, settings.JWT_SECRET, algorithms=[THUAT_TOAN],
+            options={"require": ["exp", "sub"]},
+        )
         return int(payload["sub"])
     except Exception:
         return None

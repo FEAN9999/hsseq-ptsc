@@ -21,9 +21,11 @@ class DangNhapRequest(BaseModel):
 
 @router.post("/login")
 def login(payload: DangNhapRequest, db: Session = Depends(get_db)):
-    # sai email HOẶC sai mật khẩu đều trả cùng một câu — không lộ tài khoản có tồn tại
+    # sai email HOẶC sai mật khẩu HOẶC tài khoản bị vô hiệu hoá đều trả cùng
+    # một câu — không lộ tài khoản có tồn tại hay đã bị khoá
     user = db.query(AppUser).filter_by(email=payload.email).one_or_none()
-    if user is None or not kiem_mat_khau(payload.password, user.password_hash):
+    if (user is None or not kiem_mat_khau(payload.password, user.password_hash)
+            or not user.active):
         raise UnauthorizedError(SAI_DANG_NHAP)
     return {"access_token": tao_token(user.id), "token_type": "bearer"}
 
