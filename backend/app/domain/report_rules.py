@@ -71,15 +71,22 @@ def _qua_thap_phan(v: Decimal, decimals: int) -> bool:
 def validate_values(
     catalog: list[IndicatorSpec], values: dict[str, CellValues]
 ) -> list[FieldError]:
+    """Kiểm payload MỘT PHẦN của PUT /reports/{id}/values (spec D23).
+
+    Chỉ kiểm những mã CÓ trong `values`. Mã không gửi lên nghĩa là ô không đổi,
+    không phải ô thiếu — nên không bao giờ sinh lỗi "bắt buộc" cho mã vắng mặt.
+
+    KHÔNG dùng hàm này cho phép kiểm "thiếu ô bắt buộc lúc nộp" (spec dòng 257):
+    lúc nộp phải kiểm TOÀN BỘ ô đang lưu của báo cáo, mà hàm này không nhìn thấy
+    chúng — gọi nhầm ở đó sẽ luôn trả rỗng và báo cáo thiếu dữ liệu lọt qua.
+    """
     theo_ma = {i.code: i for i in catalog}
     loi: list[FieldError] = []
-    co_chi_tieu_ngoai_mau = False
 
     for ma, o in values.items():
         spec = theo_ma.get(ma)
         if spec is None:
             loi.append(FieldError(ma, "Chỉ tiêu không có trong mẫu báo cáo"))
-            co_chi_tieu_ngoai_mau = True
             continue
         nhap_duoc = editable_columns(spec.agg_type)
         for cot in ("this_period", "acc_prev_entered", "acc_total_entered"):
@@ -97,21 +104,28 @@ def validate_values(
                     ma, f"Chỉ nhận tối đa {spec.decimals} chữ số thập phân"))
                 break
 
-    if not co_chi_tieu_ngoai_mau:
-        for spec in catalog:
-            cot = required_for(spec.agg_type)
-            if not spec.required or cot is None:
-                continue
-            o = values.get(spec.code)
-            if o is None or getattr(o, cot) is None:
-                loi.append(FieldError(spec.code, "Ô bắt buộc, chưa có giá trị"))
+    # Mã đã bị báo lỗi ở vòng trên (sai cột / âm / quá thập phân) thì bỏ qua ở
+    # vòng bắt buộc dưới đây — một ô chỉ báo lỗi cụ thể nhất, không chồng thêm
+    # lỗi "bắt buộc" lên trên lỗi đã có cho cùng một mã.
+    ma_da_loi = {e.indicator_code for e in loi}
+    for ma, o in values.items():
+        if ma in ma_da_loi:
+            continue
+        spec = theo_ma.get(ma)
+        if spec is None or not spec.required:
+            continue
+        cot = required_for(spec.agg_type)
+        if cot is None:
+            continue
+        if getattr(o, cot) is None:
+            loi.append(FieldError(ma, "Ô bắt buộc, chưa có giá trị"))
     return loi
 
 
-def evaluate_computed(formula: str, by_code: dict[str, Decimal | None]) -> Decimal:
-    """MVP chỉ hỗ trợ phép cộng; thành phần trống coi là 0."""
+def evaluate_computed(formula: str | None, by_code: dict[str, Decimal | None]) -> Decimal:
+    """MVP chỉ hỗ trợ phép cộng; thành phần trống coi là 0; công thức rỗng trả 0."""
     tong = Decimal("0")
-    for ma in (m.strip() for m in formula.split(",") if m.strip()):
+    for ma in (m.strip() for m in (formula or "").split(",") if m.strip()):
         tong += by_code.get(ma) or Decimal("0")
     return tong
 

@@ -84,3 +84,85 @@ def test_counter_check_bo_qua_khi_ky_truoc_chua_duyet():
     kq = counter_check(None, Decimal("180"), Decimal("1420"))
     assert kq.status == "bo_qua"
     assert "chưa duyệt" in kq.message.lower()
+
+
+def _spec_khac(**kw):
+    """Chỉ tiêu bắt buộc thứ hai, dùng để kiểm ca vắng mặt trong payload."""
+    return IndicatorSpec(code="B-2.2", agg_type=kw.get("agg_type", "sum"),
+                         decimals=kw.get("decimals", 0),
+                         required=kw.get("required", True),
+                         formula=kw.get("formula"))
+
+
+def test_dung_bien_decimals_thi_hop_le():
+    """decimals=2 phải nhận đúng 2 chữ số thập phân, chỉ chặn từ chữ số thứ 3."""
+    loi = validate_values([_spec(decimals=2)],
+                          {"B-2.1": CellValues(Decimal("12.34"), None, None)})
+    assert loi == []
+    loi = validate_values([_spec(decimals=2)],
+                          {"B-2.1": CellValues(Decimal("12.345"), None, None)})
+    assert [e.indicator_code for e in loi] == ["B-2.1"]
+
+
+def test_so_khong_la_gia_tri_hop_le():
+    """0 vụ tai nạn là số liệu có nghĩa, không phải số âm."""
+    loi = validate_values([_spec()], {"B-2.1": CellValues(Decimal("0"), None, None)})
+    assert loi == []
+
+
+def test_snapshot_chi_nhan_cot_cong_don():
+    loi = validate_values([_spec(agg_type="snapshot")],
+                          {"B-2.1": CellValues(None, None, Decimal("7"))})
+    assert loi == []
+    loi = validate_values([_spec(agg_type="snapshot")],
+                          {"B-2.1": CellValues(Decimal("7"), None, None)})
+    assert [e.message for e in loi] == ["Dòng tự tính, không nhận giá trị gửi lên"]
+
+
+def test_counter_nhan_ca_hai_cot_nhung_chi_bat_buoc_cong_don():
+    loi = validate_values([_spec(agg_type="counter")],
+                          {"B-2.1": CellValues(Decimal("3"), None, Decimal("10"))})
+    assert loi == []
+    # thiếu cột cộng dồn thì báo bắt buộc, dù đã nhập tháng này
+    loi = validate_values([_spec(agg_type="counter")],
+                          {"B-2.1": CellValues(Decimal("3"), None, None)})
+    assert [e.message for e in loi] == ["Ô bắt buộc, chưa có giá trị"]
+    # cột lũy kế tháng trước do hệ thống tự điền, không nhận từ người dùng
+    loi = validate_values([_spec(agg_type="counter")],
+                          {"B-2.1": CellValues(None, Decimal("5"), Decimal("10"))})
+    assert [e.message for e in loi] == ["Dòng tự tính, không nhận giá trị gửi lên"]
+
+
+def test_khong_bat_buoc_thi_de_trong_van_hop_le():
+    for loai in ("sum", "counter", "snapshot"):
+        loi = validate_values([_spec(agg_type=loai, required=False)],
+                              {"B-2.1": CellValues(None, None, None)})
+        assert loi == [], f"{loai}: required=False mà vẫn đòi nhập"
+
+
+def test_counter_check_chua_nhap_cong_don_thi_bo_qua():
+    """Đang gõ dở: đã nhập Tháng này nhưng chưa nhập Cộng dồn thì chưa có gì để so."""
+    kq = counter_check(Decimal("10"), Decimal("3"), None)
+    assert kq.status == "bo_qua"
+
+
+def test_xoa_trang_o_bat_buoc_van_bao_loi_du_payload_lan_ma_la():
+    """Mã lạ trong payload không được nuốt lỗi của chỉ tiêu khác."""
+    loi = validate_values(
+        [_spec()],
+        {"B-2.1": CellValues(None, None, None),
+         "KHONG-CO": CellValues(Decimal("1"), None, None)},
+    )
+    assert sorted(e.indicator_code for e in loi) == ["B-2.1", "KHONG-CO"]
+
+
+def test_ma_vang_mat_trong_payload_khong_bi_bao_thieu():
+    """Payload một phần (D23): ô không gửi là ô không đổi, không phải ô thiếu."""
+    loi = validate_values([_spec(), _spec_khac()],
+                          {"B-2.1": CellValues(Decimal("5"), None, None)})
+    assert loi == []
+
+
+def test_evaluate_computed_formula_rong_va_none():
+    assert evaluate_computed("", {"B-1.1": Decimal("9")}) == Decimal("0")
+    assert evaluate_computed(None, {"B-1.1": Decimal("9")}) == Decimal("0")
