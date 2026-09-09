@@ -63,7 +63,8 @@ def upgrade() -> None:
     sa.Column('org_unit_id', sa.Integer(), nullable=False),
     sa.Column('active', sa.Boolean(), nullable=False),
     sa.ForeignKeyConstraint(['org_unit_id'], ['org_unit.id'], ),
-    sa.PrimaryKeyConstraint('id')
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('email')
     )
     op.create_table('reporting_period',
     sa.Column('id', sa.Integer(), nullable=False),
@@ -194,7 +195,7 @@ def upgrade() -> None:
     sa.Column('to_state_id', sa.Integer(), nullable=False),
     sa.Column('action_code', sa.String(length=32), nullable=False),
     sa.Column('name_vi', sa.String(length=255), nullable=False),
-    sa.Column('required_permission_id', sa.Integer(), nullable=True),
+    sa.Column('required_permission_id', sa.Integer(), nullable=False),
     sa.Column('requires_note', sa.Boolean(), nullable=False),
     sa.ForeignKeyConstraint(['from_state_id'], ['workflow_state.id'], ),
     sa.ForeignKeyConstraint(['required_permission_id'], ['permission.id'], ),

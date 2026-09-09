@@ -31,3 +31,13 @@ def test_unique_bao_cao_theo_mau_don_vi_ky(db):
     assert any(
         set(c["column_names"]) == {"template_id", "org_unit_id", "period_id"} for c in uc
     )
+
+
+def test_email_la_unique(db):
+    uc = inspect(db.bind).get_unique_constraints("app_user")
+    assert any(c["column_names"] == ["email"] for c in uc), "app_user.email phải UNIQUE"
+
+
+def test_required_permission_khong_duoc_null(db):
+    cot = {c["name"]: c for c in inspect(db.bind).get_columns("workflow_transition")}
+    assert cot["required_permission_id"]["nullable"] is False

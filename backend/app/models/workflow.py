@@ -31,7 +31,7 @@ class WorkflowTransition(Base):
     # submit | return | approve | reopen
     action_code: Mapped[str] = mapped_column(String(32))
     name_vi: Mapped[str] = mapped_column(String(255))
-    required_permission_id: Mapped[int | None] = mapped_column(ForeignKey("permission.id"))
+    required_permission_id: Mapped[int] = mapped_column(ForeignKey("permission.id"))
     requires_note: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
