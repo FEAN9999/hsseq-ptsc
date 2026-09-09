@@ -24,24 +24,10 @@ import pytest
 
 from app.seed import seed_all
 from app.seed.fixture import FixtureError, load_fixture
+from tests.conftest import _seed_khung
 
 MINI = "tests/fixtures/mini_ok.csv"
 VN = ZoneInfo("Asia/Ho_Chi_Minh")
-
-
-def _seed_khung(db):
-    """Dựng org + catalog + workflow + kỳ — không nạp fixture (xem docstring module)."""
-    from app.seed import (
-        _seed_org, _seed_periods, _seed_rbac, _seed_template, _seed_users, _seed_workflow,
-    )
-    _seed_org(db)
-    _seed_rbac(db)
-    _seed_users(db)
-    tpl = _seed_template(db)
-    _seed_workflow(db, tpl)
-    _seed_periods(db, tpl)
-    db.flush()
-    return tpl
 
 
 def _tpl(db):
@@ -162,6 +148,52 @@ def test_so_du_dau_ky_gia_tri_dung(db):
 
 
 # ---------------------------------------------------------------------------
+# _assert_luy_ke: `counter` được miễn công thức `sum`, nhưng vẫn phải liên tục
+# (acc_prev kỳ sau khớp acc_total kỳ trước) — FM01 có 4 chỉ tiêu counter reset
+# theo LTI/năm/dự án (B-1.5, B-1.6, B-1.7, B-1.8).
+# ---------------------------------------------------------------------------
+
+def test_counter_duoc_phep_reset_khong_ap_cong_thuc_sum(db):
+    """4 chỉ tiêu counter của FM01 reset theo LTI / theo năm / theo dự án.
+
+    Reset nghĩa là acc_total TỤT XUỐNG, không bằng acc_prev + this_period.
+    Áp công thức của `sum` cho `counter` sẽ từ chối nhầm dữ liệu đúng.
+    """
+    from app.models import Indicator, OrgUnit, Report, ReportingPeriod, ReportValue
+    _seed_khung(db)
+    tpl = _tpl(db)
+    kq = load_fixture(db, tpl, "tests/fixtures/mini_counter_reset.csv")
+    assert kq.created_reports == 3, "3 kỳ x 1 đơn vị = 3 báo cáo"
+
+    u01 = db.query(OrgUnit).filter_by(code="U01").one()
+    ind = db.query(Indicator).filter_by(template_id=tpl.id, code="B-1.5").one()
+    assert ind.agg_type == "counter"
+    mong_doi = {  # period_key: (this_period, acc_prev, acc_total)
+        "2026-06": (Decimal("1000.00"), Decimal("0.00"), Decimal("1000.00")),
+        "2026-07": (Decimal("500.00"), Decimal("1000.00"), Decimal("500.00")),  # reset
+        "2026-08": (Decimal("300.00"), Decimal("500.00"), Decimal("800.00")),
+    }
+    for period_key, (this_period, acc_prev, acc_total) in mong_doi.items():
+        ky = db.query(ReportingPeriod).filter_by(template_id=tpl.id, period_key=period_key).one()
+        bc = db.query(Report).filter_by(template_id=tpl.id, org_unit_id=u01.id, period_id=ky.id).one()
+        v = db.query(ReportValue).filter_by(report_id=bc.id, indicator_id=ind.id).one()
+        assert (v.this_period, v.acc_prev_entered, v.acc_total_entered) == (this_period, acc_prev, acc_total), \
+            f"kỳ {period_key}: giá trị sai"
+
+
+def test_counter_dut_mach_luy_ke_van_bi_tu_choi(db):
+    """Miễn công thức cộng không có nghĩa là miễn mọi kiểm tra: acc_prev kỳ sau
+    vẫn phải khớp acc_total kỳ trước, kể cả với counter."""
+    _seed_khung(db)
+    tpl = _tpl(db)
+    with pytest.raises(FixtureError) as e:
+        load_fixture(db, tpl, "tests/fixtures/mini_counter_dut_mach.csv")
+    thong_diep = str(e.value)
+    assert "B-1.5" in thong_diep and "2026-07" in thong_diep
+    assert "999.00" in thong_diep and "1000.00" in thong_diep, "phải nêu đúng giá trị lệch"
+
+
+# ---------------------------------------------------------------------------
 # Các nhánh lỗi/bỏ qua khác — CSV dựng tại chỗ bằng tmp_path (không thêm file
 # fixture mới ngoài danh sách brief đã liệt kê)
 # ---------------------------------------------------------------------------
@@ -217,6 +249,50 @@ def test_so_sai_dinh_dang_bi_bat(db, tmp_path):
     with pytest.raises(FixtureError) as e:
         load_fixture(db, tpl, str(csv_path))
     assert "số sai định dạng" in str(e.value)
+
+
+def test_so_am_bi_tu_choi_khong_nap_nua_chung(db, tmp_path):
+    """Dữ liệu dán tay từ Excel dễ gõ nhầm dấu trừ — số âm không được nạp trót
+    lọt vào report_value, kể cả khi tự thoả công thức lũy kế (-5 + -3 = -8)."""
+    from app.models import Report
+    _seed_khung(db)
+    tpl = _tpl(db)
+    truoc = db.query(Report).count()
+    csv_path = tmp_path / "so_am.csv"
+    csv_path.write_text(
+        "org_code,period,indicator_code,this_period,acc_prev,acc_total,note\n"
+        "U01,2026-06,B-2.2,-3,-5,-8,\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(FixtureError) as e:
+        load_fixture(db, tpl, str(csv_path))
+    thong_diep = str(e.value)
+    assert "dòng 2" in thong_diep and "B-2.2" in thong_diep
+    assert "-3" in thong_diep and "-5" in thong_diep and "-8" in thong_diep, \
+        "phải nêu đúng giá trị âm của cả 3 cột"
+    assert "âm" in thong_diep
+    assert db.query(Report).count() == truoc, "đã nạp nửa chừng"
+
+
+def test_qua_thap_phan_bi_tu_choi_khong_nap_nua_chung(db, tmp_path):
+    """B-2.1 khai decimals=0 — 1.50 là thập phân dư từ công thức Excel, không
+    phải số nguyên vụ việc thật."""
+    from app.models import Report
+    _seed_khung(db)
+    tpl = _tpl(db)
+    truoc = db.query(Report).count()
+    csv_path = tmp_path / "qua_thap_phan.csv"
+    csv_path.write_text(
+        "org_code,period,indicator_code,this_period,acc_prev,acc_total,note\n"
+        "U01,2026-06,B-2.1,1.50,0,1.50,\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(FixtureError) as e:
+        load_fixture(db, tpl, str(csv_path))
+    thong_diep = str(e.value)
+    assert "dòng 2" in thong_diep and "B-2.1" in thong_diep
+    assert "1.50" in thong_diep and "thập phân" in thong_diep
+    assert db.query(Report).count() == truoc, "đã nạp nửa chừng"
 
 
 def test_chi_tieu_la_bi_bat(db, tmp_path):

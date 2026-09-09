@@ -99,13 +99,23 @@ def load_fixture(db, tpl, path: str | None = None) -> LoadResult:
     return kq
 
 
+def _qua_thap_phan(v: Decimal, decimals: int) -> bool:
+    """Số chữ số thập phân của `v` vượt `decimals` khai báo của chỉ tiêu.
+
+    Chép NGUYÊN VĂN logic của `report_rules._qua_thap_phan` — cố tình không
+    import (report_rules.py không được đụng theo ràng buộc brief task-7-fix1;
+    hàm đó cũng phục vụ ngữ cảnh khác hẳn, payload PUT một phần)."""
+    return -v.as_tuple().exponent > decimals
+
+
 def _doc_va_kiem(db, tpl, p: Path) -> tuple[list[_Dong], list[str], int]:
     """Đọc CSV, gom TOÀN BỘ lỗi cấu trúc (không dừng ở lỗi đầu tiên).
 
-    Bắt: org_code lạ, indicator_code lạ, period lạ, số sai định dạng, dòng
-    trùng khoá (org,period,indicator), và số dư (acc_prev khởi đầu của một
-    cặp org+chỉ tiêu) rơi vào kỳ không phải kỳ đầu của fixture — trường hợp
-    đó không có chỗ lưu hợp lệ vì opening_balance chỉ sinh ở kỳ đầu.
+    Bắt: org_code lạ, indicator_code lạ, period lạ, số sai định dạng, số âm,
+    số quá thập phân khai báo của chỉ tiêu, dòng trùng khoá (org,period,
+    indicator), và số dư (acc_prev khởi đầu của một cặp org+chỉ tiêu) rơi vào
+    kỳ không phải kỳ đầu của fixture — trường hợp đó không có chỗ lưu hợp lệ
+    vì opening_balance chỉ sinh ở kỳ đầu.
     """
     from app.models import Indicator, OrgUnit, ReportingPeriod
 
@@ -155,6 +165,25 @@ def _doc_va_kiem(db, tpl, p: Path) -> tuple[list[_Dong], list[str], int]:
                 loi.append(
                     f"dòng {so_dong} ({org_code},{period_key},{indicator_code}): số sai định dạng"
                 )
+                continue
+
+            co_loi_so = False
+            for ten_cot, gia_tri in (
+                ("this_period", this_period), ("acc_prev", acc_prev), ("acc_total", acc_total),
+            ):
+                if gia_tri < 0:
+                    loi.append(
+                        f"dòng {so_dong} ({org_code},{period_key},{indicator_code}): "
+                        f"{ten_cot} = {gia_tri} không được âm"
+                    )
+                    co_loi_so = True
+                elif _qua_thap_phan(gia_tri, ind.decimals):
+                    loi.append(
+                        f"dòng {so_dong} ({org_code},{period_key},{indicator_code}): "
+                        f"{ten_cot} = {gia_tri} quá {ind.decimals} chữ số thập phân"
+                    )
+                    co_loi_so = True
+            if co_loi_so:
                 continue
 
             rows.append(_Dong(

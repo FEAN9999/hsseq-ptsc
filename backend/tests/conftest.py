@@ -56,3 +56,29 @@ def client(db):
         yield TestClient(app)
     finally:
         app.dependency_overrides.clear()
+
+
+def _seed_khung(db):
+    """Dựng org + catalog + workflow + kỳ — không nạp fixture.
+
+    Hàm dùng chung, KHÔNG PHẢI fixture pytest (gọi trực tiếp `_seed_khung(db)`,
+    không khai báo trong chữ ký test). Dùng cho test chỉ cần khung dữ liệu
+    (org/RBAC/catalog/workflow/kỳ) mà không đọc report/report_value — rẻ hơn
+    `seed_all(db)` vì bỏ qua `load_fixture()` (nạp CSV) và `_nhap_don_vi_22`.
+
+    test_fixture_loader.py còn dùng hàm này để giữ các test loader độc lập
+    với full_synthetic.csv mà `seed_all()` tự nạp — gọi `seed_all(db)` rồi nạp
+    thêm CSV nhỏ riêng sẽ đụng UNIQUE(template_id, org_unit_id, period_id) và
+    bị sha256 coi là "fixture đã đổi" (xem docstring test_fixture_loader.py).
+    """
+    from app.seed import (
+        _seed_org, _seed_periods, _seed_rbac, _seed_template, _seed_users, _seed_workflow,
+    )
+    _seed_org(db)
+    _seed_rbac(db)
+    _seed_users(db)
+    tpl = _seed_template(db)
+    _seed_workflow(db, tpl)
+    _seed_periods(db, tpl)
+    db.flush()
+    return tpl

@@ -1,28 +1,28 @@
 # backend/tests/api/test_seed.py
 def test_seed_hai_lan_khong_nhan_doi(db):
     from app.models import AppUser, Indicator, OrgUnit
-    from app.seed import seed_all
+    from tests.conftest import _seed_khung
 
-    seed_all(db)
+    _seed_khung(db)
     dem = (db.query(OrgUnit).count(), db.query(Indicator).count(), db.query(AppUser).count())
-    seed_all(db)
+    _seed_khung(db)
     assert dem == (db.query(OrgUnit).count(), db.query(Indicator).count(),
                    db.query(AppUser).count())
 
 
 def test_seed_dung_22_dau_moi_bao_cao(db):
     from app.models import OrgUnit
-    from app.seed import seed_all
+    from tests.conftest import _seed_khung
 
-    seed_all(db)
+    _seed_khung(db)
     assert db.query(OrgUnit).filter_by(is_reporting=True).count() == 22
 
 
 def test_seed_du_chi_tieu_va_3_o_van_ban(db):
     from app.models import Indicator, ReportTemplate, TemplateTextField
-    from app.seed import seed_all
+    from tests.conftest import _seed_khung
 
-    seed_all(db)
+    _seed_khung(db)
     fm01 = db.query(ReportTemplate).filter_by(code="FM01").one()
     # 53 = số dòng chỉ tiêu đếm được trong FM01.xlsx. Spec ghi 55; con số của
     # spec là ghi nhớ từ office-hours, FILE mới là nguồn. Nếu bước trích ra
@@ -36,9 +36,9 @@ def test_moi_formula_computed_tro_toi_ma_co_that(db):
     """Chốt chặn: gõ sai một mã trong formula làm dòng tổng sai vĩnh viễn mà
     không ai biết, vì evaluate_computed coi mã lạ là 0 (Task 5)."""
     from app.models import Indicator, ReportTemplate
-    from app.seed import seed_all
+    from tests.conftest import _seed_khung
 
-    seed_all(db)
+    _seed_khung(db)
     fm01 = db.query(ReportTemplate).filter_by(code="FM01").one()
     ds = db.query(Indicator).filter_by(template_id=fm01.id).all()
     co_that = {i.code for i in ds}
@@ -53,9 +53,9 @@ def test_moi_formula_computed_tro_toi_ma_co_that(db):
 
 def test_moi_reporter_co_scope_dung_don_vi(db):
     from app.models import Role, UserRole
-    from app.seed import seed_all
+    from tests.conftest import _seed_khung
 
-    seed_all(db)
+    _seed_khung(db)
     reporter = db.query(Role).filter_by(code="reporter").one()
     gan = db.query(UserRole).filter_by(role_id=reporter.id).all()
     assert len(gan) == 22
@@ -64,9 +64,9 @@ def test_moi_reporter_co_scope_dung_don_vi(db):
 
 def test_seed_4_ky_va_workflow_4_trang_thai_4_chuyen(db):
     from app.models import ReportingPeriod, WorkflowState, WorkflowTransition
-    from app.seed import seed_all
+    from tests.conftest import _seed_khung
 
-    seed_all(db)
+    _seed_khung(db)
     assert {p.period_key for p in db.query(ReportingPeriod).all()} == {
         "2026-06", "2026-07", "2026-08", "2026-09"}
     assert {s.code for s in db.query(WorkflowState).all()} == {
@@ -106,9 +106,10 @@ def test_export_json_giu_dung_bo_cuc_excel(db, tmp_path):
     import json
     from itertools import groupby
 
-    from app.seed import export_catalog_json, seed_all
+    from app.seed import export_catalog_json
+    from tests.conftest import _seed_khung
 
-    seed_all(db)
+    _seed_khung(db)
     p = tmp_path / "catalog.json"
     export_catalog_json(db, str(p))
     d = json.loads(p.read_text(encoding="utf-8"))
@@ -132,9 +133,10 @@ def test_file_catalog_json_trong_repo_dung_thu_tu(db, tmp_path):
     import json
     from pathlib import Path
 
-    from app.seed import export_catalog_json, seed_all
+    from app.seed import export_catalog_json
+    from tests.conftest import _seed_khung
 
-    seed_all(db)
+    _seed_khung(db)
     p = tmp_path / "catalog.json"
     export_catalog_json(db, str(p))
     moi = json.loads(p.read_text(encoding="utf-8"))
@@ -155,13 +157,13 @@ def test_seed_lai_khong_ghi_de_du_lieu_da_co(db):
     một lần chạy lại seed không được xoá công đó.
     """
     from app.models import OrgUnit
-    from app.seed import seed_all
+    from tests.conftest import _seed_khung
 
-    seed_all(db)
+    _seed_khung(db)
     dv = db.query(OrgUnit).filter_by(code="U01").one()
     dv.name = "Tên thật do người dùng sửa"
     db.flush()
-    seed_all(db)
+    _seed_khung(db)
     db.refresh(dv)
     assert dv.name == "Tên thật do người dùng sửa", "seed lại đã ghi đè dữ liệu đang có"
 
@@ -169,9 +171,9 @@ def test_seed_lai_khong_ghi_de_du_lieu_da_co(db):
 def test_moi_reporter_gan_dung_don_vi_theo_ma(db):
     """u01→U01 … u17→U17, u18→P01 … u22→P05. Sai ánh xạ = báo cáo nhầm đơn vị."""
     from app.models import AppUser, OrgUnit, Role, UserRole
-    from app.seed import seed_all
+    from tests.conftest import _seed_khung
 
-    seed_all(db)
+    _seed_khung(db)
     reporter = db.query(Role).filter_by(code="reporter").one()
     mong_doi = {f"u{i:02d}@ptsc.local": f"U{i:02d}" for i in range(1, 18)}
     mong_doi.update({f"u{17 + i:02d}@ptsc.local": f"P{i:02d}" for i in range(1, 6)})
@@ -186,9 +188,9 @@ def test_moi_reporter_gan_dung_don_vi_theo_ma(db):
 
 def test_tung_trang_thai_dung_ba_co(db):
     from app.models import ReportTemplate, WorkflowState
-    from app.seed import seed_all
+    from tests.conftest import _seed_khung
 
-    seed_all(db)
+    _seed_khung(db)
     fm01 = db.query(ReportTemplate).filter_by(code="FM01").one()
     mong_doi = {  # code: (is_initial, is_editable, counts_in_totals)
         "draft":     (True,  True,  False),
@@ -208,9 +210,9 @@ def test_du_5_dong_chuyen_trang_thai_dung_tung_dong(db):
     'submit' nên xoá một dòng không làm tập hợp đổi."""
     from app.models import (Permission, ReportTemplate, WorkflowState,
                             WorkflowTransition)
-    from app.seed import seed_all
+    from tests.conftest import _seed_khung
 
-    seed_all(db)
+    _seed_khung(db)
     fm01 = db.query(ReportTemplate).filter_by(code="FM01").one()
     ten_tt = {s.id: s.code for s in
               db.query(WorkflowState).filter_by(template_id=fm01.id).all()}
@@ -233,9 +235,9 @@ def test_du_5_dong_chuyen_trang_thai_dung_tung_dong(db):
 
 def test_tung_vai_co_dung_tap_quyen(db):
     from app.models import Permission, Role, RolePermission
-    from app.seed import seed_all
+    from tests.conftest import _seed_khung
 
-    seed_all(db)
+    _seed_khung(db)
     tat_ca = {p.code for p in db.query(Permission).all()}
     mong_doi = {
         "admin_atcl": tat_ca,
@@ -259,9 +261,9 @@ def test_due_at_dung_gio_viet_nam(db):
     from zoneinfo import ZoneInfo
 
     from app.models import ReportingPeriod
-    from app.seed import seed_all
+    from tests.conftest import _seed_khung
 
-    seed_all(db)
+    _seed_khung(db)
     VN = ZoneInfo("Asia/Ho_Chi_Minh")
     ngay_han = {"2026-06": (2026, 7, 5), "2026-07": (2026, 8, 5),
                 "2026-08": (2026, 10, 5), "2026-09": (2026, 10, 5)}

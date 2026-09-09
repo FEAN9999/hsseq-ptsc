@@ -1,0 +1,4 @@
+org_code,period,indicator_code,this_period,acc_prev,acc_total,note
+U01,2026-06,B-1.5,1000.00,0.00,1000.00,
+U01,2026-07,B-1.5,500.00,1000.00,500.00,reset vì có LTI trong kỳ
+U01,2026-08,B-1.5,300.00,500.00,800.00,
