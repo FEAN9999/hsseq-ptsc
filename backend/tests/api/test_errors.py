@@ -84,3 +84,35 @@ def test_422_body_sai_hinh_dang_van_giu_mac_dinh_cua_fastapi(client):
     assert r.status_code == 422
     assert r.json()["detail"][0]["loc"] == ["body", "password"]
     assert r.json()["detail"][0]["msg"] == "Field required"
+
+
+def test_409_kem_decimal_trong_values_khong_lam_no_response():
+    """Spec bắt buộc 409 mang field `values` — đó là các ô report_value kiểu
+    Decimal. JSONResponse dùng json.dumps thuần nên Decimal làm nổ thành 500
+    nếu không bọc jsonable_encoder. Đây là đường mà Task 11 sẽ đi.
+    """
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from app.core.errors import ConflictError, dang_ky_handler
+
+    app = FastAPI()
+    dang_ky_handler(app)
+
+    @app.get("/thu-409")
+    def _thu():
+        raise ConflictError(
+            "Người khác vừa sửa báo cáo này, tải lại trang",
+            state="submitted", version=7,
+            values=[{"indicator_code": "B-1.1", "this_period": Decimal("3.00")}],
+        )
+
+    r = TestClient(app, raise_server_exceptions=False).get("/thu-409")
+    assert r.status_code == 409, r.text
+    body = r.json()
+    assert body["state"] == "submitted"
+    assert body["version"] == 7
+    assert body["values"][0]["indicator_code"] == "B-1.1"
+    gia_tri = body["values"][0]["this_period"]
+    assert isinstance(gia_tri, (int, float)), f"phải là JSON number, nhận {type(gia_tri)}"
+    assert gia_tri == 3.0

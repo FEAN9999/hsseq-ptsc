@@ -18,6 +18,7 @@
 # còn là HTTPException (vốn có `.status_code`). Bỏ alias này sẽ làm 3 test
 # đó đỏ dù logic phân quyền không đổi gì.
 from fastapi import FastAPI, Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 
 
@@ -47,4 +48,4 @@ class ConflictError(AppError):     status = 409
 def dang_ky_handler(app: FastAPI) -> None:
     @app.exception_handler(AppError)
     async def _handler(_: Request, e: AppError):
-        return JSONResponse(status_code=e.status, content=e.body())
+        return JSONResponse(status_code=e.status, content=jsonable_encoder(e.body()))
