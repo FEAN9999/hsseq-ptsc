@@ -74,6 +74,33 @@ def test_get_template_chi_tieu_dung_thu_tu_bo_cuc_bieu_mau(client, db):
     assert [s["sort_order"] for s in t["sections"]] == list(range(1, 12))
 
 
+# task-11-carry.md C3: `name_vi`/`name_en` của 11 nhóm không bị khoá theo giá
+# trị — tráo hai trường cho nhau (vd trả `name_vi` vào chỗ `name_en`) mà suite
+# vẫn xanh 171 passed. `name_en` HIỆN trên UI (header nhóm 11px + title khi
+# hover) nên tráo là lỗi thấy được trên form, không phải chi tiết nội bộ. Viết
+# thẳng giá trị mong đợi ra đây (không import từ app/seed/catalog_fm01.py) —
+# cùng lý do MA_CHI_TIEU_THEO_THU_TU ở trên không import: test phải là một
+# nguồn độc lập với code đang bị kiểm, nếu không dữ liệu seed tự sai thì test
+# tự sai theo, không bắt được gì.
+def test_get_template_ten_11_nhom_dung_gia_tri_khong_trao_vi_en(client, db):
+    _seed_khung(db)
+    h = dang_nhap(client, "admin@ptsc.local")
+    t = client.get("/api/v1/templates/FM01", headers=h).json()
+    assert [(s["code"], s["name_vi"], s["name_en"]) for s in t["sections"]] == [
+        ("A", "THÔNG TIN CHUNG", "General Information"),
+        ("B-1", "TỔNG GIỜ CÔNG", "Total Man Hours"),
+        ("B-2", "Tai nạn/ Sự cố", "Accident / Incident"),
+        ("B-3", "Hướng dẫn, đào tạo, huấn luyện SKATMT", "HSE Training/Presentation/Induction"),
+        ("B-4", "Thực tập - Diễn tập", "HSE Exercise/Drill"),
+        ("B-5", "Họp an toàn", "HSE Meeting/Talk"),
+        ("B-6", "Kiểm tra/ đánh giá SKATMT", "HSE Audit/Inspection/Visit"),
+        ("B-7", "Báo cáo công tác an toàn tới Cơ quan chức năng", "HSE Report to Authority"),
+        ("B-8", "Quản lý môi trường", "Environmental Management"),
+        ("B-9", "Hoạt động SKATMT khác", "Other HSE Activity"),
+        ("C", "CÁC HOẠT ĐỘNG NỔI BẬT", "Outstanding HSE activities"),
+    ]
+
+
 def test_get_template_chi_tieu_mau_dung_agg_type_decimals_formula(client, db):
     """FE dựng `cellPolicy` + `zodSchemaFromCatalog` từ chính ba field này:
     `agg_type` sai biến ô `computed`/`counter` thành ô nhập tự do."""

@@ -7,8 +7,15 @@ from app.api.deps import CurrentUser, current_user, pham_vi_bao_cao, require_per
 from app.core.db import get_db
 from app.core.errors import ConflictError, ForbiddenError, NotFoundError, ValidationError
 from app.models import OrgUnit, Report, ReportingPeriod, ReportTemplate, WorkflowState
-from app.schemas.report import CreateReportIn, CreateReportOut, ReportDetailOut, ReportListItem
-from app.services.reports import lay_chi_tiet_bao_cao, liet_ke_bao_cao
+from app.schemas.report import (
+    CreateReportIn,
+    CreateReportOut,
+    PutValuesIn,
+    PutValuesOut,
+    ReportDetailOut,
+    ReportListItem,
+)
+from app.services.reports import ghi_gia_tri, lay_chi_tiet_bao_cao, liet_ke_bao_cao
 
 router = APIRouter(prefix="/reports")
 
@@ -97,3 +104,37 @@ def xem_bao_cao(
     if pham_vi is not None and org_unit_id not in pham_vi:
         raise ForbiddenError("Bạn không có quyền xem báo cáo của đơn vị này")
     return chi_tiet
+
+
+def _kiem_quyen_ghi(
+    report_id: int,
+    u: CurrentUser = Depends(require_permission("report.edit")),
+    db: Session = Depends(get_db),
+) -> Report:
+    """Dependency kiểm quyền + phạm vi cho `PUT /{report_id}/values` — PHẢI
+    chạy như dependency, không gọi trong thân hàm route: route này nhận body
+    bắt buộc (`PutValuesIn`), và FastAPI chỉ validate body SAU KHI đã chạy
+    xong vòng dependency (`solve_dependencies`) — giống hệt bẫy `_pham_vi` ở
+    trên (`GET /reports`), chỉ khác ở đây là body bắt buộc thay vì query
+    param bắt buộc. Kiểm trong thân hàm sẽ để lộ 422 (thân rỗng/thiếu field)
+    thay vì 403 đúng nghĩa cho tài khoản ngoài phạm vi
+    (test_reporter_khong_ghi_duoc_bao_cao_don_vi_khac gọi với `values: []`
+    hợp lệ nên không lộ bẫy này, nhưng bẫy vẫn có thật với body sai/thiếu)."""
+    r = db.query(Report).filter_by(id=report_id).one_or_none()
+    if r is None:
+        raise NotFoundError("Không tìm thấy báo cáo")
+    pham_vi = pham_vi_bao_cao(u)
+    if pham_vi is not None and r.org_unit_id not in pham_vi:
+        raise ForbiddenError("Bạn không có quyền sửa báo cáo của đơn vị này")
+    return r
+
+
+@router.put("/{report_id}/values", response_model=PutValuesOut)
+def ghi_gia_tri_bao_cao(
+    payload: PutValuesIn,
+    r: Report = Depends(_kiem_quyen_ghi),
+    u: CurrentUser = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    version, values = ghi_gia_tri(db, r.id, payload.version, payload.values, actor=u)
+    return PutValuesOut(version=version, values=values)

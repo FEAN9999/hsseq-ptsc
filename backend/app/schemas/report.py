@@ -11,6 +11,7 @@ và ép qua JsonNumber sẽ biến `id=5` thành `5.0`, sai ý nghĩa của mộ
 """
 from datetime import date, datetime
 
+from app.domain.report_rules import CellValues
 from app.schemas.base import ApiModel, JsonNumber
 
 
@@ -86,3 +87,28 @@ class ReportDetailOut(ApiModel):
     missing_periods: list[str]
     values: list[ReportValueOut]
     texts: dict[str, str | None]
+
+
+class ValueIn(ApiModel):
+    """Một ô trong payload `PUT /reports/{id}/values` — payload MỘT PHẦN:
+    chỉ mã chỉ tiêu CÓ MẶT trong danh sách `values` của request bị đụng tới,
+    ô nào không gửi giữ nguyên nội dung đang lưu (xem docstring
+    `validate_values` ở app/domain/report_rules.py). Không có trường
+    `acc_prev_entered` — không agg_type nào cho nhập cột đó (luôn tự điền)."""
+    indicator_code: str
+    this_period: JsonNumber = None
+    acc_total_entered: JsonNumber = None
+    note: str | None = None
+
+    def as_cells(self) -> CellValues:
+        return CellValues(this_period=self.this_period, acc_total_entered=self.acc_total_entered)
+
+
+class PutValuesIn(ApiModel):
+    version: int
+    values: list[ValueIn]
+
+
+class PutValuesOut(ApiModel):
+    version: int
+    values: list[ReportValueOut]

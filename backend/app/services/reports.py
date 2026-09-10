@@ -27,11 +27,15 @@ vượt ngân sách — xem task-10-report.md mục "khác brief" để biết s
 `evaluate_computed`/`counter_check` (report_rules, Task 5) chạy trong Python
 trên kết quả query trên — không thêm query nào.
 """
+from decimal import ROUND_HALF_UP, Decimal
+
 from sqlalchemy import ARRAY, Column, Integer, MetaData, Numeric, String, Table
 from sqlalchemy import and_, func, join, or_, outerjoin, select, true
 from sqlalchemy.dialects.postgresql import aggregate_order_by
 from sqlalchemy.orm import Session, aliased
 
+from app.core.errors import ConflictError, ForbiddenError, NotFoundError, ValidationError
+from app.domain.report_rules import CellValues, IndicatorSpec, validate_values
 from app.domain.report_rules import counter_check as tinh_counter_check
 from app.domain.report_rules import evaluate_computed
 from app.models import (
@@ -53,6 +57,7 @@ from app.schemas.report import (
     ReportHeaderOut,
     ReportListItem,
     ReportValueOut,
+    ValueIn,
 )
 
 # `v_report_value_computed` (migration 0002) là view SQL thuần, không có ORM
@@ -333,3 +338,125 @@ def liet_ke_bao_cao(
             continue
         ket_qua.append(row)
     return ket_qua
+
+
+def upsert(db: Session, model, **khoa):
+    """get-or-create theo đúng bộ khoá `khoa` — dùng cho `ReportValue` theo
+    UNIQUE(report_id, indicator_id). KHÔNG cập nhật gì nếu đã có, để nguyên
+    cho lời gọi sau tự set field cần đổi."""
+    row = db.query(model).filter_by(**khoa).one_or_none()
+    if row is None:
+        row = model(**khoa)
+        db.add(row)
+    return row
+
+
+def _lam_tron(v: Decimal, q: Decimal) -> Decimal:
+    """`v.quantize(q, ROUND_HALF_UP)` — KHÔNG dùng `round()` của Python
+    (banker's rounding: 12.345 → 12.34, sai với kỳ vọng người nhập số)."""
+    return v.quantize(q, rounding=ROUND_HALF_UP)
+
+
+def doc_gia_tri(db: Session, report_id: int) -> list[ReportValueOut]:
+    """`values` hiện tại của báo cáo, dùng lại nguyên `lay_chi_tiet_bao_cao`
+    (Task 10) — 200 và 409 của PUT /values nhờ vậy trả đúng cùng hình dạng,
+    cùng cách tính computed/counter_check/diff với GET /reports/{id}."""
+    _, chi_tiet = lay_chi_tiet_bao_cao(db, report_id)
+    return chi_tiet.values
+
+
+def ghi_gia_tri(
+    db: Session, report_id: int, version: int, values: list[ValueIn], actor,
+) -> tuple[int, list[ReportValueOut]]:
+    """`PUT /reports/{id}/values` — payload MỘT PHẦN: chỉ mã chỉ tiêu có mặt
+    trong `values` bị đụng tới, mã vắng mặt giữ nguyên nội dung đang lưu
+    (spec D23; xem docstring `validate_values`).
+
+    Khoá lạc quan cùng kiểu Task 12 dự định dùng cho `apply_transition`:
+    `FOR UPDATE` rồi mới so `version`, tránh mất-cập-nhật khi hai request ghi
+    cùng lúc. Thứ tự kiểm: không tồn tại (404) → trạng thái không cho sửa
+    (403) → version lệch (409, kèm version + values HIỆN TẠI để FE vá lại
+    form) → dữ liệu không hợp lệ theo report_rules (400) → ghi.
+
+    `report.state` không có quan hệ ORM (chỉ có `state_id`) nên đọc
+    `WorkflowState` bằng một query riêng, không khoá FOR UPDATE — đó là bảng
+    danh mục dùng chung, khoá nó sẽ tự serialize hoá mọi request ghi đang ở
+    CÙNG trạng thái (vd mọi báo cáo "draft"), một lỗi tương tranh thật chứ
+    không phải giả định.
+    """
+    r = db.query(Report).filter_by(id=report_id).with_for_update().one_or_none()
+    if r is None:
+        raise NotFoundError("Không tìm thấy báo cáo")
+
+    trang_thai = db.query(WorkflowState).filter_by(id=r.state_id).one()
+    if not trang_thai.is_editable:
+        raise ForbiddenError("Báo cáo ở trạng thái không cho sửa")
+
+    if r.version != version:
+        raise ConflictError(
+            "Người khác vừa sửa báo cáo này",
+            state=trang_thai.code, version=r.version, values=doc_gia_tri(db, r.id),
+        )
+
+    chi_tieu = db.query(Indicator).filter_by(template_id=r.template_id, active=True).all()
+    theo_ma = {i.code: i for i in chi_tieu}
+    catalog = [
+        IndicatorSpec(code=i.code, agg_type=i.agg_type, decimals=i.decimals,
+                      required=i.required, formula=i.formula)
+        for i in chi_tieu
+    ]
+
+    # Quantize TRƯỚC khi validate, không phải sau: người nhập gõ "12.345" cho
+    # chỉ tiêu decimals=2 phải được server làm tròn thành 12.35 rồi lưu (FE
+    # hiện đúng số đã lưu) — validate_values.qua_thap_phan() từ chối thẳng
+    # giá trị còn nguyên 3 chữ số thập phân (đúng cho đường CSV fixture, nơi
+    # dữ liệu quá thập phân là lỗi nạp thật, xem app/seed/fixture.py), nên
+    # validate ở đây phải chạy trên giá trị ĐàQUANTIZE, không phải giá trị
+    # người dùng gõ nguyên văn — khác thứ tự so với brief gốc (validate rồi
+    # mới quantize), xem "quyết định riêng" trong task-11-report.md.
+    da_lam_tron: dict[str, CellValues] = {}
+    for v in values:
+        ind = theo_ma.get(v.indicator_code)
+        if ind is None:
+            da_lam_tron[v.indicator_code] = v.as_cells()   # mã lạ: để validate_values tự báo lỗi
+            continue
+        q = Decimal(10) ** -ind.decimals
+        da_lam_tron[v.indicator_code] = CellValues(
+            this_period=_lam_tron(v.this_period, q) if v.this_period is not None else None,
+            acc_total_entered=(
+                _lam_tron(v.acc_total_entered, q) if v.acc_total_entered is not None else None
+            ),
+        )
+
+    loi = validate_values(catalog, da_lam_tron)
+    if loi:
+        raise ValidationError(
+            "Dữ liệu không hợp lệ",
+            errors=[{"indicator_code": e.indicator_code, "message": e.message} for e in loi],
+        )
+
+    for v in values:                       # CHỈ ô được gửi — payload một phần
+        ind = theo_ma[v.indicator_code]
+        gia_tri = da_lam_tron[v.indicator_code]
+        row = upsert(db, ReportValue, report_id=r.id, indicator_id=ind.id)
+        if ind.agg_type == "sum":
+            if gia_tri.this_period is not None:
+                row.this_period = gia_tri.this_period
+            row.acc_prev_entered = None    # nhập sống: hai cột acc luôn NULL cho dòng sum
+            row.acc_total_entered = None
+        elif ind.agg_type == "counter":
+            if gia_tri.this_period is not None:
+                row.this_period = gia_tri.this_period
+            if gia_tri.acc_total_entered is not None:
+                row.acc_total_entered = gia_tri.acc_total_entered
+        elif ind.agg_type == "snapshot":
+            if gia_tri.acc_total_entered is not None:
+                row.acc_total_entered = gia_tri.acc_total_entered
+        # "computed": validate_values ở trên đã chặn (COT_NHAP_DUOC rỗng), không tới đây
+        if v.note is not None:
+            row.note = v.note
+
+    r.version += 1
+    r.source = "live"
+    db.flush()
+    return r.version, doc_gia_tri(db, r.id)

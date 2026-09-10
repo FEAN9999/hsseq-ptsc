@@ -20,20 +20,12 @@ def dang_nhap(client, email, mk="Demo@2026"):
 # GET /reports/{id} (xem task-10-brief.md mục Produces và
 # docs/superpowers/plans/2026-09-09-hseq-mvp-fm01.md, bảng "Cặp task dùng
 # chung file": "10 tạo, 11 thêm PUT, 12 thêm transition; không sửa chồng").
-# PUT /reports/{id}/values và POST /reports/{id}/transition KHÔNG tồn tại
-# cho tới Task 11/12 — 2 trong 5 xfail dưới đây đụng đúng hai route đó nên
-# vẫn xfail (lý do cập nhật, marker Task 8 nói "chờ Task 10 Step 6" đã cũ vì
-# viết trước khi biết PUT/transition bị tách sang task khác); 3 xfail còn lại
-# đụng route Task 10 thật sự mount nên gỡ marker ở đây.
-_XFAIL_CHO_TASK_11 = pytest.mark.xfail(
-    reason="Task 10 chỉ mount GET/POST /reports + GET /reports/{id}; "
-           "PUT /reports/{id}/values do Task 11 thêm — gỡ khi đó.",
-    strict=True,
-)
-_XFAIL_CHO_TASK_11_VA_12 = pytest.mark.xfail(
-    reason="Task 10 chỉ mount GET/POST /reports + GET /reports/{id}; "
-           "PUT /reports/{id}/values (Task 11) và POST .../transition (Task 12) "
-           "chưa tồn tại — gỡ khi cả hai đã mount.",
+# Task 11 mount thêm PUT /reports/{id}/values (test ngay dưới đã gỡ marker,
+# xanh thật). POST /reports/{id}/transition vẫn CHƯA tồn tại tới Task 12 —
+# xfail còn lại đụng đúng route đó nên vẫn giữ.
+_XFAIL_CHO_TASK_12 = pytest.mark.xfail(
+    reason="Task 10/11 chỉ mount GET/POST /reports + GET /reports/{id} + "
+           "PUT /reports/{id}/values; POST .../transition do Task 12 thêm — gỡ khi đó.",
     strict=True,
 )
 
@@ -46,7 +38,6 @@ def test_reporter_khong_doc_duoc_bao_cao_don_vi_khac(client, sanh):
     assert client.get(f"/api/v1/reports/{bc.id}", headers=h).status_code == 403
 
 
-@_XFAIL_CHO_TASK_11
 def test_reporter_khong_ghi_duoc_bao_cao_don_vi_khac(client, sanh):
     h = dang_nhap(client, "u01@ptsc.local")
     from app.models import OrgUnit, Report
@@ -69,7 +60,7 @@ def test_reporter_scope_NULL_bi_tu_choi_chu_khong_thanh_toan_quyen(client, sanh)
     assert client.get("/api/v1/reports", headers=h).status_code == 403
 
 
-@_XFAIL_CHO_TASK_11_VA_12
+@_XFAIL_CHO_TASK_12
 def test_viewer_khong_sua_duoc_gi(client, sanh):
     h = dang_nhap(client, "viewer@ptsc.local")
     from app.models import Report

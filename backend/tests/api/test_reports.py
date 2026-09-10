@@ -262,6 +262,37 @@ def test_counter_luy_ke_lay_dung_don_vi_minh_va_bo_qua_ban_nhap(client, db):
         "status": "bo_qua", "expected": None, "message": "Chưa đủ số để kiểm tra liên tục"}
 
 
+# --- task-11-carry.md C1: view v_report_value_computed tính đúng cho báo cáo
+# MỚI (0 dòng report_value) --------------------------------------------------
+
+def test_bao_cao_moi_0_report_value_van_tinh_dung_luy_ke_sum(client, db):
+    """`v_report_value_computed` (migration 0002) bắt đầu CTE `ctx` từ
+    `report_value`, nên báo cáo vừa tạo (0 dòng report_value) không sinh dòng
+    nào cho 48 chỉ tiêu `sum` — GET /reports/{id} trả `acc_prev_computed =
+    None` dù kỳ trước đã duyệt có số thật (probe controller: P05 kỳ 2026-09).
+    Migration 0003 sửa `ctx` bắt đầu từ report × indicator rồi LEFT JOIN
+    report_value.
+
+    Số liệu B-1.1 (sum) của P05 theo full_synthetic.csv (org_idx=22, ind_idx=1,
+    xem tests/fixtures/gen_fixture.py::_delta): kỳ 06 duyệt this=4.00, kỳ 07
+    duyệt this=5.00, kỳ 08 NHÁP (seed/__init__.py::_nhap_don_vi_22, không cộng
+    vào tổng) this=1.00 → acc_prev của báo cáo MỚI kỳ 09 phải là 9.00 (4+5),
+    không phải None; kỳ 08 rơi vào missing_periods vì không có báo cáo ĐƯỢC
+    DUYỆT cho kỳ đó."""
+    seed_all(db)
+    h = dang_nhap(client, "u22@ptsc.local")  # u22 → P05, đơn vị thứ 22
+    tao = client.post("/api/v1/reports",
+                      json={"template": "FM01", "period_key": "2026-09"}, headers=h)
+    assert tao.status_code == 201, tao.text
+    r = client.get(f"/api/v1/reports/{tao.json()['id']}", headers=h).json()
+    assert r["header"]["org_unit"]["code"] == "P05"
+    o = next(v for v in r["values"] if v["indicator_code"] == "B-1.1")
+    assert o["acc_prev_computed"] == 9.0
+    assert o["acc_total_computed"] == 9.0
+    assert o["this_period"] is None
+    assert r["missing_periods"] == ["2026-08"]
+
+
 def test_counter_bo_qua_ky_chua_duyet_va_bao_lech_kem_huong_dan(client, db):
     """C-2 (nhánh còn lại) + MI-3. U01 kỳ 2026-07 bị trả về nháp: lũy kế của
     B-1.5 ở kỳ 08 phải lùi về kỳ 06 (1.00), không lấy 3.00 của kỳ 07 chưa
