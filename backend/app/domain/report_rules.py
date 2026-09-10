@@ -64,6 +64,17 @@ def editable_columns(agg_type: str) -> set[str]:
     return COT_NHAP_DUOC.get(agg_type, set())
 
 
+# `report_value` khai `Numeric(18,2)`: Postgres từ chối |giá trị| >= 10^16 bằng
+# NumericValueOutOfRange, một exception không ai bắt → 500 trần, vi phạm ràng
+# buộc "mọi câu lỗi là tiếng Việt". Chặn ở tầng quy tắc để người nhập dán nhầm
+# một ô Excel dạng mũ nhận 400 có câu chỉ dẫn, không phải màn hình trắng.
+GIOI_HAN_DO_LON = Decimal(10) ** 16
+
+
+def qua_lon(v: Decimal) -> bool:
+    return abs(v) >= GIOI_HAN_DO_LON
+
+
 def qua_thap_phan(v: Decimal, decimals: int) -> bool:
     """Số chữ số thập phân THỰC SỰ của `v` (sau khi bỏ số 0 thừa ở cuối) có
     vượt `decimals` khai báo của chỉ tiêu hay không.
@@ -85,12 +96,23 @@ def qua_thap_phan(v: Decimal, decimals: int) -> bool:
 
 
 def validate_values(
-    catalog: list[IndicatorSpec], values: dict[str, CellValues]
+    catalog: list[IndicatorSpec],
+    values: dict[str, CellValues],
+    *,
+    kiem_bat_buoc: bool = True,
 ) -> list[FieldError]:
     """Kiểm payload MỘT PHẦN của PUT /reports/{id}/values (spec D23).
 
     Chỉ kiểm những mã CÓ trong `values`. Mã không gửi lên nghĩa là ô không đổi,
     không phải ô thiếu — nên không bao giờ sinh lỗi "bắt buộc" cho mã vắng mặt.
+
+    `kiem_bat_buoc=False` bỏ luôn vòng "ô bắt buộc" cho những mã CÓ trong
+    payload — đường ghi (`ghi_gia_tri`) phải truyền False. Lý do: granularity
+    của D23 là Ô, không phải DÒNG. Sửa mỗi Ghi chú của một dòng `sum` đã có số,
+    hay mỗi cột "Tháng này" của một dòng `counter`, là payload hợp lệ và là
+    thao tác thường nhất trên form; kiểm "bắt buộc" ở đó bắt lỗi ô mà người
+    dùng KHÔNG gửi và cũng không hề xoá, nên luôn sai. Phép kiểm thiếu ô bắt
+    buộc thuộc về lúc NỘP, trên toàn bộ ô đang lưu.
 
     KHÔNG dùng hàm này cho phép kiểm "thiếu ô bắt buộc lúc nộp" (spec dòng 257):
     lúc nộp phải kiểm TOÀN BỘ ô đang lưu của báo cáo, mà hàm này không nhìn thấy
@@ -115,14 +137,23 @@ def validate_values(
             if v < 0:
                 loi.append(FieldError(ma, "Số không được âm"))
                 break
+            # Trước qua_thap_phan, không phải sau: `Decimal("1e30").normalize()`
+            # ra dạng mũ và exponent của Infinity là chữ "F" — đếm thập phân
+            # trên số quá lớn không có nghĩa, còn ca Infinity thì nổ TypeError.
+            if qua_lon(v):
+                loi.append(FieldError(ma, "Số quá lớn, tối đa 16 chữ số phần nguyên"))
+                break
             if qua_thap_phan(v, spec.decimals):
                 loi.append(FieldError(
                     ma, f"Chỉ nhận tối đa {spec.decimals} chữ số thập phân"))
                 break
 
-    # Mã đã bị báo lỗi ở vòng trên (sai cột / âm / quá thập phân) thì bỏ qua ở
-    # vòng bắt buộc dưới đây — một ô chỉ báo lỗi cụ thể nhất, không chồng thêm
-    # lỗi "bắt buộc" lên trên lỗi đã có cho cùng một mã.
+    if not kiem_bat_buoc:
+        return loi
+
+    # Mã đã bị báo lỗi ở vòng trên (sai cột / âm / quá lớn / quá thập phân) thì
+    # bỏ qua ở vòng bắt buộc dưới đây — một ô chỉ báo lỗi cụ thể nhất, không
+    # chồng thêm lỗi "bắt buộc" lên trên lỗi đã có cho cùng một mã.
     ma_da_loi = {e.indicator_code for e in loi}
     for ma, o in values.items():
         if ma in ma_da_loi:

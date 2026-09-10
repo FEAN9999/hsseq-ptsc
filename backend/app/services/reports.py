@@ -27,6 +27,7 @@ vượt ngân sách — xem task-10-report.md mục "khác brief" để biết s
 `evaluate_computed`/`counter_check` (report_rules, Task 5) chạy trong Python
 trên kết quả query trên — không thêm query nào.
 """
+from collections import Counter
 from decimal import ROUND_HALF_UP, Decimal
 
 from sqlalchemy import ARRAY, Column, Integer, MetaData, Numeric, String, Table
@@ -35,7 +36,7 @@ from sqlalchemy.dialects.postgresql import aggregate_order_by
 from sqlalchemy.orm import Session, aliased
 
 from app.core.errors import ConflictError, ForbiddenError, NotFoundError, ValidationError
-from app.domain.report_rules import CellValues, IndicatorSpec, validate_values
+from app.domain.report_rules import CellValues, IndicatorSpec, qua_lon, validate_values
 from app.domain.report_rules import counter_check as tinh_counter_check
 from app.domain.report_rules import evaluate_computed
 from app.models import (
@@ -340,21 +341,29 @@ def liet_ke_bao_cao(
     return ket_qua
 
 
-def upsert(db: Session, model, **khoa):
-    """get-or-create theo đúng bộ khoá `khoa` — dùng cho `ReportValue` theo
-    UNIQUE(report_id, indicator_id). KHÔNG cập nhật gì nếu đã có, để nguyên
-    cho lời gọi sau tự set field cần đổi."""
-    row = db.query(model).filter_by(**khoa).one_or_none()
-    if row is None:
-        row = model(**khoa)
-        db.add(row)
-    return row
-
-
 def _lam_tron(v: Decimal, q: Decimal) -> Decimal:
     """`v.quantize(q, ROUND_HALF_UP)` — KHÔNG dùng `round()` của Python
     (banker's rounding: 12.345 → 12.34, sai với kỳ vọng người nhập số)."""
     return v.quantize(q, rounding=ROUND_HALF_UP)
+
+
+def _lam_tron_an_toan(v: Decimal | None, q: Decimal) -> Decimal | None:
+    """Làm tròn, TRỪ giá trị mà `validate_values` sắp từ chối vì dấu hoặc độ lớn.
+
+    Quantize chạy TRƯỚC validate (xem `ghi_gia_tri`) nên nó không được làm sai
+    lệch hai phép kiểm đó:
+      - `Decimal("-0.4").quantize(Decimal("1"))` ra `Decimal("-0")`, mà
+        `Decimal("-0") < 0` là False → số âm lọt qua kiểm, lưu thành 0 trong
+        im lặng; người nhập không nhận lỗi nào và ô cũng không sáng đỏ.
+      - `Decimal("1e30").quantize(Decimal("1"))` ném `InvalidOperation` (vượt
+        precision 28 của context decimal) → 500 trần thay vì 400 tiếng Việt.
+    Trả nguyên giá trị GỐC cho hai ca đó để `validate_values` thấy đúng thứ nó
+    cần thấy. Luật thập phân giữ nguyên chủ ý cũ (quantize trước, spec dòng 231
+    bắt server làm tròn): 12.345 với decimals=0 vẫn lưu thành 12, không bị 400.
+    """
+    if v is None or v < 0 or qua_lon(v):
+        return v
+    return _lam_tron(v, q)
 
 
 def doc_gia_tri(db: Session, report_id: int) -> list[ReportValueOut]:
@@ -376,7 +385,8 @@ def ghi_gia_tri(
     `FOR UPDATE` rồi mới so `version`, tránh mất-cập-nhật khi hai request ghi
     cùng lúc. Thứ tự kiểm: không tồn tại (404) → trạng thái không cho sửa
     (403) → version lệch (409, kèm version + values HIỆN TẠI để FE vá lại
-    form) → dữ liệu không hợp lệ theo report_rules (400) → ghi.
+    form) → mã chỉ tiêu lặp trong payload (400) → dữ liệu không hợp lệ theo
+    report_rules (400) → ghi.
 
     `report.state` không có quan hệ ORM (chỉ có `state_id`) nên đọc
     `WorkflowState` bằng một query riêng, không khoá FOR UPDATE — đó là bảng
@@ -396,6 +406,20 @@ def ghi_gia_tri(
         raise ConflictError(
             "Người khác vừa sửa báo cáo này",
             state=trang_thai.code, version=r.version, values=doc_gia_tri(db, r.id),
+        )
+
+    # Một mã hai lần trong CÙNG payload: session để `autoflush=False` nên lượt
+    # get-or-create thứ hai không thấy dòng đang pending → thêm dòng thứ hai →
+    # UNIQUE(report_id, indicator_id) nổ thành 500 lúc flush (chỉ với báo cáo
+    # mới tạo, tức đúng đường demo). Trả 400 tiếng Việt kèm `errors` để FE tô
+    # đúng ô, thay vì tự gộp hai mục — "gộp" là ngữ nghĩa mới cho hợp đồng
+    # D23 ("payload là ô đã đổi"), không phải chuyện sửa lỗi ở vòng này.
+    lap = [ma for ma, n in Counter(v.indicator_code for v in values).items() if n > 1]
+    if lap:
+        raise ValidationError(
+            "Dữ liệu không hợp lệ",
+            errors=[{"indicator_code": ma,
+                     "message": "Mã chỉ tiêu bị lặp trong cùng một payload"} for ma in lap],
         )
 
     chi_tieu = db.query(Indicator).filter_by(template_id=r.template_id, active=True).all()
@@ -422,23 +446,38 @@ def ghi_gia_tri(
             continue
         q = Decimal(10) ** -ind.decimals
         da_lam_tron[v.indicator_code] = CellValues(
-            this_period=_lam_tron(v.this_period, q) if v.this_period is not None else None,
-            acc_total_entered=(
-                _lam_tron(v.acc_total_entered, q) if v.acc_total_entered is not None else None
-            ),
+            this_period=_lam_tron_an_toan(v.this_period, q),
+            acc_total_entered=_lam_tron_an_toan(v.acc_total_entered, q),
         )
 
-    loi = validate_values(catalog, da_lam_tron)
+    # `kiem_bat_buoc=False`: granularity của D23 là Ô, không phải DÒNG — xem
+    # docstring `validate_values`. Kiểm ô bắt buộc là việc của lúc NỘP.
+    loi = validate_values(catalog, da_lam_tron, kiem_bat_buoc=False)
     if loi:
         raise ValidationError(
             "Dữ liệu không hợp lệ",
             errors=[{"indicator_code": e.indicator_code, "message": e.message} for e in loi],
         )
 
+    # Nạp trước các dòng đang có bằng MỘT query thay vì một query mỗi ô (Ctrl+S
+    # sau khi điền cả form ~53 ô là 59 round-trip với bản cũ; đích chạy là
+    # Render free + pooler Supabase).
+    id_chi_tieu = [theo_ma[v.indicator_code].id for v in values]
+    dong_theo_chi_tieu = {
+        row.indicator_id: row
+        for row in db.query(ReportValue).filter(
+            ReportValue.report_id == r.id, ReportValue.indicator_id.in_(id_chi_tieu)
+        ).all()
+    } if id_chi_tieu else {}
+
     for v in values:                       # CHỈ ô được gửi — payload một phần
         ind = theo_ma[v.indicator_code]
         gia_tri = da_lam_tron[v.indicator_code]
-        row = upsert(db, ReportValue, report_id=r.id, indicator_id=ind.id)
+        row = dong_theo_chi_tieu.get(ind.id)
+        if row is None:
+            row = ReportValue(report_id=r.id, indicator_id=ind.id)
+            db.add(row)
+            dong_theo_chi_tieu[ind.id] = row
         if ind.agg_type == "sum":
             if gia_tri.this_period is not None:
                 row.this_period = gia_tri.this_period

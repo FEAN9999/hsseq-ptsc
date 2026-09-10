@@ -170,3 +170,43 @@ def test_11_ky_da_duyet_nhung_bo_trong_o_thi_khong_bao_thieu(db):
     row = doc_view(db, r8.id, bk["ind"].id)
     assert row.acc_prev_computed == Decimal("100")
     assert row.missing_periods == []
+
+
+def test_12_bao_cao_moi_chua_co_o_nao_van_lay_dung_so_du_dau_ky(db):
+    """Nhánh MỚI của migration 0003 (`rv` trở thành nullable trong CTE `ctx`).
+
+    Dòng số dư đầu kỳ phải khớp `o2.indicator_id = i.id`, KHÔNG phải
+    `= rv.indicator_id`: với báo cáo chưa có ô nào thì `rv.indicator_id` là
+    NULL, LATERAL không khớp dòng số dư nào, `ob_start` rơi về NULL và
+    `acc_prev` cộng lại toàn bộ lịch sử từ '-infinity'.
+
+    Fixture không lộ ra: cả 1144 dòng `opening_balance` đều ở kỳ đầu (2026-06)
+    với `value = 0.00`, nên bỏ số dư đi cũng ra cùng con số. Phải có số dư
+    GIỮA năm khác 0 thì hai đường mới tách ra:
+      đúng = 1000 (số dư kỳ 08) + 5 (kỳ 08 đã duyệt)        = 1005
+      sai  = 3 (kỳ 06) + 4 (kỳ 07) + 5 (kỳ 08), bỏ số dư    = 12
+    Người dùng thấy: bấm "Tạo báo cáo" kỳ mới, cột "Lũy kế tháng trước" hiện
+    12 thay vì 1005 ngay lần vẽ đầu tiên — đúng con số mà C1 sinh ra để sửa.
+    """
+    from app.models import OpeningBalance, Report
+
+    bk = dung_bo_khung(db)
+    them_bao_cao(db, bk, "2026-06", 3)
+    them_bao_cao(db, bk, "2026-07", 4)
+    them_bao_cao(db, bk, "2026-08", 5)
+    db.add(OpeningBalance(org_unit_id=bk["org"].id, indicator_id=bk["ind"].id,
+                          period_id=bk["ky"]["2026-08"].id, value=Decimal("1000"),
+                          source="fixture"))
+    db.flush()
+
+    r9 = Report(template_id=bk["tpl"].id, org_unit_id=bk["org"].id,
+                period_id=bk["ky"]["2026-09"].id, state_id=bk["draft"].id,
+                version=1, source="live")
+    db.add(r9); db.flush()
+
+    assert dem_dong_view(db, r9.id, bk["ind"].id) == 1, \
+        "báo cáo 0 dòng report_value vẫn phải có dòng trong view (chính là C1)"
+    row = doc_view(db, r9.id, bk["ind"].id)
+    assert row.acc_prev_computed == Decimal("1005")
+    assert row.acc_total_computed == Decimal("1005")
+    assert row.missing_periods == []
