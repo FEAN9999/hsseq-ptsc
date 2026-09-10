@@ -20,14 +20,10 @@ def dang_nhap(client, email, mk="Demo@2026"):
 # GET /reports/{id} (xem task-10-brief.md mục Produces và
 # docs/superpowers/plans/2026-09-09-hseq-mvp-fm01.md, bảng "Cặp task dùng
 # chung file": "10 tạo, 11 thêm PUT, 12 thêm transition; không sửa chồng").
-# Task 11 mount thêm PUT /reports/{id}/values (test ngay dưới đã gỡ marker,
-# xanh thật). POST /reports/{id}/transition vẫn CHƯA tồn tại tới Task 12 —
-# xfail còn lại đụng đúng route đó nên vẫn giữ.
-_XFAIL_CHO_TASK_12 = pytest.mark.xfail(
-    reason="Task 10/11 chỉ mount GET/POST /reports + GET /reports/{id} + "
-           "PUT /reports/{id}/values; POST .../transition do Task 12 thêm — gỡ khi đó.",
-    strict=True,
-)
+# Task 11 mount thêm PUT /reports/{id}/values, Task 12 mount thêm
+# POST /reports/{id}/transition (task-12-carry.md D3) — cả hai route
+# test_viewer_khong_sua_duoc_gi đụng tới giờ đã tồn tại, xfail cuối cùng của
+# file này đã gỡ, chạy xanh thật.
 
 
 def test_reporter_khong_doc_duoc_bao_cao_don_vi_khac(client, sanh):
@@ -60,7 +56,6 @@ def test_reporter_scope_NULL_bi_tu_choi_chu_khong_thanh_toan_quyen(client, sanh)
     assert client.get("/api/v1/reports", headers=h).status_code == 403
 
 
-@_XFAIL_CHO_TASK_12
 def test_viewer_khong_sua_duoc_gi(client, sanh):
     h = dang_nhap(client, "viewer@ptsc.local")
     from app.models import Report

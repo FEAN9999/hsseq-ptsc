@@ -198,6 +198,26 @@ def test_get_template_chuyen_trang_thai_so_tung_dong_khong_so_tap_hop(client, db
     ])
 
 
+# task-12-carry.md D2: thêm order_by cho transitions vì FE vẽ nút hành động thẳng
+# theo danh sách này — thứ tự TRỞ THÀNH hợp đồng từ đây, khoá bằng một test MỚI,
+# không sửa test so-tập-hợp-rồi-tự-sắp ở trên (đúng cách viết khi thứ tự chưa phải
+# hợp đồng — vẫn còn giá trị, không xoá).
+def test_get_template_chuyen_trang_thai_dung_thu_tu_khong_ngau_nhien(client, db):
+    """Thứ tự đúng theo `WorkflowTransition.id` (thứ tự `TRANSITIONS` trong
+    `app/seed/__init__.py`) — không sắp lại ở test, để lộ nếu ai bỏ `order_by`
+    khỏi `chi_tiet_mau` (Postgres không cam kết thứ tự không `ORDER BY`)."""
+    _seed_khung(db)
+    h = dang_nhap(client, "admin@ptsc.local")
+    t = client.get("/api/v1/templates/FM01", headers=h).json()
+    assert [(x["action_code"], x["from_state"], x["to_state"]) for x in t["transitions"]] == [
+        ("submit", "draft", "submitted"),
+        ("submit", "returned", "submitted"),
+        ("return", "submitted", "returned"),
+        ("approve", "submitted", "approved"),
+        ("reopen", "approved", "returned"),
+    ]
+
+
 def test_get_org_units_tra_cay_theo_parent_id_va_giu_is_reporting(client, db):
     """MI-5: `GET /org-units` (cây) chưa có một test nào. Seed chưa gán
     `parent_id` nên cây tạm thời phẳng — tự gán ở đây để cây có thật một tầng,

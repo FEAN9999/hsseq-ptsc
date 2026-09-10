@@ -1,4 +1,5 @@
 # backend/app/api/reports.py
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from fastapi import APIRouter, Depends
@@ -6,7 +7,16 @@ from fastapi import APIRouter, Depends
 from app.api.deps import CurrentUser, current_user, pham_vi_bao_cao, require_permission
 from app.core.db import get_db
 from app.core.errors import ConflictError, ForbiddenError, NotFoundError, ValidationError
-from app.models import OrgUnit, Report, ReportingPeriod, ReportTemplate, WorkflowState
+from app.models import (
+    AuditLog,
+    OrgUnit,
+    Permission,
+    Report,
+    ReportingPeriod,
+    ReportTemplate,
+    WorkflowState,
+    WorkflowTransition,
+)
 from app.schemas.report import (
     CreateReportIn,
     CreateReportOut,
@@ -16,6 +26,7 @@ from app.schemas.report import (
     ReportListItem,
 )
 from app.services.reports import ghi_gia_tri, lay_chi_tiet_bao_cao, liet_ke_bao_cao
+from app.services.workflow import apply_transition
 
 router = APIRouter(prefix="/reports")
 
@@ -138,3 +149,97 @@ def ghi_gia_tri_bao_cao(
 ):
     version, values = ghi_gia_tri(db, r.id, payload.version, payload.values, actor=u)
     return PutValuesOut(version=version, values=values)
+
+
+class TransitionIn(BaseModel):
+    action: str
+    expected_state: str
+    version: int
+    note: str | None = None
+
+
+class TransitionOut(BaseModel):
+    state: str
+    version: int
+
+
+def _kiem_quyen_chuyen_trang_thai(
+    report_id: int,
+    u: CurrentUser = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> CurrentUser:
+    """Dependency kiểm quyền THÔ + phạm vi cho `POST /{report_id}/transition` — PHẢI
+    chạy như dependency, không gọi trong thân hàm route: route này nhận body bắt
+    buộc (`TransitionIn`), và FastAPI chỉ validate body SAU KHI đã chạy xong vòng
+    dependency (`solve_dependencies`) — bẫy 422-thắng-403 y hệt `_pham_vi`/
+    `_kiem_quyen_ghi` ở trên.
+
+    Khác `_kiem_quyen_ghi` (một quyền cố định `report.edit`): quyền cần cho
+    transition phụ thuộc `action` — mà `action` nằm TRONG thân request, chưa đọc
+    được ở tầng dependency. Nên ở đây chỉ kiểm quyền THÔ ("có ít nhất một quyền
+    chuyển-trạng-thái nào đó của MẪU này không" — lấy từ chính
+    `workflow_transition`, không hardcode "report.submit/return/approve" cho một
+    mẫu cụ thể) + phạm vi đơn vị; quyền CHÍNH XÁC cho đúng `action` do
+    `apply_transition` (app/services/workflow.py) tự kiểm lại bằng
+    `kiem_quyen_trong_pham_vi`, sau khi đã có thân request."""
+    r = db.query(Report).filter_by(id=report_id).one_or_none()
+    if r is None:
+        raise NotFoundError("Không tìm thấy báo cáo")
+    quyen_lien_quan = {
+        ma for (ma,) in (
+            db.query(Permission.code)
+            .join(WorkflowTransition, WorkflowTransition.required_permission_id == Permission.id)
+            .filter(WorkflowTransition.template_id == r.template_id)
+            .distinct()
+        )
+    }
+    if u.permissions.isdisjoint(quyen_lien_quan):
+        raise ForbiddenError("Bạn không có quyền chuyển trạng thái báo cáo này")
+    pham_vi = pham_vi_bao_cao(u)
+    if pham_vi is not None and r.org_unit_id not in pham_vi:
+        raise ForbiddenError("Bạn không có quyền chuyển trạng thái báo cáo của đơn vị này")
+    return u
+
+
+@router.post("/{report_id}/transition", response_model=TransitionOut)
+def chuyen_trang_thai_bao_cao(
+    report_id: int,
+    payload: TransitionIn,
+    u: CurrentUser = Depends(_kiem_quyen_chuyen_trang_thai),
+    db: Session = Depends(get_db),
+):
+    r = apply_transition(db, report_id, payload.action, payload.note,
+                         payload.expected_state, payload.version, actor=u)
+    ma_trang_thai = db.query(WorkflowState.code).filter_by(id=r.state_id).scalar()
+    return TransitionOut(state=ma_trang_thai, version=r.version)
+
+
+@router.get("/{report_id}/history")
+def lich_su_bao_cao(
+    report_id: int,
+    u: CurrentUser = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    """Lịch sử chuyển trạng thái — cùng hợp đồng phạm vi với `GET /{report_id}`
+    (đơn vị của mình cho reporter, toàn bộ cho viewer/admin): người nhập phải tự
+    xem lại lịch sử báo cáo của chính mình, không chỉ Ban ATCL, nên KHÔNG đòi
+    `audit.view` (chỉ admin_atcl có quyền đó) — dùng `pham_vi_bao_cao` như trang
+    xem báo cáo."""
+    pham_vi = pham_vi_bao_cao(u)
+    r = db.query(Report).filter_by(id=report_id).one_or_none()
+    if r is None:
+        raise NotFoundError("Không tìm thấy báo cáo")
+    if pham_vi is not None and r.org_unit_id not in pham_vi:
+        raise ForbiddenError("Bạn không có quyền xem báo cáo của đơn vị này")
+
+    ds = (
+        db.query(AuditLog)
+        .filter_by(entity="report", entity_id=report_id)
+        .order_by(AuditLog.created_at.desc(), AuditLog.id.desc())
+        .all()
+    )
+    return [
+        {"id": a.id, "action": a.action, "actor_id": a.actor_id,
+         "before": a.before_json, "after": a.after_json, "created_at": a.created_at}
+        for a in ds
+    ]

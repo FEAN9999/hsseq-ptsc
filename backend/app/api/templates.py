@@ -64,12 +64,16 @@ def chi_tiet_mau(code: str, u: CurrentUser = Depends(yeu_cau_xem_bao_cao),
     )
     TU = aliased(WorkflowState)
     DEN = aliased(WorkflowState)
+    # order_by ổn định (task-12-carry.md D2): thiếu nó Postgres trả thứ tự tuỳ ý,
+    # mà FE vẽ nút "Nộp / Trả lại / Duyệt" thẳng theo danh sách này nên thứ tự nút
+    # có thể xáo giữa các lần tải trang.
     transitions = (
         db.query(WorkflowTransition, TU, DEN, Permission)
         .join(TU, TU.id == WorkflowTransition.from_state_id)
         .join(DEN, DEN.id == WorkflowTransition.to_state_id)
         .join(Permission, Permission.id == WorkflowTransition.required_permission_id)
         .filter(WorkflowTransition.template_id == tpl.id)
+        .order_by(WorkflowTransition.id)
         .all()
     )
 
