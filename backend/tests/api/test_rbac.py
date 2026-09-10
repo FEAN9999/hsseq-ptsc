@@ -16,13 +16,28 @@ def dang_nhap(client, email, mk="Demo@2026"):
     return {"Authorization": f"Bearer {r.json()['access_token']}"}
 
 
-_XFAIL_CHO_TASK_10 = pytest.mark.xfail(
-    reason="Task 8: router /reports chưa mount (404 thay vì 403/401) — gỡ khi Task 10 Step 6 mount xong.",
+# Task 10 mount /reports nhưng CHỈ 3 route: GET /reports, POST /reports,
+# GET /reports/{id} (xem task-10-brief.md mục Produces và
+# docs/superpowers/plans/2026-09-09-hseq-mvp-fm01.md, bảng "Cặp task dùng
+# chung file": "10 tạo, 11 thêm PUT, 12 thêm transition; không sửa chồng").
+# PUT /reports/{id}/values và POST /reports/{id}/transition KHÔNG tồn tại
+# cho tới Task 11/12 — 2 trong 5 xfail dưới đây đụng đúng hai route đó nên
+# vẫn xfail (lý do cập nhật, marker Task 8 nói "chờ Task 10 Step 6" đã cũ vì
+# viết trước khi biết PUT/transition bị tách sang task khác); 3 xfail còn lại
+# đụng route Task 10 thật sự mount nên gỡ marker ở đây.
+_XFAIL_CHO_TASK_11 = pytest.mark.xfail(
+    reason="Task 10 chỉ mount GET/POST /reports + GET /reports/{id}; "
+           "PUT /reports/{id}/values do Task 11 thêm — gỡ khi đó.",
+    strict=True,
+)
+_XFAIL_CHO_TASK_11_VA_12 = pytest.mark.xfail(
+    reason="Task 10 chỉ mount GET/POST /reports + GET /reports/{id}; "
+           "PUT /reports/{id}/values (Task 11) và POST .../transition (Task 12) "
+           "chưa tồn tại — gỡ khi cả hai đã mount.",
     strict=True,
 )
 
 
-@_XFAIL_CHO_TASK_10
 def test_reporter_khong_doc_duoc_bao_cao_don_vi_khac(client, sanh):
     h = dang_nhap(client, "u01@ptsc.local")
     from app.models import OrgUnit, Report
@@ -31,7 +46,7 @@ def test_reporter_khong_doc_duoc_bao_cao_don_vi_khac(client, sanh):
     assert client.get(f"/api/v1/reports/{bc.id}", headers=h).status_code == 403
 
 
-@_XFAIL_CHO_TASK_10
+@_XFAIL_CHO_TASK_11
 def test_reporter_khong_ghi_duoc_bao_cao_don_vi_khac(client, sanh):
     h = dang_nhap(client, "u01@ptsc.local")
     from app.models import OrgUnit, Report
@@ -42,7 +57,6 @@ def test_reporter_khong_ghi_duoc_bao_cao_don_vi_khac(client, sanh):
     assert r.status_code == 403
 
 
-@_XFAIL_CHO_TASK_10
 def test_reporter_scope_NULL_bi_tu_choi_chu_khong_thanh_toan_quyen(client, sanh):
     """Critical gap: scope NULL với reporter KHÔNG bao giờ hiểu là 'mọi đơn vị'."""
     from app.models import AppUser, Role, UserRole
@@ -55,7 +69,7 @@ def test_reporter_scope_NULL_bi_tu_choi_chu_khong_thanh_toan_quyen(client, sanh)
     assert client.get("/api/v1/reports", headers=h).status_code == 403
 
 
-@_XFAIL_CHO_TASK_10
+@_XFAIL_CHO_TASK_11_VA_12
 def test_viewer_khong_sua_duoc_gi(client, sanh):
     h = dang_nhap(client, "viewer@ptsc.local")
     from app.models import Report
@@ -67,7 +81,6 @@ def test_viewer_khong_sua_duoc_gi(client, sanh):
                              "version": 1}, headers=h).status_code == 403
 
 
-@_XFAIL_CHO_TASK_10
 def test_khong_token_thi_401_khong_phai_403(client, sanh):
     assert client.get("/api/v1/reports").status_code == 401
 

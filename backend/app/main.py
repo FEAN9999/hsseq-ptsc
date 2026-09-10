@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import auth, health
+from app.api import auth, health, org, reports, templates
 from app.core.config import settings
 from app.core.errors import dang_ky_handler
 
@@ -16,3 +16,6 @@ app.add_middleware(
 )
 app.include_router(health.router, prefix="/api/v1")
 app.include_router(auth.router, prefix="/api/v1")
+app.include_router(reports.router, prefix="/api/v1")
+app.include_router(templates.router, prefix="/api/v1")
+app.include_router(org.router, prefix="/api/v1")
