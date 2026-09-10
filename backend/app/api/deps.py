@@ -117,6 +117,21 @@ def require_permission(code: str):
     return _kiem
 
 
+def yeu_cau_xem_bao_cao(u: CurrentUser = Depends(current_user)) -> CurrentUser:
+    """Dependency cho các endpoint DANH MỤC (`/templates/*`, `/org-units*`).
+
+    Danh mục không trả số báo cáo nên không cần lọc phạm vi, nhưng vẫn phải
+    đòi một quyền THẬT — chỉ `Depends(current_user)` là fail OPEN: người phụ
+    trách bị thu hồi hết vai vẫn tải được sơ đồ 35 đơn vị và danh mục 53 chỉ
+    tiêu trong suốt 12 giờ token còn hạn. Dùng lại `pham_vi_bao_cao` (không
+    dùng kết quả) để danh mục fail closed đúng cùng một lúc, cùng một câu lỗi
+    với `/reports` — cả ba vai reporter/viewer/admin đều qua được vì vai nào
+    cũng có `report.view_own_unit` hoặc `report.view_all`.
+    """
+    pham_vi_bao_cao(u)
+    return u
+
+
 def pham_vi_bao_cao(u: CurrentUser) -> set[int] | None:
     """Những đơn vị mà người dùng này được đụng tới báo cáo.
 

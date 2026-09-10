@@ -1,12 +1,13 @@
 # backend/app/api/templates.py
 """Danh mục mẫu báo cáo — chỉ đọc (MVP). `PUT`/`POST` cho `template.manage`
-là giai đoạn 2. Không cần quyền riêng ngoài đăng nhập: mọi vai (reporter,
-viewer, admin) đều cần đọc danh mục để dựng form/bộ lọc.
+là giai đoạn 2. Mọi vai (reporter, viewer, admin) đều cần đọc danh mục để
+dựng form/bộ lọc, nhưng vẫn phải còn quyền xem báo cáo — xem
+`deps.yeu_cau_xem_bao_cao`.
 """
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session, aliased
 
-from app.api.deps import CurrentUser, current_user
+from app.api.deps import CurrentUser, yeu_cau_xem_bao_cao
 from app.core.db import get_db
 from app.core.errors import NotFoundError
 from app.models import (
@@ -24,7 +25,7 @@ router = APIRouter(prefix="/templates")
 
 
 @router.get("")
-def ds_mau(u: CurrentUser = Depends(current_user), db: Session = Depends(get_db)):
+def ds_mau(u: CurrentUser = Depends(yeu_cau_xem_bao_cao), db: Session = Depends(get_db)):
     ds = db.query(ReportTemplate).order_by(ReportTemplate.code).all()
     return [
         {"code": t.code, "name_vi": t.name_vi, "name_en": t.name_en,
@@ -34,7 +35,8 @@ def ds_mau(u: CurrentUser = Depends(current_user), db: Session = Depends(get_db)
 
 
 @router.get("/{code}")
-def chi_tiet_mau(code: str, u: CurrentUser = Depends(current_user), db: Session = Depends(get_db)):
+def chi_tiet_mau(code: str, u: CurrentUser = Depends(yeu_cau_xem_bao_cao),
+                 db: Session = Depends(get_db)):
     tpl = db.query(ReportTemplate).filter_by(code=code).one_or_none()
     if tpl is None:
         raise NotFoundError("Không tìm thấy mẫu báo cáo")
@@ -105,7 +107,8 @@ def chi_tiet_mau(code: str, u: CurrentUser = Depends(current_user), db: Session 
 
 
 @router.get("/{code}/periods")
-def ds_ky(code: str, u: CurrentUser = Depends(current_user), db: Session = Depends(get_db)):
+def ds_ky(code: str, u: CurrentUser = Depends(yeu_cau_xem_bao_cao),
+          db: Session = Depends(get_db)):
     tpl = db.query(ReportTemplate).filter_by(code=code).one_or_none()
     if tpl is None:
         raise NotFoundError("Không tìm thấy mẫu báo cáo")

@@ -29,6 +29,7 @@ trên kết quả query trên — không thêm query nào.
 """
 from sqlalchemy import ARRAY, Column, Integer, MetaData, Numeric, String, Table
 from sqlalchemy import and_, func, join, or_, outerjoin, select, true
+from sqlalchemy.dialects.postgresql import aggregate_order_by
 from sqlalchemy.orm import Session, aliased
 
 from app.domain.report_rules import counter_check as tinh_counter_check
@@ -42,6 +43,7 @@ from app.models import (
     ReportText,
     ReportValue,
     TemplateSection,
+    TemplateTextField,
     WorkflowState,
 )
 from app.schemas.report import (
@@ -107,6 +109,19 @@ def lay_chi_tiet_bao_cao(db: Session, report_id: int) -> tuple[int, ReportDetail
         .where(ReportText.report_id == Report.id)
         .scalar_subquery()
     )
+    # Hợp đồng với FE là `texts: {C1, C2, C3}` — ĐỦ CẢ BA khoá, kể cả trường
+    # chưa ai gõ. `json_object_agg` chỉ sinh khoá của trường ĐÃ có dòng trong
+    # report_text, nên báo cáo mới gõ C1 trả về `{"C1": ...}` thiếu hẳn C2/C3:
+    # textarea của FE chuyển từ controlled sang uncontrolled và mất nội dung
+    # đang gõ. Lấy danh sách mã trường chữ của chính mẫu này bằng một subquery
+    # tương quan nữa — vẫn nằm trong CÙNG câu SELECT, không tốn round-trip
+    # (ngân sách 2 query ở docstring module) — rồi điền None cho trường chưa ghi.
+    ma_truong_chu = (
+        select(func.array_agg(
+            aggregate_order_by(TemplateTextField.code, TemplateTextField.sort_order)))
+        .where(TemplateTextField.template_id == Report.template_id)
+        .scalar_subquery()
+    )
 
     stmt = (
         select(
@@ -125,6 +140,7 @@ def lay_chi_tiet_bao_cao(db: Session, report_id: int) -> tuple[int, ReportDetail
             ReportValue.acc_total_entered, ReportValue.note,
             prev_counter.label("prev_total_counter"),
             texts_json.label("texts_json"),
+            ma_truong_chu.label("ma_truong_chu"),
             V_REPORT_VALUE_COMPUTED.c.acc_prev_computed,
             V_REPORT_VALUE_COMPUTED.c.acc_total_computed,
             V_REPORT_VALUE_COMPUTED.c.missing_periods,
@@ -211,10 +227,13 @@ def lay_chi_tiet_bao_cao(db: Session, report_id: int) -> tuple[int, ReportDetail
         submitted_at=dau.submitted_at, decided_at=dau.decided_at,
         decision_note=dau.decision_note,
     )
+    texts: dict[str, str | None] = {ma: None for ma in (dau.ma_truong_chu or [])}
+    texts.update(dau.texts_json or {})
+
     chi_tiet = ReportDetailOut(
         id=dau.id, version=dau.version, state=dau.state_code, source=dau.source,
         is_late=dau.is_late, header=header, missing_periods=sorted(missing),
-        values=values, texts=(dau.texts_json or {}),
+        values=values, texts=texts,
     )
     return dau.org_unit_id, chi_tiet
 
