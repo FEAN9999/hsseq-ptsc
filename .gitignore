@@ -69,6 +69,13 @@ backend/scripts/seed_hoi_vien.py
 # dữ liệu cá nhân với tệp trên và cùng lý do phải nằm ngoài history.
 backend/scripts/anh_dai_dien/
 
+# Nguồn Excel của danh mục FM01. Danh mục đã được TRÍCH một lần sang
+# backend/app/seed/catalog_fm01.py (nguồn chân lý của code); file .xlsx chỉ
+# còn là tài liệu gốc để đối chiếu bằng mắt, không code nào và không test nào
+# đọc nó. Nặng, nhị phân, diff vô nghĩa — giữ ngoài history (plan Task 6 dòng
+# 44 đã tự chỉ định điều này).
+backend/app/seed/source/
+
 # Local secrets / certs
 *.pem
 *.key

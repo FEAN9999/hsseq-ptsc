@@ -10,7 +10,25 @@
                           returned ◀───────────────────────────────┘
                           editable; ghi chú admin hiện đầu form
 
-Không dùng thư viện state machine: trạng thái là dữ liệu, thêm FM02 không sửa code.
+Không dùng thư viện state machine: bảng trạng thái (`workflow_state`) và bảng
+chuyển trạng thái (`workflow_transition`) là DỮ LIỆU, nên mẫu thứ hai khai được
+bằng seed, không cần migration cũng không cần sửa module này.
+
+Nhưng nói "thêm FM02 không sửa code" là hứa quá: BỐN hành vi dưới đây khoá cứng
+vào mã action tiếng Anh `"submit"` và ba mã quyết định của
+`CAC_ACTION_QUYET_DINH` (`approve`/`return`/`reopen`):
+
+  - ghi `submitted_at` mỗi lượt nộp;
+  - chốt `first_submitted_at` và `is_late` ở lượt nộp ĐẦU;
+  - cổng "thiếu ô bắt buộc lúc nộp" (`_thieu_o_bat_buoc`);
+  - ghi `decided_at`/`decided_by`/`decision_note` ở lượt quyết định.
+
+Mẫu nào đặt `action_code` khác (ví dụ `"nop"` thay cho `"submit"`) vẫn chuyển
+trạng thái đúng, nhưng KHÔNG được ghi những cột trên và KHÔNG bị cổng ô bắt
+buộc chặn. Schema hiện không có cột nào trong `workflow_transition` mang ngữ
+nghĩa "dòng này là lượt nộp" / "dòng này là lượt quyết định", nên đây là giới
+hạn đã biết của MVP — ghi ra để không ai đọc docstring rồi tin nhầm, KHÔNG
+phải chỗ mời tổng quát hoá thêm.
 
 `apply_transition` là hàm TỰ CHỦ về phân quyền (nhận `actor: CurrentUser`, tự gọi
 `kiem_quyen_trong_pham_vi` bên trong) — khác `ghi_gia_tri` (Task 11), nơi phạm vi chỉ
@@ -159,8 +177,19 @@ def _snapshot(r: Report, ma_trang_thai: str) -> dict:
 
 def apply_transition(db, report_id: int, action: str, note: str | None,
                      expected_state: str, version: int, actor) -> Report:
+    # `.populate_existing()` KHÔNG phải trang trí: dependency kiểm quyền của route
+    # (`_kiem_quyen_chuyen_trang_thai`, app/api/reports.py) đã đọc `Report` này để
+    # lấy `org_unit_id`, và FastAPI cache `Depends(get_db)` theo request nên nó
+    # dùng CHUNG session với hàm này. Không có cờ đó, câu `FOR UPDATE` dưới đây
+    # trả lại chính đối tượng CŨ trong identity map và KHÔNG ghi đè thuộc tính
+    # bằng dòng vừa khoá — `r.version`/`r.state_id` là giá trị đọc TRƯỚC khi khoá,
+    # nên phép so (2) chạy trên bản cũ và khoá lạc quan mất hiệu lực hoàn toàn khi
+    # hai request chồng thời gian (hai người cùng quyết, hay double-click). Test
+    # khoá điều này là tests/test_khoa_lac_quan_tuong_tranh.py — phải đi vòng qua
+    # conftest (hai `SessionLocal()` riêng), test qua fixture `client` xanh cả khi
+    # bỏ cờ đi vì cả suite chỉ có MỘT session.
     r = (db.query(Report).filter_by(id=report_id)
-           .with_for_update().one_or_none())                       # (1) khoá dòng
+           .populate_existing().with_for_update().one_or_none())    # (1) khoá dòng
     if r is None:
         raise NotFoundError("Không tìm thấy báo cáo")
 
@@ -171,8 +200,25 @@ def apply_transition(db, report_id: int, action: str, note: str | None,
 
     tr = tim_transition(db, r.template_id, r.state_id, action)     # (3)
     if tr is None:
-        raise ConflictError(f"Không thể {action} từ trạng thái hiện tại",
-                            state=trang_thai_hien_tai.code, version=r.version)
+        # KHÔNG nhúng `action` vào câu lỗi: đó là chuỗi TỰ DO từ thân request
+        # (`TransitionIn.action`, app/api/reports.py), mã tiếng Anh, không đối
+        # chiếu danh mục — người dùng sẽ đọc "Không thể approve từ trạng thái
+        # hiện tại", nửa Anh nửa Việt, trái ràng buộc "mọi `detail` là tiếng
+        # Việt"; và câu lỗi cũng không được thành chỗ dội ngược chữ client gửi
+        # lên. Tên hiển thị lấy từ chính bảng chuyển trạng thái của MẪU này
+        # (`name_vi`) — tìm theo `action_code` bất kể `from_state_id`, vì dòng
+        # cho trạng thái hiện tại không tồn tại thì mới vào được nhánh này.
+        # Một `action_code` có thể có nhiều dòng ("submit" có "Nộp báo cáo" từ
+        # draft và "Nộp lại" từ returned) nên `order_by(id)` để câu lỗi không
+        # đổi giữa hai lần chạy. Mã hoàn toàn lạ thì không có tên nào để hiện —
+        # dùng câu chung, vẫn tiếng Việt.
+        ten = (db.query(WorkflowTransition.name_vi)
+                 .filter_by(template_id=r.template_id, action_code=action)
+                 .order_by(WorkflowTransition.id).limit(1).scalar())
+        raise ConflictError(
+            f'Không thể "{ten}" ở trạng thái hiện tại' if ten
+            else "Không thể thực hiện thao tác này ở trạng thái hiện tại",
+            state=trang_thai_hien_tai.code, version=r.version)
 
     kiem_quyen_trong_pham_vi(actor, tr.required_permission_code, r.org_unit_id)  # (4) 403
     if tr.requires_note and not (note or "").strip():

@@ -394,7 +394,15 @@ def ghi_gia_tri(
     CÙNG trạng thái (vd mọi báo cáo "draft"), một lỗi tương tranh thật chứ
     không phải giả định.
     """
-    r = db.query(Report).filter_by(id=report_id).with_for_update().one_or_none()
+    # `.populate_existing()`: cùng lỗi, cùng bản vá với `apply_transition`
+    # (app/services/workflow.py, xem comment dài ở đó). Dependency `_kiem_quyen_ghi`
+    # (app/api/reports.py) đã nạp `Report` này vào identity map của CHÍNH session
+    # này trước khi route chạy, nên thiếu cờ đó thì `FOR UPDATE` trả lại đối tượng
+    # CŨ và phép so `version` dưới đây so với bản đọc TRƯỚC khi khoá: hai `PUT`
+    # chồng thời gian (chính sách "lưu khi rời ô", D23) cùng nhận 200 và cái sau
+    # ghi đè số của cái trước, không ai nhận 409.
+    r = (db.query(Report).filter_by(id=report_id)
+         .populate_existing().with_for_update().one_or_none())
     if r is None:
         raise NotFoundError("Không tìm thấy báo cáo")
 

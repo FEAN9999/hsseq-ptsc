@@ -65,6 +65,7 @@ class _Dong:
     indicator_id: int
     agg_type: str
     decimals: int
+    required: bool
     this_period: Decimal
     acc_prev: Decimal
     acc_total: Decimal
@@ -93,6 +94,7 @@ def load_fixture(db, tpl, path: str | None = None) -> LoadResult:
 
     rows, loi, so_bo_qua = _doc_va_kiem(db, tpl, p)
     loi += _assert_luy_ke(rows)
+    loi += _assert_du_chi_tieu_bat_buoc(rows)
     if loi:
         raise FixtureError(loi)          # chưa ghi gì → không nạp nửa chừng
 
@@ -184,7 +186,7 @@ def _doc_va_kiem(db, tpl, p: Path) -> tuple[list[_Dong], list[str], int]:
                 so_dong=so_dong, org_code=org_code, org_id=org.id,
                 period_key=period_key, period_id=period.id, period_start=period.start_date,
                 indicator_code=indicator_code, indicator_id=ind.id, agg_type=ind.agg_type,
-                decimals=ind.decimals,
+                decimals=ind.decimals, required=ind.required,
                 this_period=this_period, acc_prev=acc_prev, acc_total=acc_total, note=note,
             ))
 
@@ -244,6 +246,42 @@ def _assert_luy_ke(rows: list[_Dong]) -> list[str]:
                     f"không khớp acc_total kỳ trước {truoc.period_key} ({truoc.acc_total})"
                 )
             truoc = d
+    return loi
+
+
+def _assert_du_chi_tieu_bat_buoc(rows: list[_Dong]) -> list[str]:
+    """Mỗi (đơn vị, kỳ) phải có ĐỦ mọi chỉ tiêu BẮT BUỘC mà file này khai.
+
+    Cổng "thiếu ô bắt buộc lúc nộp" (`app/services/workflow.py::_thieu_o_bat_buoc`)
+    đòi đủ 52/53 ô bắt buộc mới cho nộp. Loader thì trước đây không đòi gì: một
+    dòng bị bỏ TRỐNG HẲN (sheet nguồn không ghi dòng nào cho chỉ tiêu mà tháng
+    đó không có sự kiện) nạp im lặng — chỉ ô rỗng mới báo lỗi, vì `Decimal("")`
+    ném `InvalidOperation`. Fixture nạp sạch, dashboard hiện đúng, rồi đến lúc
+    ai đó bấm "Nộp" mới nhận 400 kèm danh sách chỉ tiêu. Assert này biến một lỗi
+    lúc DEMO thành một lỗi lúc NẠP.
+
+    Tập đối chiếu là "chỉ tiêu bắt buộc CÓ TRONG FILE NÀY", không phải toàn bộ
+    52 chỉ tiêu `required` của danh mục: cùng tinh thần file-tương-đối với phép
+    kiểm "số dư khởi đầu phải rơi vào kỳ đầu CỦA FIXTURE" ở `_doc_va_kiem`, và
+    là tập lớn nhất dùng được — các test loader cố ý nạp CSV một chỉ tiêu
+    (`tests/fixtures/mini_*.csv`) để khoá từng quy tắc một, đối chiếu thẳng với
+    danh mục sẽ từ chối hết. Hệ quả phải biết: file bỏ sót một chỉ tiêu ở MỌI
+    đơn vị và MỌI kỳ thì assert này KHÔNG thấy (không có gì để so lệch) — chỉ
+    lưới THƯA mới thấy, tức đúng kịch bản "sheet bỏ trống dòng" ở trên.
+    """
+    bat_buoc = {d.indicator_code for d in rows if d.required}
+    theo_bao_cao: dict[tuple[str, str], set[str]] = {}
+    for d in rows:
+        theo_bao_cao.setdefault((d.org_code, d.period_key), set()).add(d.indicator_code)
+
+    loi: list[str] = []
+    for (org_code, period_key), co in sorted(theo_bao_cao.items()):
+        thieu = sorted(bat_buoc - co)
+        if thieu:
+            loi.append(
+                f"{org_code},{period_key}: thiếu {len(thieu)} chỉ tiêu bắt buộc "
+                f"(file có ở (đơn vị, kỳ) khác): {', '.join(thieu)}"
+            )
     return loi
 
 

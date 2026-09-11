@@ -53,8 +53,17 @@ def test_409_khi_version_lech(client, db):
     hu = dang_nhap(client, "u22@ptsc.local")
     bc = _nhap_08(client, hu)
     v = client.get(f"/api/v1/reports/{bc['id']}", headers=hu).json()["version"]
+    assert v == 1
     r = _chuyen(client, hu, bc["id"], "submit", "draft", v - 1)
     assert r.status_code == 409
+    # Thân 409 phải mang version HIỆN TẠI của server (1), không phải con số
+    # client vừa gửi (0). Đổi `version=r.version` thành `version=version` trong
+    # apply_transition mà cả suite vẫn xanh: khi đó FE nhận 409 kèm version CŨ
+    # của chính mình, banner "tải lại" gọi lại đúng version đó và nhận 409 tiếp
+    # — người nhập kẹt vòng lặp không thoát được. Khoá nguyên thân, không chỉ
+    # riêng `version`, để câu lỗi cũng không trôi đi.
+    assert r.json() == {"detail": "Người khác vừa sửa báo cáo này",
+                        "state": "draft", "version": 1}
 
 
 def test_return_thieu_ghi_chu_tra_400(client, db):
@@ -164,15 +173,41 @@ def test_vong_tra_lai_sua_nop_lai_chay_that(client, db):
        Task 11 đo được rằng đổi phép kiểm của `ghi_gia_tri` thành `code != "draft"`
        vẫn giữ cả suite xanh — mà báo cáo bị trả lại không sửa được thì không bao
        giờ nộp lại được, bế tắc đúng kịch bản demo.
+    3. Khoá bộ ba `submitted_at` / `decided_at` / `decided_by` theo GIÁ TRỊ ở
+       từng bước. Xoá `r.submitted_at = now` khỏi apply_transition mà cả suite
+       vẫn xanh: trên thật mọi báo cáo nộp sống có `submitted_at = NULL`, cột
+       "Cập nhật" ở /reports và dải mốc thời gian của form trống, `/status`
+       không biết nộp lúc nào; bỏ `decided_at`/`decided_by` thì không ai biết
+       ai duyệt và duyệt lúc nào. `is not None` suông không đủ — nó vẫn xanh
+       khi `submitted_at` chỉ được ghi ở lượt nộp ĐẦU (lẫn với
+       `first_submitted_at`), hay khi `decided_by` lấy nhầm người tạo báo cáo.
+       Nên ở đây so: submit KHÔNG đụng cột quyết định, `return` KHÔNG đụng
+       `submitted_at`, lượt nộp thứ hai phải ghi lại `submitted_at` MỚI, và
+       `decided_by` đúng bằng id người vừa bấm.
     """
     seed_all(db)
+    from app.models import AppUser, Report
+    id_admin = db.query(AppUser).filter_by(email="admin@ptsc.local").one().id
+    id_u22 = db.query(AppUser).filter_by(email="u22@ptsc.local").one().id
     hu = dang_nhap(client, "u22@ptsc.local")
     ha = dang_nhap(client, "admin@ptsc.local")
     rid = _nhap_08(client, hu)["id"]
     assert _lay(client, hu, rid)["version"] == 1
 
+    def _moc():
+        """(submitted_at, decided_at, decided_by) đọc thẳng từ DB — `decided_by`
+        không có trong thân `GET /reports/{id}`."""
+        db.expire_all()
+        bc = db.query(Report).filter_by(id=rid).one()
+        return bc.submitted_at, bc.decided_at, bc.decided_by
+
+    assert _moc() == (None, None, None), "báo cáo nháp chưa nộp, chưa ai quyết định"
+
     r = _chuyen(client, hu, rid, "submit", "draft", 1)
     assert (r.status_code, r.json()) == (200, {"state": "submitted", "version": 2})
+    nop_1, quyet_1, ai_1 = _moc()
+    assert nop_1 is not None, "submit phải ghi submitted_at"
+    assert (quyet_1, ai_1) == (None, None), "submit KHÔNG phải một quyết định"
 
     # submitted: is_editable = false → không sửa được
     assert _ghi_o(client, hu, rid, 2, "B-2.1", 7).status_code == 403
@@ -180,6 +215,10 @@ def test_vong_tra_lai_sua_nop_lai_chay_that(client, db):
     r = _chuyen(client, ha, rid, "return", "submitted", 2, note="Thiếu số B-8")
     assert (r.status_code, r.json()) == (200, {"state": "returned", "version": 3})
     assert _lay(client, hu, rid)["header"]["decision_note"] == "Thiếu số B-8"
+    nop_2, tra_luc, ai_tra = _moc()
+    assert nop_2 == nop_1, "`return` không được đụng submitted_at"
+    assert tra_luc is not None and tra_luc >= nop_1
+    assert ai_tra == id_admin != id_u22, "decided_by là người BẤM, không phải người tạo"
 
     # returned: is_editable = true → SỬA ĐƯỢC, và số sửa phải lưu thật
     r = _ghi_o(client, hu, rid, 3, "B-2.1", 7)
@@ -188,13 +227,23 @@ def test_vong_tra_lai_sua_nop_lai_chay_that(client, db):
 
     r = _chuyen(client, hu, rid, "submit", "returned", 4)
     assert (r.status_code, r.json()) == (200, {"state": "submitted", "version": 5})
+    nop_3, quyet_3, ai_3 = _moc()
+    assert nop_3 > nop_1, "mỗi lượt nộp ghi lại submitted_at, không chỉ lượt đầu"
+    assert (quyet_3, ai_3) == (tra_luc, id_admin), "submit KHÔNG đụng cột quyết định"
 
     r = _chuyen(client, ha, rid, "approve", "submitted", 5)
     assert (r.status_code, r.json()) == (200, {"state": "approved", "version": 6})
+    nop_4, duyet_luc, ai_duyet = _moc()
+    assert nop_4 == nop_3, "`approve` không được đụng submitted_at"
+    assert duyet_luc > tra_luc, "approve phải ghi decided_at MỚI, không giữ mốc lượt trả lại"
+    assert ai_duyet == id_admin
 
     cuoi = _lay(client, ha, rid)
     assert cuoi["state"] == "approved" and cuoi["version"] == 6
     assert _o(cuoi["values"], "B-2.1")["this_period"] == 7
+    # cùng ba mốc đó phải đi ra được tới API, không chỉ nằm trong DB
+    assert cuoi["header"]["submitted_at"] is not None
+    assert cuoi["header"]["decided_at"] is not None
 
 
 def test_reopen_tu_approved_ve_returned_va_ra_khoi_tong(client, db):
@@ -257,9 +306,29 @@ def test_action_khong_co_dong_trong_bang_tra_409(client, db):
 
     r = _chuyen(client, ha, rid, "approve", "draft", 1)
     assert r.status_code == 409
-    assert r.json() == {"detail": "Không thể approve từ trạng thái hiện tại",
+    # `name_vi` của dòng `approve` trong workflow_transition ("Duyệt"), KHÔNG
+    # phải mã action tiếng Anh client gửi lên — mọi `detail` là tiếng Việt.
+    assert r.json() == {"detail": 'Không thể "Duyệt" ở trạng thái hiện tại',
                         "state": "draft", "version": 1}
     assert _lay(client, ha, rid)["state"] == "draft"
+
+
+def test_action_la_khong_lot_chuoi_client_gui_len_vao_cau_loi(client, db):
+    """`action` là chuỗi TỰ DO từ thân request, không đối chiếu danh mục.
+
+    Mã lạ không có dòng nào trong `workflow_transition` nên cũng không có
+    `name_vi` nào để hiện — câu lỗi phải lùi về câu chung, vẫn tiếng Việt, và
+    tuyệt đối không dội ngược nguyên văn chuỗi client gửi lên.
+    """
+    seed_all(db)
+    hu = dang_nhap(client, "u22@ptsc.local")
+    rid = _nhap_08(client, hu)["id"]
+
+    r = _chuyen(client, hu, rid, "<script>alert(1)</script>", "draft", 1)
+    assert r.status_code == 409
+    assert r.json() == {"detail": "Không thể thực hiện thao tác này ở trạng thái hiện tại",
+                        "state": "draft", "version": 1}
+    assert _lay(client, hu, rid)["state"] == "draft"
 
 
 def test_moi_action_doi_dung_quyen_cua_dong_do(client, db):
@@ -389,6 +458,38 @@ def test_history_ghi_dung_tung_buoc_va_khong_ghi_luot_bi_tu_choi(client, db):
         ("submit",  id_u22,  "returned",  "submitted", 3, 4),
         ("approve", id_admin, "submitted", "approved",  4, 5),
     ]
+
+
+def test_history_dong_seed_import_co_before_null(client, db):
+    """Hợp đồng hai hình dạng dòng của `/history` (HistoryItemOut).
+
+    Dòng `seed_import` (do app/seed/fixture.py ghi, là dòng ĐẦU của mọi báo cáo
+    nạp từ fixture) có `before = null` và `after` chỉ mang `note`; dòng chuyển
+    trạng thái có `before`/`after` là ảnh chụp cột workflow đầy đủ. Khoá cả hai
+    ở đây để `response_model` không âm thầm bị bỏ đi, và để không ai "chuẩn hoá"
+    dòng seed bằng cách bịa `before` cho nó — test của chính Task 12 phải lọc
+    `action != "seed_import"` chính vì hình dạng này.
+    """
+    seed_all(db)
+    ha = dang_nhap(client, "admin@ptsc.local")
+    ds = client.get("/api/v1/reports?template=FM01&period=2026-07", headers=ha).json()
+    rid = next(r for r in ds if r["state"] == "approved")["id"]
+    v = _lay(client, ha, rid)["version"]
+    assert _chuyen(client, ha, rid, "reopen", "approved", v,
+                   note="Duyệt nhầm đơn vị").status_code == 200
+
+    ls = client.get(f"/api/v1/reports/{rid}/history", headers=ha).json()
+    seed = [d for d in ls if d["action"] == "seed_import"]
+    assert len(seed) == 1
+    assert seed[0]["before"] is None
+    assert seed[0]["after"] == {"note": "nạp từ file tổng hợp kỳ 2026-07"}
+
+    chuyen = [d for d in ls if d["action"] == "reopen"]
+    assert len(chuyen) == 1
+    assert set(chuyen[0]["before"]) == {
+        "state", "version", "source", "submitted_at", "first_submitted_at",
+        "decided_at", "decided_by", "decision_note", "is_late"}
+    assert (chuyen[0]["before"]["state"], chuyen[0]["after"]["state"]) == ("approved", "returned")
 
 
 def test_history_ngoai_pham_vi_tra_403(client, db):

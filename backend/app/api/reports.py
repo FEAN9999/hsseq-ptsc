@@ -1,4 +1,6 @@
 # backend/app/api/reports.py
+from datetime import datetime
+
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -214,7 +216,34 @@ def chuyen_trang_thai_bao_cao(
     return TransitionOut(state=ma_trang_thai, version=r.version)
 
 
-@router.get("/{report_id}/history")
+class HistoryItemOut(BaseModel):
+    """Một dòng của `GET /reports/{id}/history`.
+
+    HAI HÌNH DẠNG DÒNG, có chủ ý, và đây là chỗ ghi hợp đồng đó:
+
+      - dòng chuyển trạng thái (`submit`/`return`/`approve`/`reopen`) do
+        `apply_transition` ghi: `before` và `after` đều là ảnh chụp các cột
+        workflow (`_snapshot`, app/services/workflow.py) — `state`, `version`,
+        `source`, `submitted_at`, `first_submitted_at`, `decided_at`,
+        `decided_by`, `decision_note`, `is_late`;
+      - dòng `seed_import` do loader fixture ghi (`app/seed/fixture.py`):
+        **`before` là `null`**, `after` chỉ có `{"note": "nạp từ file ..."}`.
+
+    Nên `before`/`after` khai `dict | None`, và FE KHÔNG được đọc thẳng
+    `before.state`: dòng `seed_import` là dòng ĐẦU TIÊN của mọi báo cáo nạp
+    từ fixture (21/22 đơn vị × 3 kỳ), nên đọc thẳng là nổ ngay ở dòng đầu.
+    Không chuẩn hoá bằng cách bịa `before` cho dòng seed — audit phải kể đúng
+    thứ đã ghi, không phải thứ tiện cho FE.
+    """
+    id: int
+    action: str
+    actor_id: int | None
+    before: dict | None
+    after: dict | None
+    created_at: datetime
+
+
+@router.get("/{report_id}/history", response_model=list[HistoryItemOut])
 def lich_su_bao_cao(
     report_id: int,
     u: CurrentUser = Depends(current_user),

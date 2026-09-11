@@ -65,6 +65,32 @@ def test_assert_luy_ke_bat_duoc_lech(db):
     assert "B-1.1" in str(e.value) and "2026-07" in str(e.value)
 
 
+def test_thieu_han_mot_dong_bat_buoc_thi_tu_choi_ca_file(db):
+    """Lưới THƯA: file có B-1.2 ở kỳ 06 và 07 của U01 nhưng KHÔNG có ở kỳ 08.
+
+    Đây là hình dạng thật của file dán từ sheet — người nhập bỏ trống hẳn dòng
+    cho chỉ tiêu tháng đó không có sự kiện. Trước khi có
+    `_assert_du_chi_tieu_bat_buoc`, file này nạp SẠCH (chỉ ô rỗng mới báo lỗi,
+    dòng vắng mặt thì không), dashboard hiện đúng, và lỗi chỉ nổ ra khi ai đó
+    bấm "Nộp" — 400 kèm danh sách chỉ tiêu, đúng nút, đúng phút của phân đoạn
+    demo, vì cổng `_thieu_o_bat_buoc` (Task 12) đòi đủ ô bắt buộc mới cho nộp.
+
+    Khẳng định NGUYÊN danh sách lỗi, không chỉ "có raise": thông điệp phải nói
+    đủ đơn vị nào, kỳ nào, thiếu mã nào — thiếu một trong ba thì người nạp
+    không biết sửa dòng nào của file 3432 dòng. So bằng `==` cũng khoá luôn
+    việc không có lỗi NÀO KHÁC nổ kèm (lũy kế, số dư đầu kỳ) cho đúng file này.
+    """
+    from app.models import Report
+    _seed_khung(db)
+    truoc = db.query(Report).count()
+    with pytest.raises(FixtureError) as e:
+        load_fixture(db, _tpl(db), "tests/fixtures/mini_thieu_dong.csv")
+    assert e.value.loi == [
+        "U01,2026-08: thiếu 1 chỉ tiêu bắt buộc (file có ở (đơn vị, kỳ) khác): B-1.2"
+    ]
+    assert db.query(Report).count() == truoc, "đã nạp nửa chừng"
+
+
 def test_so_du_dau_ky_chi_o_ky_dau_cua_fixture(db):
     from app.models import OpeningBalance
     _seed_khung(db)
