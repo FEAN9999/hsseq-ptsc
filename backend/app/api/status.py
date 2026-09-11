@@ -108,6 +108,12 @@ def ma_tran_trang_thai(
     )
     if pham_vi is not None:
         q = q.filter(OrgUnit.id.in_(pham_vi))
+    # Thứ tự dòng của lưới là LỰA CHỌN CÓ Ý THỨC: theo MÃ đơn vị, nên 5 ban dự
+    # án P01–P05 nằm TRƯỚC 17 đơn vị thành viên U01–U17. Cùng quy ước với
+    # GET /reports (app/services/reports.py) và GET /dashboard/units; khác
+    # /org-units (sắp theo id = thứ tự seed). Đổi sang id thì lệch /reports —
+    # giữ một quy ước duy nhất cho mọi danh sách CÓ MÃ, và khoá bằng test so
+    # danh sách theo thứ tự (test_status_thu_tu_don_vi_theo_ma).
     q = q.order_by(OrgUnit.code, ReportingPeriod.start_date)
 
     thu_tu_don_vi: list[str] = []

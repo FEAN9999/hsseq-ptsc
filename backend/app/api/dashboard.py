@@ -27,7 +27,7 @@ không `is_editable` (đã nộp, chưa duyệt); "chưa nộp" (`missing_units`
 có báo cáo HOẶC báo cáo đang `is_editable` (nháp/trả lại, còn phải nộp/nộp
 lại). Ba nhóm loại trừ lẫn nhau và phủ hết mọi đơn vị trong phạm vi.
 """
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.dialects.postgresql import aggregate_order_by
 from sqlalchemy.orm import Session
 
@@ -35,6 +35,7 @@ from fastapi import APIRouter, Depends
 
 from app.api.deps import CurrentUser, pham_vi_bao_cao, require_permission
 from app.core.db import get_db
+from app.domain.report_rules import COT_BAT_BUOC
 from app.models import Indicator, OrgUnit, Report, ReportingPeriod, ReportTemplate, ReportValue, WorkflowState
 from app.schemas.base import ApiModel, JsonNumber
 from app.schemas.report import OrgUnitBrief
@@ -70,11 +71,21 @@ def _ky_dang_hoat_dong(period_key: str):
     mẫu đang `active` — xem lý do không tách thành query Python riêng ở
     docstring module. Không khớp kỳ nào (hoặc chưa có mẫu active) → NULL, mọi
     so sánh `Report.period_id == NULL` ở nơi gọi tự nhiên không khớp dòng
-    nào — không raise, không 500."""
+    nào — không raise, không 500.
+
+    `.limit(1)` KHÔNG phải phòng xa: không ràng buộc DB nào cấm hai mẫu cùng
+    `active` (`report_template.active` mặc định True, alembic 0001 không tạo
+    unique lẫn index bán phần), mà mọi mẫu tháng đều sinh khoá kỳ dạng
+    "YYYY-MM" nên hai mẫu active là hai dòng TRÙNG khoá kỳ; scalar subquery
+    trả >1 dòng thì Postgres ném CardinalityViolation → 500 (thân lỗi tiếng
+    Anh) ngay màn hình mở đầu. `order_by(ReportingPeriod.id)` để ca đó vẫn
+    TẤT ĐỊNH — kỳ dựng trước thắng — thay vì tuỳ kế hoạch truy vấn."""
     return (
         select(ReportingPeriod.id)
         .join(ReportTemplate, ReportTemplate.id == ReportingPeriod.template_id)
         .where(ReportingPeriod.period_key == period_key, ReportTemplate.active.is_(True))
+        .order_by(ReportingPeriod.id)
+        .limit(1)
         .scalar_subquery()
     )
 
@@ -174,12 +185,19 @@ def tong_quan(
         select(func.count()).select_from(theo_don_vi)
             .where(theo_don_vi.c.counts_in_totals.is_(False), theo_don_vi.c.is_editable.is_(False))
             .scalar_subquery().label("submitted_count"),
-        select(func.array_agg(aggregate_order_by(theo_don_vi.c.org_code, theo_don_vi.c.org_code)))
+        # MỘT json_agg gom cả cặp (mã, tên) thành một đối tượng, KHÔNG hai
+        # array_agg song song rồi zip() theo vị trí: ghép theo vị trí là hợp
+        # đồng ngầm giữa hai phép gom độc lập — chỉ cần một ORDER BY lệch là
+        # tên đơn vị gắn nhầm mã, mà bảng "đơn vị chưa nộp" khi đó chỉ SAI TÊN
+        # chứ không sai số nên không ai phát hiện. Ghép trong chính dòng SQL
+        # thì không lệch được. Vẫn một câu SELECT duy nhất (ngân sách 2 query
+        # tính cả xác thực, xem docstring module).
+        select(func.json_agg(aggregate_order_by(
+            func.json_build_object("code", theo_don_vi.c.org_code,
+                                   "name", theo_don_vi.c.org_name),
+            theo_don_vi.c.org_code)))
             .select_from(theo_don_vi).where(chua_nop)
-            .scalar_subquery().label("missing_codes"),
-        select(func.array_agg(aggregate_order_by(theo_don_vi.c.org_name, theo_don_vi.c.org_code)))
-            .select_from(theo_don_vi).where(chua_nop)
-            .scalar_subquery().label("missing_names"),
+            .scalar_subquery().label("missing_units"),
         tong_kpi.c.lti, tong_kpi.c.fat, tong_kpi.c.near_miss, tong_kpi.c.hazob,
         tong_kpi.c.gio_cong, tong_kpi.c.don_vi_co_lti,
     ).select_from(tong_kpi)
@@ -190,15 +208,15 @@ def tong_quan(
         "lti": row.lti, "fat": row.fat, "near_miss": row.near_miss, "hazob": row.hazob,
         "gio_cong": row.gio_cong, "don_vi_co_lti": row.don_vi_co_lti,
     }
-    missing_codes = row.missing_codes or []
-    missing_names = row.missing_names or []
+    # json_agg trả NULL (không phải mảng rỗng) khi không có dòng nào chưa nộp.
+    missing_units = row.missing_units or []
 
     return DashboardSummaryOut(
         period_key=period,
         reporting_units=row.reporting_units,
         approved_count=row.approved_count,
         submitted_count=row.submitted_count,
-        missing_units=[OrgUnitBrief(code=c, name=n) for c, n in zip(missing_codes, missing_names)],
+        missing_units=[OrgUnitBrief(code=u["code"], name=u["name"]) for u in missing_units],
         kpis=[KpiOut(code=code, label=label, value=gia_tri_theo_ma[key], unit=unit)
               for code, label, key, unit in _KPI],
     )
@@ -216,13 +234,27 @@ class DashboardUnitOut(ApiModel):
 
 
 def _gia_tri_chi_tieu(ma: str):
-    """Scalar subquery TƯƠNG QUAN theo `Report.id` của dòng ngoài: `this_period`
-    của chỉ tiêu `ma` cho đúng báo cáo đang xét. Không cần SUM — mỗi đơn vị
-    tối đa một báo cáo/kỳ (UniqueConstraint(template_id, org_unit_id,
+    """Scalar subquery TƯƠNG QUAN theo `Report.id` của dòng ngoài: con số có
+    nghĩa của chỉ tiêu `ma` cho đúng báo cáo đang xét. Không cần SUM — mỗi đơn
+    vị tối đa một báo cáo/kỳ (UniqueConstraint(template_id, org_unit_id,
     period_id)) và mỗi báo cáo tối đa một dòng report_value/chỉ tiêu
-    (UniqueConstraint(report_id, indicator_id))."""
+    (UniqueConstraint(report_id, indicator_id)).
+
+    CỘT nào mang con số đó tuỳ `indicator.agg_type`, chọn bằng CASE ngay trong
+    SQL (không thêm round-trip, không khoá cứng mã chỉ tiêu) theo đúng ma trận
+    `COT_BAT_BUOC` của app/domain/report_rules.py — nguồn chân lý duy nhất, để
+    không chép lại quy tắc ở đây: `sum` → "Tháng này" (`this_period`);
+    `counter`/`snapshot` → "Cộng dồn" (`acc_total_entered`); `computed` không
+    lưu cột nào nên không WHEN nào khớp → NULL.
+
+    Với `counter` (B-1.5 "Tổng giờ công an toàn không xảy ra LTI", hiện trên
+    dashboard là cột "Giờ AT KỂ TỪ LTI cuối") `this_period` chỉ là phần TĂNG
+    THÊM của tháng: đọc nó thì dashboard và form báo cáo nói hai con số khác
+    nhau cho cùng một ô, và đơn vị chỉ điền đúng cột bắt buộc "Cộng dồn" (hợp
+    lệ với counter) sẽ hiện "—" như thể chưa nhập gì."""
     return (
-        select(ReportValue.this_period)
+        select(case(*[(Indicator.agg_type == agg, getattr(ReportValue, cot))
+                      for agg, cot in COT_BAT_BUOC.items() if cot is not None]))
         .select_from(ReportValue)
         .join(Indicator, Indicator.id == ReportValue.indicator_id)
         .where(ReportValue.report_id == Report.id, Indicator.code == ma)
@@ -254,6 +286,13 @@ def bang_don_vi(
         .outerjoin(Report, and_(Report.org_unit_id == OrgUnit.id, Report.period_id == ky_id))
         .outerjoin(WorkflowState, WorkflowState.id == Report.state_id)
         .where(OrgUnit.is_reporting.is_(True))
+        # Khoá sắp CUỐI CÙNG của bảng: `dong.sort` bên dưới là sort ỔN ĐỊNH
+        # (Python), nên mọi dòng hoà cả ba khoá giá trị giữ nguyên thứ tự này
+        # thay vì thứ tự Postgres tình cờ trả về. Không có nó thì kỳ chưa có
+        # báo cáo nào (2026-09 — kỳ người demo bấm sang) hoà toàn bộ 22 dòng
+        # và thứ tự đổi giữa các lần tải trang. Theo MÃ đơn vị, cùng quy ước
+        # với GET /reports và GET /status.
+        .order_by(OrgUnit.code)
     )
     if pham_vi is not None:
         stmt = stmt.where(OrgUnit.id.in_(pham_vi))

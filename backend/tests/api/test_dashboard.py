@@ -125,6 +125,10 @@ def test_summary_khong_missing_khi_tron_ven(client, db):
     seed_all(db)
     h = dang_nhap(client, "admin@ptsc.local")
     s = client.get("/api/v1/dashboard/summary?period=2026-06", headers=h).json()
+    # K6 — `period_key` trong thân trả về phải là CHÍNH kỳ được hỏi (thanh
+    # coverage của FE ghi "Kỳ …" từ đây); kỳ 2026-06 khác kỳ mặc định của mọi
+    # test còn lại nên một hằng số lọt vào chỗ đó sẽ lộ ngay.
+    assert s["period_key"] == "2026-06"
     assert s["reporting_units"] == 22
     assert s["approved_count"] == 22
     assert s["missing_units"] == []
@@ -242,9 +246,14 @@ def test_units_gia_tri_dung_cho_don_vi_duyet_va_don_vi_nhap(client, db):
     theo_ma = {u["org_unit"]["code"]: u for u in ds}
 
     u01 = theo_ma["U01"]
+    # gio_an_toan_tu_lti_cuoi = 6.0 chứ KHÔNG phải 3.0: B-1.5 là chỉ tiêu
+    # `counter`, con số của nó nằm ở cột "Cộng dồn" (acc_total_entered = 6.00
+    # cho U01 kỳ 2026-08), còn this_period = 3.00 chỉ là phần tăng thêm trong
+    # tháng. Kỳ vọng 3.0 cũ khoá đúng con số mà dashboard hiện khác hẳn form
+    # báo cáo của chính đơn vị đó.
     assert (u01["state"], u01["lti"], u01["fat"], u01["near_miss"], u01["hazob"],
             u01["gio_cong"], u01["gio_an_toan_tu_lti_cuoi"]) == \
-           ("approved", 3.0, 2.0, 1.0, 2.0, 8.0, 3.0)
+           ("approved", 3.0, 2.0, 1.0, 2.0, 8.0, 6.0)
 
     # P05 đang draft nhưng report_value vẫn còn nguyên số fixture gốc
     # (_nhap_don_vi_22 không xoá report_value) — /dashboard/units hiển thị số
@@ -393,3 +402,204 @@ def test_status_template_khong_ton_tai_tra_404(client, db):
     h = dang_nhap(client, "admin@ptsc.local")
     r = client.get("/api/v1/status?template=KHONG-TON-TAI&from=2026-06&to=2026-09", headers=h)
     assert r.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Vòng sửa 1 (task-13-fix-brief.md K1-K6).
+# ---------------------------------------------------------------------------
+
+
+def _mau_phu(db, code: str, period_key: str, active: bool):
+    """Dựng thêm MỘT mẫu báo cáo nữa (không phải FM01) cùng một kỳ khoá
+    `period_key` — đúng đường đi giai đoạn 2 mà repo đã có test
+    (test_mau_gia_FM99_tao_duoc_khong_can_migration): mẫu mới chỉ là dòng dữ
+    liệu, không migration. Mọi mẫu tháng đều sinh khoá kỳ dạng "YYYY-MM" nên
+    kỳ của hai mẫu TRÙNG khoá là chắc chắn, không phải giả định."""
+    from datetime import date, datetime
+    from zoneinfo import ZoneInfo
+    from app.models import ReportingPeriod, ReportTemplate
+    tpl = ReportTemplate(code=code, name_vi=f"Mẫu {code}", period_type="month",
+                         version=1, active=active)
+    db.add(tpl)
+    db.flush()
+    db.add(ReportingPeriod(
+        template_id=tpl.id, period_key=period_key,
+        start_date=date(2026, 8, 1), end_date=date(2026, 8, 31),
+        due_at=datetime(2026, 10, 5, 23, 59, 59, tzinfo=ZoneInfo("Asia/Ho_Chi_Minh")),
+        is_open=True))
+    db.flush()
+    return tpl
+
+
+def test_units_counter_lay_cot_cong_don_dung_bang_so_tren_form(client, db):
+    """K1 — B-1.5 là chỉ tiêu `counter`: cột bắt buộc của nó là "Cộng dồn"
+    (acc_total_entered), "Tháng này" chỉ là phần tăng thêm (ma trận
+    app/domain/report_rules.py). Đơn vị nhập ĐÚNG cột bắt buộc rồi bỏ trống
+    "Tháng này" là hợp lệ — và là ca thường gặp với số thật. Dashboard phải
+    hiện đúng con số form báo cáo đang hiện, không phải "—".
+
+    Cùng lượt ghi có một chỉ tiêu `sum` (B-2.2, cột bắt buộc là "Tháng này",
+    hai cột acc bị ghi NULL — xem test_dong_sum_ghi_NULL_vao_hai_cot_acc) để
+    khoá luôn chiều ngược lại: đọc "Cộng dồn" cho MỌI chỉ tiêu cũng sai."""
+    seed_all(db)
+    hu = dang_nhap(client, "u01@ptsc.local")
+    ha = dang_nhap(client, "admin@ptsc.local")
+
+    rid = client.post("/api/v1/reports", json={"template": "FM01", "period_key": "2026-09"},
+                      headers=hu).json()["id"]
+    v0 = client.get(f"/api/v1/reports/{rid}", headers=hu).json()["version"]
+    r = client.put(f"/api/v1/reports/{rid}/values", headers=hu,
+                   json={"version": v0, "values": [
+                       {"indicator_code": "B-1.5", "acc_total_entered": 1200},
+                       {"indicator_code": "B-2.2", "this_period": 7}]})
+    assert r.status_code == 200
+
+    o = {v["indicator_code"]: v for v in
+         client.get(f"/api/v1/reports/{rid}", headers=hu).json()["values"]}
+    assert o["B-1.5"]["acc_total_entered"] == 1200.0
+    assert o["B-1.5"]["this_period"] is None
+
+    ds = client.get("/api/v1/dashboard/units?period=2026-09", headers=ha).json()
+    u01 = next(u for u in ds if u["org_unit"]["code"] == "U01")
+    # Cùng một ô, hai màn hình, MỘT con số.
+    assert u01["gio_an_toan_tu_lti_cuoi"] == o["B-1.5"]["acc_total_entered"] == 1200.0
+    assert u01["lti"] == o["B-2.2"]["this_period"] == 7.0
+    assert o["B-2.2"]["acc_total_entered"] is None
+
+
+def test_summary_khong_500_khi_co_mau_active_thu_hai_trung_khoa_ky(client, db):
+    """K2 — không ràng buộc DB nào cấm hai mẫu cùng `active` (alembic 0001
+    không có unique lẫn index bán phần trên report_template.active). Hai mẫu
+    active có kỳ trùng khoá làm scalar subquery giải kỳ trả 2 dòng →
+    CardinalityViolation → 500 tiếng Anh ngay màn hình mở đầu buổi demo.
+
+    Khẳng định cả HAI vế: không 500, VÀ số liệu vẫn là số của mẫu đang dùng
+    (kỳ dựng trước thắng, `order_by(ReportingPeriod.id).limit(1)`) chứ không
+    rơi về mẫu rỗng vừa thêm."""
+    seed_all(db)
+    _mau_phu(db, "FM99", "2026-08", active=True)
+    h = dang_nhap(client, "admin@ptsc.local")
+
+    r = client.get("/api/v1/dashboard/summary?period=2026-08", headers=h)
+    assert r.status_code == 200
+    s = r.json()
+    assert s["reporting_units"] == 22
+    assert s["approved_count"] == 21
+    assert [u["code"] for u in s["missing_units"]] == ["P05"]
+    assert {k["code"]: k["value"] for k in s["kpis"]}["B-2.2"] == 63.0
+
+    ru = client.get("/api/v1/dashboard/units?period=2026-08", headers=h)
+    assert ru.status_code == 200
+    assert next(u for u in ru.json() if u["org_unit"]["code"] == "U01")["lti"] == 3.0
+
+
+def test_summary_bo_qua_mau_da_ngung_dung_du_ky_cua_no_dung_truoc(client, db):
+    """K2 — vế còn lại của cùng một câu truy vấn: lọc `active` phải THẬT SỰ
+    lọc. Mẫu FM98 dựng TRƯỚC seed_all nên kỳ "2026-08" của nó có id NHỎ HƠN kỳ
+    của FM01 — bỏ điều kiện `active` là dashboard rơi ngay về mẫu đã ngừng
+    dùng (rỗng, không báo cáo nào) và toàn bộ số về 0."""
+    _mau_phu(db, "FM98", "2026-08", active=False)
+    seed_all(db)
+    h = dang_nhap(client, "admin@ptsc.local")
+
+    s = client.get("/api/v1/dashboard/summary?period=2026-08", headers=h).json()
+    assert s["approved_count"] == 21
+    assert [u["code"] for u in s["missing_units"]] == ["P05"]
+    assert {k["code"]: k["value"] for k in s["kpis"]}["B-2.2"] == 63.0
+
+
+def test_summary_missing_units_ghep_dung_ten_voi_ma(client, db):
+    """K3 — `missing_units` phải ghép TÊN với ĐÚNG MÃ của nó, theo đúng thứ tự
+    mã. Kỳ 2026-09 chưa có báo cáo nào nên cả 22 đầu mối đều chưa nộp: đủ dài
+    để một hoán vị (hai phép gom song song lệch thứ tự) lộ ra — khác
+    test_summary_submitted_count_dem_dung_va_khong_con_thieu, ở đó danh sách
+    chỉ có một phần tử nên mọi hoán vị đều là chính nó.
+
+    So với TÊN THẬT trong DB chứ không gõ lại chuỗi: tên 17 đơn vị + 5 ban dự
+    án hiện là tên tạm, Chồng yêu sẽ thay trước demo (CONTEXT.md)."""
+    seed_all(db)
+    from app.models import OrgUnit
+    h = dang_nhap(client, "admin@ptsc.local")
+    s = client.get("/api/v1/dashboard/summary?period=2026-09", headers=h).json()
+
+    ky_vong = [{"code": o.code, "name": o.name} for o in
+               db.query(OrgUnit).filter_by(is_reporting=True).order_by(OrgUnit.code).all()]
+    assert len(ky_vong) == 22
+    assert s["missing_units"] == ky_vong
+
+
+def test_units_gia_tri_0_that_hien_0_va_khong_lan_voi_o_chua_nhap(client, db):
+    """K4 — bẫy `Decimal("0")` falsy. Dữ liệu PTSC thật hầu hết có LTI = 0, mà
+    bộ sinh fixture không bao giờ ra 0 (delta luôn 1..5) nên cả suite chưa
+    từng đi qua ca này.
+
+    U05 nhập số 0 THẬT cho LTI/FAT/giờ công; U02 chưa nhập ô nào (không có
+    dòng report_value → NULL). Hai điều phải đúng: (1) U05 hiện 0 chứ không
+    phải null/"—"; (2) U05 xếp TRÊN U02 — dùng `or` thay cho `_hoac` trong
+    khoá sắp xếp biến số 0 thật thành mặc định -1, U05 tụt xuống hoà với đơn
+    vị chưa nhập và rơi về thứ tự mã (U02 trước U05)."""
+    seed_all(db)
+    from app.models import Indicator, OrgUnit, Report, ReportingPeriod, ReportValue
+    ky = db.query(ReportingPeriod).filter_by(period_key="2026-08").one()
+    ma = ["B-2.2", "B-2.1", "B-1.1", "B-1.2", "B-1.3"]
+    ind_ids = [i.id for i in db.query(Indicator).filter(Indicator.code.in_(ma)).all()]
+
+    def bao_cao(code):
+        oid = db.query(OrgUnit).filter_by(code=code).one().id
+        return db.query(Report).filter_by(org_unit_id=oid, period_id=ky.id).one()
+
+    db.query(ReportValue).filter(ReportValue.report_id == bao_cao("U05").id,
+                                 ReportValue.indicator_id.in_(ind_ids)) \
+        .update({"this_period": Decimal("0.00")}, synchronize_session=False)
+    db.query(ReportValue).filter(ReportValue.report_id == bao_cao("U02").id,
+                                 ReportValue.indicator_id.in_(ind_ids)) \
+        .delete(synchronize_session=False)
+    db.flush()
+
+    h = dang_nhap(client, "admin@ptsc.local")
+    ds = client.get("/api/v1/dashboard/units?period=2026-08", headers=h).json()
+    thu_tu = [u["org_unit"]["code"] for u in ds]
+    u05 = next(u for u in ds if u["org_unit"]["code"] == "U05")
+    u02 = next(u for u in ds if u["org_unit"]["code"] == "U02")
+
+    assert (u05["lti"], u05["fat"], u05["gio_cong"]) == (0.0, 0.0, 0.0)
+    assert (u02["lti"], u02["fat"]) == (None, None)
+    assert thu_tu.index("U05") < thu_tu.index("U02")
+
+
+def test_units_thu_tu_theo_ma_don_vi_khi_hoa_het(client, db):
+    """K5 — kỳ 2026-09 chưa có báo cáo nào nên cả 22 dòng hoà cả ba khoá giá
+    trị; không khoá sắp cuối cùng thì thứ tự bảng chính của buổi demo đổi giữa
+    các lần tải trang. So DANH SÁCH THEO THỨ TỰ, không so tập hợp (Task 6 từng
+    ship một lần lỗi thứ tự vì test so tập hợp)."""
+    seed_all(db)
+    h = dang_nhap(client, "admin@ptsc.local")
+    ds = client.get("/api/v1/dashboard/units?period=2026-09", headers=h).json()
+    assert [u["org_unit"]["code"] for u in ds] == \
+        [f"P{i:02d}" for i in range(1, 6)] + [f"U{i:02d}" for i in range(1, 18)]
+
+
+def test_status_thu_tu_don_vi_theo_ma(client, db):
+    """K5 — thứ tự dòng của lưới "Tình trạng nộp" là lựa chọn có ý thức: theo
+    MÃ đơn vị (P01-P05 trước U01-U17), cùng quy ước với GET /reports và
+    /dashboard/units. Khoá lại để lần sửa sau phải là lần sửa CỐ Ý."""
+    seed_all(db)
+    h = dang_nhap(client, "admin@ptsc.local")
+    st = client.get("/api/v1/status?template=FM01&from=2026-08&to=2026-08", headers=h).json()
+    assert [u["code"] for u in st["units"]] == \
+        [f"P{i:02d}" for i in range(1, 6)] + [f"U{i:02d}" for i in range(1, 18)]
+
+
+def test_summary_thu_tu_6_o_kpi_dung_luoi_thiet_ke(client, db):
+    """K5 — FE render mảng `kpis` theo thứ tự, thiết kế chốt lưới 3x2
+    "LTI · FAT · Đơn vị có LTI | Tổng giờ công · Near miss · HAZOB"
+    (docs/designs/hseq-platform-mvp-fm01.md). test_summary_6_kpi_gia_tri_dung
+    đánh chỉ mục theo mã nên đảo hai ô vẫn xanh ở đó."""
+    seed_all(db)
+    h = dang_nhap(client, "admin@ptsc.local")
+    s = client.get("/api/v1/dashboard/summary?period=2026-08", headers=h).json()
+    assert [(k["code"], k["label"]) for k in s["kpis"]] == [
+        ("B-2.2", "LTI trong kỳ"), ("B-2.1", "FAT trong kỳ"),
+        ("DON_VI_CO_LTI", "Đơn vị có LTI"), ("B-1.4", "Tổng giờ công"),
+        ("B-2.10", "Near miss"), ("B-2.11", "HAZOB card"),
+    ]

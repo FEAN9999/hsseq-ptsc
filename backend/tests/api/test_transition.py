@@ -239,12 +239,13 @@ def test_vong_tra_lai_sua_nop_lai_chay_that(client, db):
 def test_reopen_tu_approved_ve_returned_va_ra_khoi_tong(client, db):
     """Dòng chuyển trạng thái thứ 5 (`reopen`, approved → returned).
 
-    Phần WORKFLOW của `test_reopen_dua_so_ra_khoi_tong` (đang xfail vì
-    `GET /dashboard/summary` là sản phẩm Task 13). Khẳng định "ra khỏi tổng" bằng
-    CHÍNH cột quyết định điều đó — `workflow_state.counts_in_totals` — thay vì qua
-    dashboard: approved đếm vào tổng, returned thì không. Không có test này thì
-    xoá hẳn dòng `reopen` khỏi bảng chuyển trạng thái không ai thấy (cả suite chỉ
-    còn cái xfail đụng tới nó).
+    Phần WORKFLOW của `test_reopen_dua_so_ra_khoi_tong` (test kia đo "ra khỏi
+    tổng" qua `GET /dashboard/summary` — đã chạy thật từ Task 13, không còn
+    xfail). Khẳng định "ra khỏi tổng" bằng CHÍNH cột quyết định điều đó —
+    `workflow_state.counts_in_totals` — thay vì qua dashboard: approved đếm vào
+    tổng, returned thì không. Giữ cả hai vì chúng khoá hai lớp khác nhau: test
+    kia khoá hợp đồng API, test này khoá đúng cột dữ liệu, nên xoá dòng
+    `reopen` khỏi bảng chuyển trạng thái không lọt được ở cả hai lớp.
     """
     seed_all(db)
     from app.models import Report, WorkflowState
