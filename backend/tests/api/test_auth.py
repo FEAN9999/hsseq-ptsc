@@ -2,7 +2,8 @@
 """Test `security.py`, `api/deps.py`, `api/auth.py`.
 
 `test_rbac.py` (task-8-brief.md) đi qua HTTP `/reports` để kiểm scope — nhưng
-`/reports` chưa mount tới Task 10 nên 5/6 test ở đó đang `xfail` và KHÔNG hề
+`/reports` chưa mount tới Task 10 nên 5/6 test ở đó từng phải `xfail` (đã gỡ
+hết từ Task 13, repo giờ không còn ca nào) và KHÔNG hề
 chạm `current_user()`/`require_permission()`/`pham_vi_bao_cao()`: FastAPI
 trả 404 ngay ở tầng routing, trước khi bất kỳ dependency nào chạy. Nếu chỉ có
 test_rbac.py, mutation "require_permission trả True khi thiếu quyền" hay
