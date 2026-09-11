@@ -77,19 +77,9 @@ def test_return_thieu_ghi_chu_tra_400(client, db):
 
 
 # task-12-brief.md Step 4 nói rõ test này "cần Task 13 — chạy lại sau Task 13 nếu
-# tạm xfail": `GET /dashboard/summary` là sản phẩm của Task 13 (chưa tồn tại,
-# `app/api/` chưa có file `dashboard.py`, chưa mount ở `app/main.py`) nên vế thứ
-# hai của test (so `approved_count` trước/sau) hiện 404, không phải KeyError sai
-# lệch logic. Phần WORKFLOW của test (reopen approved -> returned) tự nó ĐàXANH
-# nếu bỏ hai dòng dashboard — xem task-12-report.md mục "Quyết định riêng" về việc
-# giữ nguyên assert gốc và tạm xfail thay vì sửa/xoá test, dù task-12-carry.md D3
-# nói "sau Task 12 không còn xfail nào" (D3 viết về xfail CÒN LẠI của test_rbac.py,
-# không tính test MỚI này — mâu thuẫn nội tại giữa D3 và Step 4 của chính brief).
-@pytest.mark.xfail(
-    reason="GET /dashboard/summary là sản phẩm Task 13, chưa tồn tại — brief Step 4 "
-           "cho phép xfail tạm, gỡ khi Task 13 mount endpoint này.",
-    strict=True,
-)
+# tạm xfail": `GET /dashboard/summary` là sản phẩm của Task 13, giờ đã tồn tại
+# (app/api/dashboard.py, mount ở app/main.py) — xfail tạm đã gỡ, test chạy xanh
+# thật (task-13-carry.md E1). Assert gốc GIỮ NGUYÊN, không sửa.
 def test_reopen_dua_so_ra_khoi_tong(client, db):
     seed_all(db)
     ha = dang_nhap(client, "admin@ptsc.local")
