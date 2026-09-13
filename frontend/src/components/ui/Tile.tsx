@@ -23,17 +23,21 @@ export function Tile({ label, value, unit, danger, flash }: TileProps) {
 
   return (
     <div className={rootClass}>
-      <div className={`text-tableHead uppercase tracking-[0.02em] font-medium ${mutedClass}`}>{label}</div>
+      {/* text-[12px] (KHÔNG phải text-tableHead — token đó dành cho <th> bảng, ép line-height 1.2)
+          để nhãn kế thừa line-height 1.45 của body, đúng mockup .tile .lbl chỉ đặt font-size */}
+      <div className={`text-[12px] uppercase tracking-[0.02em] font-medium ${mutedClass}`}>{label}</div>
       {isMissing ? (
-        <div className="text-kpi font-medium tnum text-sec" aria-label="chưa có dữ liệu">
+        // mt-1.5 = 6px, đúng mockup .tile .val{margin-top:6px} (nhãn → số)
+        <div className="text-kpi font-medium tnum text-sec mt-1.5" aria-label="chưa có dữ liệu">
           —
         </div>
       ) : (
         <>
-          <div className={`text-kpi font-medium tnum ${isDanger ? 'text-danger' : 'text-ink'}`}>
+          <div className={`text-kpi font-medium tnum mt-1.5 ${isDanger ? 'text-danger' : 'text-ink'}`}>
             {value.toLocaleString('vi-VN')}
           </div>
-          <div className={`text-[11px] ${mutedClass}`}>{unit}</div>
+          {/* mt-0.5 = 2px, đúng mockup .tile .unit{margin-top:2px} (số → đơn vị) */}
+          <div className={`text-[11px] mt-0.5 ${mutedClass}`}>{unit}</div>
         </>
       )}
     </div>

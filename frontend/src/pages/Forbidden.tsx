@@ -8,7 +8,7 @@ export function Forbidden() {
         <p className="text-table text-sec mt-2">Tài khoản của bạn không có quyền xem trang này.</p>
         <a
           href="/"
-          className="inline-flex items-center justify-center h-8 px-3.5 mt-5 rounded-input bg-cyan border border-cyanEdge text-white text-table font-medium no-underline"
+          className="inline-flex items-center justify-center h-8 px-3.5 mt-5 rounded-input bg-cyan border border-cyanEdge text-white text-table font-medium no-underline transition-colors duration-[120ms] hover:bg-cyanEdge"
         >
           Về trang chủ
         </a>

@@ -44,6 +44,10 @@ export function Toast() {
   if (!toast) return null
 
   return (
+    // fixed, KHÔNG phải absolute như .toast trong tokens.css: trong mockup toast được đặt bên
+    // trong .frame (một khung demo có position:relative) nên absolute là đủ; app thật không có
+    // khung bao ngoài đó, toast phải nổi trên toàn viewport bất kể cuộn trang → cần fixed. Khác
+    // token có chủ đích, đừng "sửa lại cho đúng token".
     <div
       role="status"
       className="fixed right-6 bottom-6 bg-soot text-white py-2.5 px-3.5 rounded-input text-table shadow-[0_4px_16px_rgba(0,0,0,0.05)]"
