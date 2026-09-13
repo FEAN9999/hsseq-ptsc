@@ -1,15 +1,16 @@
 // frontend/src/app/routes.tsx
 //
 // C7 (task-19-carry.md): bảng route của toàn ứng dụng — không task nào trong plan dựng nó, không
-// task nào sửa main.tsx sau Task 15. Chỉ khai BỐN mục — đúng những trang ĐÃ CÓ THẬT lúc này, đừng
-// khai trước trang chưa xây (mã đầu cơ, trái CLAUDE.md #2):
-//   /login → <Login/>   — KHÔNG bọc RequireAuth, KHÔNG bọc AppShell
-//   /403   → <Forbidden/>
-//   /      → điều hướng về /login
-//   *      → <NotFound/>
-// Task sau (thêm /reports, /reports/:id, /dashboard, /status) sẽ nối tiếp vào CHÍNH mảng
-// `routeObjects` này, mỗi trang bọc <RequireAuth><AppShell>…</AppShell></RequireAuth>
-// (xem RequireAuth ở ./router).
+// task nào sửa main.tsx sau Task 15. Chỉ khai đúng những trang ĐÃ CÓ THẬT lúc này, đừng khai
+// trước trang chưa xây (mã đầu cơ, trái CLAUDE.md #2):
+//   /login    → <Login/>   — KHÔNG bọc RequireAuth, KHÔNG bọc AppShell
+//   /403      → <Forbidden/>
+//   /reports  → <Reports/>, bọc <RequireAuth><AppShell>…</AppShell></RequireAuth> (Task 20, C3)
+//   /         → điều hướng về /login
+//   *         → <NotFound/>
+// Task sau (thêm /reports/:id, /dashboard, /status) sẽ nối tiếp vào CHÍNH mảng `routeObjects`
+// này, mỗi trang bọc <RequireAuth><AppShell>…</AppShell></RequireAuth> (xem RequireAuth ở
+// ./router).
 //
 // `App` xuất ra component gộp — nhận `router` làm prop thay vì tự tạo `createBrowserRouter` bên
 // trong — để routes.test.tsx dựng lại bằng `createMemoryRouter` (kiểm được route ở một URL ban
@@ -21,13 +22,26 @@ import { QueryClientProvider } from '@tanstack/react-query'
 
 import { queryClient } from './queryClient'
 import { Toast } from '../components/ui/Toast'
+import { RequireAuth } from './router'
+import { AppShell } from '../components/AppShell'
 import { Login } from '../pages/Login'
 import { Forbidden } from '../pages/Forbidden'
 import { NotFound } from '../pages/NotFound'
+import { Reports } from '../pages/Reports'
 
 export const routeObjects: RouteObject[] = [
   { path: '/login', element: <Login /> },
   { path: '/403', element: <Forbidden /> },
+  {
+    path: '/reports',
+    element: (
+      <RequireAuth>
+        <AppShell>
+          <Reports />
+        </AppShell>
+      </RequireAuth>
+    ),
+  },
   { path: '/', element: <Navigate to="/login" replace /> },
   { path: '*', element: <NotFound /> },
 ]
