@@ -1046,6 +1046,51 @@ def test_o_chu_rong_duoc_chuan_hoa_ve_null(client, db):
         "đường INSERT lưu `''` xuống DB thay vì NULL"
 
 
+def test_ghi_chu_rong_duoc_chuan_hoa_ve_null(client, db):
+    """Cùng quy ước với ba ô chữ nhóm C: `""` và `null` là MỘT ý "ô rỗng".
+    `ReportForm.tsx:178` làm `ghiChu[...] = v.note ?? ''` rồi `:808` gửi chính
+    chuỗi đó, nên người dùng xoá trắng một ô Ghi chú gửi lên `""` chứ không phải
+    `null` — đường `null` mà test_null_xoa_trang_ghi_chu khoá gần như không bao
+    giờ được FE đi qua. Để nguyên thì `report_value.note` có hai cách biểu diễn
+    "rỗng" trong cùng một cột, y hệt `report_text.content` trước vòng sửa 1.
+
+    Khẳng định đọc THẲNG `report_value`, không qua GET: GET trả `note` nguyên
+    văn nên ở đây nó phân biệt được `""` với `None`, nhưng bài học của
+    test_khong_ghi_duoc_vao_chi_tieu_computed là đừng đặt phép kiểm tầng lưu trữ
+    lên một câu trả lời đã qua tay lớp trình bày."""
+    seed_all(db)
+    from app.models import Indicator, ReportValue
+    h = dang_nhap(client, "u22@ptsc.local")
+    bc = _nhap_08(client, h)
+    ind = db.query(Indicator).filter_by(code="B-2.1").one()
+
+    def _note_trong_db():
+        db.flush()      # xem chú thích `db.flush()` ở ca mã trường chữ lạ
+        return db.query(ReportValue).filter_by(
+            report_id=bc["id"], indicator_id=ind.id).one().note
+
+    v = _xem(client, h, bc["id"])["version"]
+    assert _ghi(client, h, bc["id"], v,
+                [{"indicator_code": "B-2.1", "note": "lý do lệch"}]).status_code == 200
+    assert _note_trong_db() == "lý do lệch", "tiền đề: dòng này đang có ghi chú"
+
+    v = _xem(client, h, bc["id"])["version"]
+    r = _ghi(client, h, bc["id"], v, [{"indicator_code": "B-2.1", "note": ""}])
+    assert r.status_code == 200, r.text
+    assert _note_trong_db() is None, "`\"\"` lưu xuống DB vẫn là `''`, không phải NULL"
+
+    # `null` vẫn phải xoá được như cũ — chuẩn hoá không được làm hỏng đường đang có
+    v = _xem(client, h, bc["id"])["version"]
+    assert _ghi(client, h, bc["id"], v,
+                [{"indicator_code": "B-2.1", "note": "gõ lại"}]).status_code == 200
+    assert _note_trong_db() == "gõ lại"
+
+    v = _xem(client, h, bc["id"])["version"]
+    r = _ghi(client, h, bc["id"], v, [{"indicator_code": "B-2.1", "note": None}])
+    assert r.status_code == 200, r.text
+    assert _note_trong_db() is None
+
+
 def test_hai_o_chu_dang_co_noi_dung_cap_nhat_duoc_trong_cung_mot_luot(client, db):
     """Ctrl+S sau khi sửa CẢ HAI ô chữ đã có nội dung. Nạp trước dòng
     `report_text` mà chỉ lấy mã ĐẦU thì ô thứ hai đi đường INSERT →

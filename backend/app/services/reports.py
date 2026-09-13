@@ -557,7 +557,14 @@ def ghi_gia_tri(
         # "computed": validate_values ở trên đã chặn mọi giá trị số gửi vào dòng
         # tự tính (COT_NHAP_DUOC rỗng) nên không có nhánh ghi số nào ở đây.
         if "note" in co_mat:
-            row.note = v.note
+            # `""` và `null` là CÙNG một ý "ô rỗng" — cùng quy ước với ba ô chữ
+            # nhóm C ở dưới, và cùng lý lẽ: `ReportForm.tsx:178` làm
+            # `ghiChu[...] = v.note ?? ''` rồi `:808` gửi chính chuỗi đó, nên xoá
+            # trắng một ô Ghi chú gửi lên `""` chứ không phải `null`. Để nguyên
+            # thì `report_value.note` có HAI cách biểu diễn "rỗng" trong cùng một
+            # cột — hai cột cùng loại dữ liệu mà khác quy ước là đúng thứ sinh ra
+            # lỗi cho người đọc mã sau.
+            row.note = v.note or None
 
     if texts:
         dong_chu = {
