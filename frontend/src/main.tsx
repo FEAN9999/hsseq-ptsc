@@ -1,16 +1,12 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
-import { Wordmark } from './components/ui/Wordmark'
-import { Toast } from './components/ui/Toast'
+import { App, router } from './app/routes'
 
-// Task 15 chỉ dựng scaffold + component nền. App shell/router thật là việc của task sau;
-// ở đây chỉ mount <Toast/> (cần có mặt một lần, toàn cục) và Wordmark để xác nhận Tailwind chạy.
+// C7 (task-19-carry.md): App gộp sẵn QueryClientProvider → RouterProvider và mount <Toast/> ở
+// cấp toàn cục (xem frontend/src/app/routes.tsx) — bảng route thật thay cho scaffold Task 15.
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <div className="p-6">
-      <Wordmark />
-    </div>
-    <Toast />
+    <App router={router} />
   </StrictMode>,
 )
