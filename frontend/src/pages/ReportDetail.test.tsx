@@ -62,6 +62,17 @@ const CHI_TIET = {
       counter_check: null,
       note: null,
     },
+    {
+      indicator_code: 'B-1.2',
+      this_period: null,
+      acc_prev_entered: null,
+      acc_total_entered: null,
+      acc_prev_computed: null,
+      acc_total_computed: null,
+      diff: null,
+      counter_check: null,
+      note: null,
+    },
   ],
   texts: {},
 }
@@ -80,6 +91,18 @@ const MAU = {
       decimals: 2,
       required: true,
       sort_order: 1,
+    },
+    {
+      code: 'B-1.2',
+      section_code: 'B-1',
+      name_vi: 'Nhà thầu phụ',
+      name_en: 'Subcontractor',
+      unit: 'Giờ',
+      agg_type: 'sum',
+      formula: null,
+      decimals: 2,
+      required: false,
+      sort_order: 2,
     },
   ],
   text_fields: [],
@@ -110,6 +133,42 @@ function moiApi(loi: Record<string, number> = {}) {
   })
   vi.stubGlobal('fetch', f)
   return daGoi
+}
+
+/** Dựng cảnh "gõ một số rồi để nó tự lưu": lớp lưu của Task 23 nằm trong `ReportForm`, hẹn 1,5 s
+ * sau khi rời ô có sửa. */
+async function goRoiLuu(u: ReturnType<typeof userEvent.setup>, ma: string, so: string) {
+  await u.click(await screen.findByLabelText(new RegExp(`^${ma.replace(/\./g, '\\.')} .+, Tháng này$`)))
+  await u.keyboard(so)
+  await u.tab()
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1600)
+  })
+}
+
+/** Quay lại tab — `refetchOnWindowFocus` (app/queryClient.ts:11) nghe `visibilitychange`. Đây là
+ * lượt làm mới NỀN KHÔNG gắn với lần lưu nào: đường người dùng đi mỗi lần chuyển sang cửa sổ khác
+ * rồi quay lại giữa lúc đang nhập dở.
+ *
+ * TỰ KHẲNG ĐỊNH ĐÃ CÓ LƯỢT GỌI MỚI. Chỗ nghe sự kiện là chi tiết bên trong của
+ * `@tanstack/query-core` (5.102.8 nghe trên WINDOW — `focusManager.js:12`; bản đầu của helper này
+ * bắn vào `document` và KHÔNG refetch gì cả). Nâng phiên bản mà nó đổi chỗ nghe thì mọi ca dùng
+ * helper này sẽ xanh GIẢ — không có lượt làm mới nào nên chẳng có gì để hỏng. Dòng khẳng định dưới
+ * đây là thứ duy nhất ngăn điều đó. */
+async function quayLaiTab(daGoi: string[]) {
+  const truoc = daGoi.length
+  await act(async () => {
+    window.dispatchEvent(new Event('visibilitychange'))
+    await vi.advanceTimersByTimeAsync(50)
+  })
+  expect(daGoi.length).toBeGreaterThan(truoc)
+}
+
+/** Đồng hồ giả CÓ nhích theo thời gian thật + `userEvent` gắn vào nó: `userEvent` treo cứng với
+ * đồng hồ giả đứng yên (đã đo ở ReportForm.test.tsx). */
+function nguoiDung() {
+  vi.useFakeTimers({ shouldAdvanceTime: true })
+  return userEvent.setup({ advanceTimers: (ms) => vi.advanceTimersByTime(ms) })
 }
 
 function ve(quyen: string[] = QUYEN_NGUOI_NOP) {
@@ -219,5 +278,88 @@ describe('ReportDetail', () => {
     expect(screen.queryByText('Không tải được báo cáo')).toBeNull()
     const oNhap = screen.getByLabelText(/^B-1\.1 .+, Tháng này$/) as HTMLInputElement
     expect(oNhap.value).toBe('7')
+  })
+
+  // G7 — câu cảnh báo KHÔNG dính vĩnh viễn: nó đọc `error` của query, mà TanStack Query xoá
+  // `error` ngay khi một lượt fetch thành công. Đã ĐO (vòng sửa 2) rồi mới khoá: sau một lượt hỏng
+  // + một lượt lọt, dải đầu quay về "Đã lưu HH:MM". Không có ca này thì một bản "nhớ luôn đã từng
+  // hỏng" cũng xanh, và người vừa qua cú mạng chập chờn mất luôn chỉ báo họ cần nhất.
+  it('làm mới THÀNH CÔNG trở lại thì câu cảnh báo tự tắt, "Đã lưu HH:MM" quay lại', async () => {
+    const u = nguoiDung()
+    const loi: Record<string, number> = {}
+    moiApi(loi)
+    ve()
+
+    loi['/reports/12'] = 502
+    await goRoiLuu(u, 'B-1.1', '7')
+    expect(await screen.findByText('Không làm mới được số liệu')).toBeTruthy()
+
+    delete loi['/reports/12'] // mạng trở lại
+    await goRoiLuu(u, 'B-1.2', '9')
+    expect(screen.queryByText('Không làm mới được số liệu')).toBeNull()
+    expect(screen.getByRole('status').textContent).toMatch(/^Đã lưu \d\d:\d\d$/)
+  })
+
+  // G1 — lượt làm mới nền THÀNH CÔNG cũng không được dựng lại form. Không ca nào trong cả dự án
+  // khoá đường này, nên một `key={baoCao.dataUpdatedAt}` đặt nhầm sẽ remount `ReportForm` sau MỌI
+  // lần lưu (và mọi lần quay lại tab), xoá sạch reducer + hàng chờ lưu + hẹn debounce — đúng thiệt
+  // hại F1 sinh ra để chặn, nhưng trên đường chạy thường xuyên hơn nhiều.
+  it('làm mới nền THÀNH CÔNG không dựng lại form: ô đã gõ và ô còn trong hàng chờ đều còn nguyên', async () => {
+    const u = nguoiDung()
+    const daGoi = moiApi()
+    ve()
+    await goRoiLuu(u, 'B-1.1', '7') // ô này đã lên server
+
+    // Ô thứ hai: gõ rồi rời ô, CHƯA hết 1,5 giây nên còn nằm trong hàng chờ lưu.
+    await u.click(screen.getByLabelText(/^B-1\.2 .+, Tháng này$/))
+    await u.keyboard('9')
+    await u.tab()
+    expect(screen.getByText('Chưa lưu (1 ô)')).toBeTruthy()
+
+    await quayLaiTab(daGoi)
+
+    expect((screen.getByLabelText(/^B-1\.1 .+, Tháng này$/) as HTMLInputElement).value).toBe('7')
+    expect((screen.getByLabelText(/^B-1\.2 .+, Tháng này$/) as HTMLInputElement).value).toBe('9')
+    // Hàng chờ lưu sống sót: ô B-1.2 vẫn được gửi đi khi mốc debounce tới.
+    expect(screen.getByText('Chưa lưu (1 ô)')).toBeTruthy()
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1600)
+    })
+    expect(screen.getByRole('status').textContent).toMatch(/^Đã lưu \d\d:\d\d$/)
+  })
+
+  // G4 — `loiLamMoi` phải phủ CẢ HAI lượt tải. `loi = baoCao.error ?? mau.error`, nên một lượt làm
+  // mới DANH MỤC hỏng cũng phải nói ra: bảng chỉ tiêu trên màn có thể đã cũ.
+  it('làm mới DANH MỤC hỏng cũng nói ra ở dải đầu, và vẫn giữ form', async () => {
+    const u = nguoiDung()
+    const loi: Record<string, number> = {}
+    const daGoi = moiApi(loi)
+    ve()
+    await goRoiLuu(u, 'B-1.1', '7')
+
+    loi['/templates/'] = 502
+    await quayLaiTab(daGoi)
+
+    expect(screen.getByText('Không làm mới được số liệu')).toBeTruthy()
+    expect((screen.getByLabelText(/^B-1\.1 .+, Tháng này$/) as HTMLInputElement).value).toBe('7')
+    expect(screen.queryByText('Không tải được báo cáo')).toBeNull()
+  })
+
+  // G5 — ranh giới của F1 theo CẢ HAI chiều: 5xx là trục trặc tạm thời (giữ form), còn 403 là KẾT
+  // LUẬN — quyền vừa bị thu hồi thì không được để người ta gõ tiếp vào một form họ không còn
+  // quyền ghi. Ca 404 đã có ở trên; ca này khoá nửa còn lại.
+  it('403 NỀN (quyền vừa bị thu hồi) vẫn thay cả trang, không giữ form như 5xx', async () => {
+    const u = nguoiDung()
+    const loi: Record<string, number> = {}
+    const daGoi = moiApi(loi)
+    ve()
+    await goRoiLuu(u, 'B-1.1', '7')
+
+    loi['/reports/12'] = 403
+    await quayLaiTab(daGoi)
+
+    expect(screen.getByText('Bạn không có quyền xem báo cáo này')).toBeTruthy()
+    expect(screen.queryByRole('table')).toBeNull()
+    expect(screen.queryByText('Không làm mới được số liệu')).toBeNull()
   })
 })

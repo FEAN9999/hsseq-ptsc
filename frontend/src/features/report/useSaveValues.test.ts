@@ -606,7 +606,12 @@ describe('useSaveValues — đường lỗi', () => {
 
   // C2: 409 thứ hai (thao tác không hợp lệ ở trạng thái hiện tại) KHÔNG mang `values` — không có
   // gì để vẽ lại bảng. Phân biệt bằng sự CÓ MẶT của `values`, không bằng chuỗi `detail`.
-  it('409 không kèm values: không đẩy tín hiệu vẽ lại bảng, chỉ hiện detail nguyên văn', async () => {
+  //
+  // Ca này còn khoá một bất biến nữa (vòng sửa 2, G6): việc NHẬN `version` nằm NGOÀI nhánh
+  // 409-kèm-values, áp cho MỌI lỗi có mang `version`. Đó đúng là bất biến mà F3 dựa vào để xoá
+  // canh `phienBanLoi !== null`; chuyển nó vào trong nhánh kia thì FE giữ `version` cũ và lặp 409
+  // vĩnh viễn với bất kỳ nguồn 409 nào không kèm `values` mà Task 23b có thể thêm sau này.
+  it('409 không kèm values: không đẩy tín hiệu vẽ lại bảng, chỉ hiện detail nguyên văn, nhưng VẪN nhận version mới', async () => {
     putSpy.mockRejectedValueOnce(
       new ApiError(409, { detail: 'Không thể "Nộp báo cáo" ở trạng thái hiện tại', state: 'submitted', version: 11 }),
     )
@@ -620,6 +625,12 @@ describe('useSaveValues — đường lỗi', () => {
     expect(h.current.status).toBe('error')
     expect(h.current.dirtyCount).toBe(1)
     expect(h.current.offline).toBe(false)
+
+    // `version` của thân lỗi đã vào `phienBan`: lượt gửi sau đi bằng 11, không phải 8 của lúc mở form.
+    await act(async () => {
+      await h.current.saveNow()
+    })
+    expect(than(1).version).toBe(11)
   })
 
   // C3: sai luật nghiệp vụ là 400, KHÔNG phải 422.

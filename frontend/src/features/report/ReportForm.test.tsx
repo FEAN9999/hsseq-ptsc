@@ -1823,16 +1823,20 @@ describe('lưu khi rời ô', () => {
     ])
   })
 
-  // N18 của người soát: `useSaveValues(12, …)` viết cứng vẫn xanh 437/437, vì `ve()` của file này
-  // lẫn `ren()` của useSaveValues.test.ts đều cố định id 12. Mọi báo cáo khác #12 sẽ ghi đè lên #12.
-  it('gửi tới URL của ĐÚNG báo cáo đang mở, không phải mã viết cứng', async () => {
+  // Một dòng gọi `useSaveValues(chiTiet.id, chiTiet.version)` — hai nửa, cả hai đều từng có đột
+  // biến sống. N18: `12` viết cứng (mọi báo cáo khác #12 ghi đè lên #12). C19-vòng-2 (C8): `8`
+  // viết cứng (mọi báo cáo thật bắt đầu từ version 1 nên dính 409 GIẢ ngay lần lưu đầu — banner
+  // vàng "Người khác vừa sửa", lượt lưu không lên server, bấm "Nộp" bị chặn). Cả hai fixture cũ
+  // đều cố định id 12 / version 8 nên không ca nào bắt được. Ca này đặt CẢ HAI khác mặc định.
+  it('gửi tới ĐÚNG báo cáo và ĐÚNG version của báo cáo đó, không phải số viết cứng', async () => {
     const u = nguoiDung()
-    ve({ state: 'draft', vai: 'reporter', id: 77, mau: MAU_HAI_DONG() })
+    ve({ state: 'draft', vai: 'reporter', id: 77, version: 3, mau: MAU_HAI_DONG() })
     await u.click(o('B-1.1', 'Tháng này'))
     await u.keyboard('5')
     await u.tab()
     await choDebounce()
     expect(putSpy.mock.calls[0][0]).toBe('/reports/77/values')
+    expect(thanPut(0)).toEqual({ version: 3, values: [{ indicator_code: 'B-1.1', this_period: 5 }] })
   })
 
   // N16 của người soát: gửi `0` thay `null` vẫn xanh, vì khoá duy nhất cho hành vi này nằm ở mức
@@ -1989,6 +1993,15 @@ describe('dải đầu — trạng thái lưu', () => {
     const dong = screen.getByText('Không làm mới được số liệu')
     expect(resolveCascadeWinner(dong.className, 'color')).toBe('text-warning')
     expect(screen.queryByText(/Đã lưu/)).toBeNull()
+  })
+
+  // Câu này KHÔNG chờ có lần lưu nào mới nói: thu hẹp nhánh về `savedAt !== null` vẫn xanh ở hai
+  // ca trên (cả hai đều lưu trước). Với `refetchOnWindowFocus`, chỉ cần rời tab rồi quay lại lúc
+  // Render đang ngủ — chưa gõ gì cả — là màn hình đã đứng số cũ mà không câu nào nói.
+  it('làm mới hỏng TRƯỚC lần lưu đầu tiên cũng nói ra, không chờ có "Đã lưu" mới nói', () => {
+    const r = ve({ state: 'draft', vai: 'reporter', mau: MAU_BA_DONG() })
+    r.batLoiLamMoi()
+    expect(screen.getByText('Không làm mới được số liệu')).toBeTruthy()
   })
 
   // …nhưng KHÔNG được thắng "Chưa lưu (n ô)": ô chưa lên tới server là nguy cơ mất số, còn lượt
