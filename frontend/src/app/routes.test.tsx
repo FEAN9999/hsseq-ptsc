@@ -149,6 +149,107 @@ describe('bảng route', () => {
     expect(screen.queryByText('Đăng nhập HSEQ')).toBeNull()
   })
 
+  // Task 22 (task-22-carry.md C6, cùng lý do C5 của Task 20): route MỚI phải có ca riêng khoá
+  // RequireAuth. Ruling 177: một route thêm vào mà không ai đo thì gỡ mất lớp bọc cũng không test
+  // nào đỏ — và /reports/:id là màn có toàn bộ số liệu của một đơn vị.
+  it('vào /reports/12 khi CHƯA có token: bị đá về /login, KHÔNG lộ nội dung báo cáo', () => {
+    duong('/reports/12')
+    expect(screen.getByText('Đăng nhập HSEQ')).toBeTruthy()
+    expect(screen.queryByText(/FM01 · 08\/2026/)).toBeNull()
+  })
+
+  it('có token: /reports/12 dựng form FM01 trong khung AppShell, kèm breadcrumb về /reports', async () => {
+    useSession
+      .getState()
+      .login(
+        'tok-1',
+        { id: 1, email: 'u01@ptsc.local', full_name: 'Người nhập U01', position: null },
+        { id: 2, code: 'U01', name: 'PTSC Miền Trung' },
+        ['report.view_own_unit', 'report.edit', 'report.submit'],
+      )
+    const chiTiet = {
+      id: 12,
+      version: 3,
+      state: 'draft',
+      source: 'live',
+      is_late: false,
+      header: {
+        org_unit: { code: 'U01', name: 'PTSC Miền Trung' },
+        template_code: 'FM01',
+        period_key: '2026-08',
+        due_at: '2026-10-05T16:59:59Z',
+        report_no: 'DV-2026-08',
+        location: null,
+        report_date: null,
+        reporter_name: null,
+        reporter_position: null,
+        submitted_at: null,
+        decided_at: null,
+        decision_note: null,
+      },
+      missing_periods: [],
+      values: [
+        {
+          indicator_code: 'B-1.1',
+          this_period: null,
+          acc_prev_entered: null,
+          acc_total_entered: null,
+          acc_prev_computed: 402100,
+          acc_total_computed: null,
+          diff: null,
+          counter_check: null,
+          note: null,
+        },
+      ],
+      texts: { C1: null },
+    }
+    const mau = {
+      sections: [{ code: 'B-1', name_vi: 'TỔNG GIỜ CÔNG', name_en: 'Total Man Hours' }],
+      indicators: [
+        {
+          code: 'B-1.1',
+          section_code: 'B-1',
+          name_vi: 'TCT PTSC',
+          name_en: 'PTSC Corp.',
+          unit: 'Giờ',
+          agg_type: 'sum',
+          formula: null,
+          decimals: 2,
+          required: true,
+          sort_order: 1,
+        },
+      ],
+      text_fields: [{ code: 'C1', label_vi: 'Hoạt động nổi bật trong tháng' }],
+      states: [{ code: 'draft', name_vi: 'Nháp', is_editable: true }],
+      transitions: [
+        {
+          action_code: 'submit',
+          from_state: 'draft',
+          to_state: 'submitted',
+          name_vi: 'Nộp báo cáo',
+          required_permission: 'report.submit',
+          requires_note: false,
+        },
+      ],
+    }
+    const f = vi.fn((url: string) => {
+      if (url.includes('/reports/12')) return Promise.resolve({ ok: true, status: 200, json: async () => chiTiet })
+      if (url.includes('/templates/FM01')) return Promise.resolve({ ok: true, status: 200, json: async () => mau })
+      throw new Error(`URL không lường trước: ${url}`)
+    })
+    vi.stubGlobal('fetch', f)
+
+    duong('/reports/12')
+    expect(await screen.findByRole('heading', { name: 'PTSC Miền Trung · FM01 · 08/2026' })).toBeTruthy()
+    // Danh mục phải lấy theo template_code của CHÍNH báo cáo, không phải chuỗi "FM01" viết cứng.
+    expect(f.mock.calls.some(([u]) => String(u).includes('/templates/FM01'))).toBe(true)
+    expect(screen.getByLabelText('B-1.1 TCT PTSC, Lũy kế tháng trước').textContent).toBe('402.100')
+    expect(screen.getByText('Đăng xuất')).toBeTruthy() // AppShell/Sidebar có mặt
+    // Breadcrumb (chỉ ReportDetail mới có): "<đơn vị> · <kỳ>" — khác chuỗi của <h1> nên khớp đúng
+    // một phần tử, trong khi nhãn "Báo cáo của đơn vị" bị trùng với link Sidebar.
+    expect(screen.getByText('PTSC Miền Trung · 08/2026')).toBeTruthy()
+  })
+
   it('Toast có mặt đúng MỘT lần ở cấp toàn cục', async () => {
     // Toast() tự render null khi chưa có thông điệp (components/ui/Toast.tsx) — không có cách nào
     // đếm "có mặt" qua DOM nếu không kích hoạt một thông điệp thật qua chính hook useToast().

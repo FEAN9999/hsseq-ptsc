@@ -1,0 +1,98 @@
+// frontend/src/features/report/FormModeBar.tsx
+//
+// Thanh dính dưới của form (bản vẽ `.bar`): bên trái một câu cảnh báo, bên phải các nút.
+//
+// Nút KHÔNG hardcode theo trạng thái/vai. Chúng sinh thẳng từ `transitions` của
+// `GET /templates/{code}` (backend/app/api/templates.py:104) — đúng ý định đã ghi trong docstring
+// của endpoint đó ("FE vẽ nút Nộp / Trả lại / Duyệt thẳng theo danh sách này") và đúng
+// task-22-carry.md C1 (quyền quyết định chế độ, không phải chuỗi vai trò). Nhờ vậy 5 chế độ của
+// bảng D14 rơi ra từ dữ liệu:
+//   nháp + report.submit        → "Nộp báo cáo"          (name_vi của seed)
+//   trả lại + report.submit     → "Nộp lại"
+//   đã nộp + report.return/approve → "Trả lại…" + "Duyệt"
+//   đã duyệt + report.return    → "Mở lại…"
+//   đã nộp + người nộp          → không nút nào
+//
+// Dấu "…" gắn vào đúng các chuyển trạng thái `requires_note` — nó là lời hứa "bấm xong còn một
+// hộp thoại nữa" (Trả lại / Mở lại đều bắt nhập lý do, D24), không phải trang trí.
+import type { ChuyenTrangThai } from './ReportForm'
+
+/** Số mã chỉ tiêu tối đa liệt kê trong thanh trước khi rút gọn thành "+n". Cùng quy ước với thanh
+ * coverage của dashboard ("≤ 4 tên, hơn thì +n", thiết kế dòng 623): một form trống hoàn toàn
+ * thiếu 52 ô, liệt hết sẽ đẩy thanh dính cao gần nửa màn hình. */
+const MA_HIEN_TOI_DA = 8
+
+const NUT =
+  'inline-flex items-center justify-center h-8 px-3.5 rounded-input border text-table font-medium whitespace-nowrap disabled:opacity-50'
+const NUT_THUONG = `${NUT} bg-surface border-hair text-ink transition-colors duration-[120ms] hover:bg-mutedbg`
+const NUT_CHINH = `${NUT} bg-cyan border-cyanEdge text-white`
+const NUT_GHOST = `${NUT} bg-transparent border-hair text-ink transition-colors duration-[120ms] hover:bg-mutedbg`
+
+/** Mã chỉ tiêu → id neo trong DOM ("B-8.1" → "B-8-1"). Dấu chấm hợp lệ trong id nhưng lại là dấu
+ * chọn lớp trong CSS/`querySelector`, nên bản vẽ states.html đã chọn sẵn dạng gạch (`id="B-8-1"`). */
+export function maNeo(ma: string): string {
+  return ma.replace(/\./g, '-')
+}
+
+export function FormModeBar({
+  chuyenDuoc,
+  suaDuoc,
+  thieuBatBuoc,
+  soDemLech,
+  onLuu,
+  onChuyenTrangThai,
+}: {
+  chuyenDuoc: ChuyenTrangThai[]
+  suaDuoc: boolean
+  /** Mã các chỉ tiêu còn thiếu ô bắt buộc — rỗng khi chưa bấm Nộp lần nào (D16: chỉ đỏ sau lần
+   * bấm Nộp đầu tiên), nên component này không cần biết `daBamNop`. */
+  thieuBatBuoc: string[]
+  soDemLech: number
+  onLuu: () => void
+  onChuyenTrangThai: (chuyen: ChuyenTrangThai) => void
+}) {
+  const hienThi = thieuBatBuoc.slice(0, MA_HIEN_TOI_DA)
+  return (
+    <div className="sticky bottom-0 -mx-6 -mb-6 mt-3 flex items-center justify-between gap-4 bg-surface border-t border-hair px-5 py-3 text-table">
+      <div>
+        {thieuBatBuoc.length > 0 ? (
+          <span className="text-danger">
+            Thiếu {thieuBatBuoc.length} ô bắt buộc:{' '}
+            {hienThi.map((ma) => (
+              <a key={ma} href={`#${maNeo(ma)}`} className="text-danger font-medium underline mr-1.5">
+                {ma}
+              </a>
+            ))}
+            {thieuBatBuoc.length > hienThi.length && <span>+{thieuBatBuoc.length - hienThi.length}</span>}
+          </span>
+        ) : (
+          // D25: bộ đếm lệch KHÔNG chặn nộp — câu này chỉ để người duyệt (và người nộp) biết vì
+          // sao không có gì chặn họ lại.
+          soDemLech > 0 && (
+            <span className="text-warning">
+              {soDemLech} bộ đếm lệch công thức chưa có ghi chú · vẫn được nộp
+            </span>
+          )
+        )}
+      </div>
+      <div className="flex gap-2">
+        {suaDuoc && (
+          <button type="button" onClick={onLuu} className={NUT_THUONG}>
+            Lưu
+          </button>
+        )}
+        {chuyenDuoc.map((c) => (
+          <button
+            key={`${c.action_code}-${c.from_state}`}
+            type="button"
+            onClick={() => onChuyenTrangThai(c)}
+            className={c.requires_note ? NUT_GHOST : NUT_CHINH}
+          >
+            {c.name_vi}
+            {c.requires_note ? '…' : ''}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}

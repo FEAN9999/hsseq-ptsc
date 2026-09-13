@@ -6,9 +6,10 @@
 //   /login    → <Login/>   — KHÔNG bọc RequireAuth, KHÔNG bọc AppShell
 //   /403      → <Forbidden/>
 //   /reports  → <Reports/>, bọc <RequireAuth><AppShell>…</AppShell></RequireAuth> (Task 20, C3)
+//   /reports/:id → <ReportDetail/>, bọc y hệt (Task 22, task-22-carry.md C6)
 //   /         → điều hướng về /login
 //   *         → <NotFound/>
-// Task sau (thêm /reports/:id, /dashboard, /status) sẽ nối tiếp vào CHÍNH mảng `routeObjects`
+// Task sau (thêm /dashboard, /status) sẽ nối tiếp vào CHÍNH mảng `routeObjects`
 // này, mỗi trang bọc <RequireAuth><AppShell>…</AppShell></RequireAuth> (xem RequireAuth ở
 // ./router).
 //
@@ -28,6 +29,7 @@ import { Login } from '../pages/Login'
 import { Forbidden } from '../pages/Forbidden'
 import { NotFound } from '../pages/NotFound'
 import { Reports } from '../pages/Reports'
+import { ReportDetail } from '../pages/ReportDetail'
 
 export const routeObjects: RouteObject[] = [
   { path: '/login', element: <Login /> },
@@ -38,6 +40,16 @@ export const routeObjects: RouteObject[] = [
       <RequireAuth>
         <AppShell>
           <Reports />
+        </AppShell>
+      </RequireAuth>
+    ),
+  },
+  {
+    path: '/reports/:id',
+    element: (
+      <RequireAuth>
+        <AppShell>
+          <ReportDetail />
         </AppShell>
       </RequireAuth>
     ),

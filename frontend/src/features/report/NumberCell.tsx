@@ -1,6 +1,6 @@
 /**
- * Ô nhập số của FM01 — hiện định dạng vi-VN lúc nghỉ (`formatNumber`, Task 16), hiện số thô lúc
- * đang gõ để không vướng dấu chấm/phẩy định dạng.
+ * Ô nhập số của FM01 — hiện định dạng vi-VN lúc nghỉ (`dinhDangSoBang` ngay dưới đây), hiện số
+ * thô lúc đang gõ để không vướng dấu chấm/phẩy định dạng.
  *
  * `type="text" inputMode="decimal"`, KHÔNG `type="number"` (task-21-carry.md C2): bàn phím
  * vi-VN nuốt dấu phẩy và cuộn chuột đổi số ngoài ý muốn; Task 22 còn đếm
@@ -13,24 +13,47 @@
  * đúng `decimals` của dòng đích.
  */
 import { useEffect, useId, useRef, useState, type ChangeEvent, type ClipboardEvent } from 'react'
-import { formatNumber } from '../../lib/format'
 import { parseViNumber } from '../../lib/parseViNumber'
 
 export interface NumberCellProps {
   value: number | null
   decimals: number
   ariaLabel: string
+  /** Lỗi do NGƯỜI GỌI phát hiện (Task 22: "Bắt buộc" sau lần bấm Nộp đầu) — khác lỗi phân tích
+   * chuỗi của chính ô này. Lỗi nội bộ thắng khi cả hai cùng có: nó nói về CHỮ ĐANG NẰM TRONG ô,
+   * còn lỗi ngoài nói về giá trị đã chốt. Không có prop này thì không cách nào đặt `aria-invalid`
+   * lên chính `<input>` từ ngoài — đó là điều thiết kế a11y đòi (mỗi ô lỗi có aria-invalid +
+   * aria-describedby), nên đây là bổ sung bắt buộc chứ không phải tiện tay. */
+  loiNgoai?: string | null
   onChange?: (ketQua: { value: number | null; error: string | null }) => void
   onCommit?: (ketQua: { value: number | null; error: string | null }) => void
   onPasteColumn?: (dong: string[]) => void
 }
 
+/** Số lúc NGHỈ — task-22-carry.md C13: KHÔNG dùng `formatNumber` (nó đệm số 0 tới đúng `decimals`,
+ * nên `402100` ở dòng B-1.1 `decimals=2` ra "402.100,00" trong khi ô chỉ đọc ngay cạnh trong CÙNG
+ * MỘT DÒNG hiện "402.100" theo bản vẽ approve.html). Chỉ `maximumFractionDigits`: số nguyên ra
+ * "402.100", số lẻ vẫn hiện đủ tới `decimals`.
+ *
+ * Export để bảng 55 dòng (ReportForm, Task 22) vẽ ô CHỈ ĐỌC bằng đúng hàm này — hai luật định
+ * dạng nằm cạnh nhau trong một dòng mà lệch nhau chính là lỗi C13 mô tả.
+ *
+ * `null` ra "—", không bao giờ "0" (ràng buộc toàn cục). `-0` ép về `0` vì `Intl.NumberFormat`
+ * nhìn DẤU BIT chứ không nhìn giá trị so sánh (cùng lý do đã ghi ở `formatNumber`). */
+export function dinhDangSoBang(n: number | null, decimals: number): string {
+  if (n === null) return '—'
+  const nSach = n === 0 ? 0 : n
+  return new Intl.NumberFormat('vi-VN', { maximumFractionDigits: decimals }).format(nSach)
+}
+
 /** Số thô để SỬA lúc đang focus: không nhóm hàng nghìn (để dấu chấm không lẫn vào lúc gõ), vẫn
- * giữ dấu phẩy thập phân — đúng ngữ pháp mà `parseViNumber` đọc lại lúc blur. */
+ * giữ dấu phẩy thập phân — đúng ngữ pháp mà `parseViNumber` đọc lại lúc blur.
+ *
+ * C13: bỏ `minimumFractionDigits` ở ĐÂY NỮA, không chỉ ở lúc nghỉ — nếu lúc nghỉ hiện "402.100"
+ * mà bấm vào lại hiện "402100,00" thì người dùng thấy ",00" mọc ra từ hư không. */
 function soThoDeSua(value: number, decimals: number): string {
   return new Intl.NumberFormat('vi-VN', {
     useGrouping: false,
-    minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,
   }).format(value)
 }
@@ -39,7 +62,7 @@ function soThoDeSua(value: number, decimals: number): string {
 // đơn dính ba số làm một), và '\n' đơn làm dấu xuống dòng khi tách một cột đã dán.
 const PHAN_CACH_DONG = /\r\n|\r|\n/
 
-export function NumberCell({ value, decimals, ariaLabel, onChange, onCommit, onPasteColumn }: NumberCellProps) {
+export function NumberCell({ value, decimals, ariaLabel, loiNgoai, onChange, onCommit, onPasteColumn }: NumberCellProps) {
   // fix-2 T1 — ĐỪNG xoá initializer này (fix-1 S9 từng xoá nhầm nó, coi là mã chết — SAI).
   // Đây là chữ của LẦN VẼ ĐẦU TIÊN; `useEffect` ngay dưới chỉ lo các lần `value` đổi VỀ SAU,
   // vì hợp đồng React chạy effect SAU khi trình duyệt đã vẽ — không phải "ngay lập tức" như
@@ -48,7 +71,7 @@ export function NumberCell({ value, decimals, ariaLabel, onChange, onCommit, onP
   // `flushSync`/`renderToString` (task-21-rereview-1.md §3) cho khung hình đầu rỗng thật —
   // dựng 165 ô kiểu bảng FM01 thì 165/165 ô rỗng ở khung đầu, kể cả ô hiện `—`. Không có test
   // nào bắt được nếu xoá dòng này (đã xác nhận: 0 ca đỏ) — ĐỪNG suy ra từ đó là mã thừa.
-  const [text, setText] = useState(() => formatNumber(value, decimals))
+  const [text, setText] = useState(() => dinhDangSoBang(value, decimals))
   const [error, setError] = useState<string | null>(null)
   const dangFocus = useRef(false)
   // fix-1 S6: mốc so sánh — nhớ `text` tại thời điểm focus, blur mà `text` không đổi so với mốc
@@ -63,7 +86,7 @@ export function NumberCell({ value, decimals, ariaLabel, onChange, onCommit, onP
   // sạch lỗi, không được treo lại "Chỉ nhập số" trên một giá trị vừa được ghi đè hợp lệ.
   useEffect(() => {
     if (!dangFocus.current) {
-      setText(formatNumber(value, decimals))
+      setText(dinhDangSoBang(value, decimals))
       setError(null)
     }
   }, [value, decimals])
@@ -87,7 +110,7 @@ export function NumberCell({ value, decimals, ariaLabel, onChange, onCommit, onP
     dangFocus.current = false
     const ketQua = parseViNumber(text, decimals)
     setError(ketQua.error)
-    if (!ketQua.error) setText(formatNumber(ketQua.value, decimals))
+    if (!ketQua.error) setText(dinhDangSoBang(ketQua.value, decimals))
     // fix-1 S6: người dùng chỉ Tab ngang qua (không sửa gì) thì KHÔNG bắn `onCommit` — nếu không,
     // Task 23 (lưu-khi-rời-ô) sẽ tạo một PUT cho mỗi ô người dùng đi qua, và với ô có giá trị
     // nhiều chữ số thập phân hơn `decimals` thì còn bắn nhầm bản đã bị làm tròn theo hiển thị.
@@ -115,7 +138,15 @@ export function NumberCell({ value, decimals, ariaLabel, onChange, onCommit, onP
     // rỗng thì `dong[-1]` là `undefined !== ''` nên vòng lặp tự dừng, canh này là thừa.
     while (dong[dong.length - 1] === '') dong.pop()
     onPasteColumn(dong)
+    // Cha vừa nạp giá trị mới cho CẢ CỘT, kể cả ô này. Effect đồng bộ ở trên cố ý không đè chữ
+    // của ô ĐANG FOCUS (fix-1 N1) — nhưng ở đây không ai đang gõ dở cả, nên giữ focus sẽ biến
+    // đúng ô vừa được dán vào thành ô DUY NHẤT không hiện số mới (nó vẫn đang hiện chữ rỗng/số
+    // cũ của lúc focus). Rời focus để nó nhận lại giá trị như mọi ô khác trong cột.
+    e.currentTarget.blur()
   }
+
+  // Lỗi nội bộ (chữ đang nằm trong ô sai) thắng lỗi ngoài (giá trị đã chốt còn thiếu).
+  const loiHienThi = error ?? loiNgoai ?? null
 
   return (
     <>
@@ -123,20 +154,24 @@ export function NumberCell({ value, decimals, ariaLabel, onChange, onCommit, onP
         type="text"
         inputMode="decimal"
         aria-label={ariaLabel}
-        aria-invalid={error ? 'true' : undefined}
-        aria-describedby={error ? loiId : undefined}
+        aria-invalid={loiHienThi ? 'true' : undefined}
+        aria-describedby={loiHienThi ? loiId : undefined}
         value={text}
         onFocus={xuLyFocus}
         onBlur={xuLyBlur}
         onChange={xuLyChange}
         onPaste={xuLyDan}
-        className={`block w-full h-9 border rounded-input px-2.5 bg-surface text-right tnum ${
-          error ? 'border-danger text-danger' : 'border-hair text-ink'
+        // h-7 (28px) chứ không phải h-9 (36px): dòng bảng CŨNG cao 36px (tokens.css `td{height:36px}`),
+        // nên ô nhập cao bằng cả dòng sẽ đặt viền dưới của nó chồng đúng lên hairline của `<td>` —
+        // viền đôi mà task-22-carry.md C11 cảnh báo. Bản vẽ chốt sẵn con số: `.cell{height:28px}`.
+        // `focus:outline` là "viền trong 2px cyan" của thiết kế (Pass 6), không phải trang trí.
+        className={`block w-full h-7 border rounded-input px-2 bg-surface text-right tnum focus:outline-2 focus:outline-cyan focus:-outline-offset-2 ${
+          loiHienThi ? 'border-danger text-danger' : 'border-hair text-ink'
         }`}
       />
-      {error && (
-        <span id={loiId} className="block text-[13px] mt-1 text-danger">
-          {error}
+      {loiHienThi && (
+        <span id={loiId} className="block text-[11px] leading-[1.3] text-danger">
+          {loiHienThi}
         </span>
       )}
     </>
