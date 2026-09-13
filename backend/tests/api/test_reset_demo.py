@@ -47,18 +47,60 @@ def test_tu_choi_khi_APP_ENV_khong_dat(monkeypatch):
 
 
 def test_thong_bao_tu_choi_neu_ro_gia_tri_APP_ENV_hien_tai(monkeypatch, capsys):
-    """Thông báo từ chối phải nói rõ APP_ENV đang là gì, không chỉ thoát im lặng."""
+    """Thông báo từ chối phải nói rõ APP_ENV đang là gì, không chỉ thoát im lặng.
+
+    (task-14-fix-brief.md S5) Giá trị nêu bằng ngoặc kép thường ("production"),
+    không phải repr() kiểu Python ('production') — đổi assert cũ theo đúng
+    format mới, không đổi ý nghĩa của test.
+    """
     from scripts.reset_demo import main
 
     monkeypatch.setenv("APP_ENV", "production")
     with pytest.raises(SystemExit):
         main(["--yes"])
-    assert "'production'" in capsys.readouterr().out
+    assert '"production"' in capsys.readouterr().out
 
     monkeypatch.delenv("APP_ENV", raising=False)
     with pytest.raises(SystemExit):
         main(["--yes"])
     assert "chưa được đặt" in capsys.readouterr().out
+
+
+def test_thong_bao_APP_ENV_chi_duong_lenh_dung(monkeypatch, capsys):
+    """Người bị chặn đang đứng trước giờ demo, không có thời gian tra tài liệu —
+    thông báo phải tự chỉ lệnh đúng, không chỉ nêu vấn đề (task-14-fix-brief.md
+    S2: reviewer chạy đúng lệnh trong tài liệu ở shell sạch thì bị chặn vì
+    pydantic-settings đọc `.env` vào `settings`, không export ra os.environ)."""
+    from scripts.reset_demo import main
+
+    monkeypatch.delenv("APP_ENV", raising=False)
+    with pytest.raises(SystemExit):
+        main(["--yes"])
+    assert "APP_ENV=local" in capsys.readouterr().out
+
+
+def test_APP_ENV_demo_duoc_chap_nhan(monkeypatch):
+    """demo là môi trường Render thật (Task 28, task-14-fix-brief.md S1) — chính
+    script này sinh ra để reset nó trước mỗi lượt demo. Không chạy reset() thật:
+    monkeypatch SessionLocal và reset() thành no-op, chỉ khẳng định main()
+    KHÔNG ném SystemExit khi APP_ENV=demo."""
+    import scripts.reset_demo as reset_demo
+
+    class _PhienGia:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *ngoai_le):
+            return False
+
+        def commit(self):
+            pass
+
+    monkeypatch.setenv("APP_ENV", "demo")
+    monkeypatch.setattr(reset_demo, "SessionLocal", _PhienGia)
+    monkeypatch.setattr(reset_demo, "reset", lambda db: None)
+
+    reset_demo.main(["--yes"])  # không raise SystemExit
 
 
 def test_cau_chi_yes_duoc_kiem_truoc_APP_ENV(monkeypatch, capsys):

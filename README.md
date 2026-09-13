@@ -25,6 +25,22 @@ docker compose -f infra/docker-compose.yml exec api python -m scripts.seed
 
 ## Reset demo
 
+### Đường nhanh (giây, giữ nguyên container)
+
+Xoá `report`, `report_value`, `report_text`, `audit_log`, `opening_balance` rồi nạp lại từ fixture qua `seed_all()`; giữ nguyên danh mục, đơn vị, tài khoản. Chạy trước mỗi lượt demo hoặc Playwright (`backend/scripts/reset_demo.py`):
+
+```bash
+docker compose -f infra/docker-compose.yml exec api python -m scripts.reset_demo --yes
+```
+
+Từ máy host, ngoài container (`.venv`) — `.env` không tự export ra biến môi trường tiến trình nên phải đặt `APP_ENV` ngay trên dòng lệnh:
+
+```bash
+cd backend && APP_ENV=local .venv/bin/python -m scripts.reset_demo --yes
+```
+
+### Đường toàn phần
+
 Xoá sạch dữ liệu kể cả volume Postgres rồi dựng lại từ đầu — `db` tạo lại `hseq`/`hseq_test` sạch, `api` tự migrate và seed lại:
 
 ```bash
