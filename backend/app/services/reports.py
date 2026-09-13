@@ -76,6 +76,12 @@ V_REPORT_VALUE_COMPUTED = Table(
 )
 
 
+# Trần 2000 ký tự của ba ô chữ nhóm C (thiết kế dòng 625, 719). Bản sao duy
+# nhất còn lại ở frontend/src/features/report/ReportForm.tsx::TOI_DA_CHU (thuộc
+# tính `maxLength` của textarea); sửa một bên phải sửa bên kia.
+TOI_DA_CHU = 2000
+
+
 def _prev_counter_subquery(R, P, WS, RV, Report_, Indicator_, ReportingPeriod_):
     """`acc_total_entered` của kỳ TRƯỚC gần nhất có `counts_in_totals`, cùng
     (org_unit, indicator) — tương quan theo dòng ngoài (Report_/Indicator_/
@@ -376,17 +382,35 @@ def doc_gia_tri(db: Session, report_id: int) -> list[ReportValueOut]:
 
 def ghi_gia_tri(
     db: Session, report_id: int, version: int, values: list[ValueIn], actor,
+    texts: dict[str, str | None] | None = None,
 ) -> tuple[int, list[ReportValueOut]]:
     """`PUT /reports/{id}/values` — payload MỘT PHẦN: chỉ mã chỉ tiêu có mặt
     trong `values` bị đụng tới, mã vắng mặt giữ nguyên nội dung đang lưu
     (spec D23; xem docstring `validate_values`).
+
+    "Một phần" đó dừng ở cấp MÃ CHỈ TIÊU — Ở CẤP TRƯỜNG THÌ KHÔNG. Trường có
+    mặt mang `null` là XOÁ TRẮNG ô; chỉ trường VẮNG MẶT mới giữ nguyên. Hai
+    chuyện đó chỉ còn phân biệt được bằng `model_fields_set` của pydantic v2
+    (`ValueIn` mặc định mọi trường là None), nên đừng thay bằng `is not None`:
+    người nhập xoá một ô gõ nhầm, thấy "Đã lưu", tải lại trang thì số cũ quay
+    về. Chiều ngược lại cũng là mất dữ liệu và còn nặng hơn — FE chỉ gửi ô ĐÃ
+    ĐỔI, nên coi "vắng mặt" là "xoá" sẽ xoá sạch Ghi chú của dòng mỗi lần
+    người dùng sửa một con số.
+
+    `texts` (ba ô chữ nhóm C, bảng `report_text`) đi CHUNG endpoint này chứ
+    không có endpoint thứ hai: hai endpoint nghĩa là hai `version` chạy song
+    song trên cùng một báo cáo, tự đẻ ra một lớp lỗi 409 mới. Cùng luật payload
+    một phần với `values`: `texts` vắng mặt (None) không đụng gì tới
+    `report_text`, mã có mặt thì ghi, mã vắng mặt giữ nguyên, giá trị `null`
+    là xoá trắng. `version` tăng đúng MỘT lần cho cả lượt, kể cả lượt chỉ có
+    `texts` còn `values` rỗng.
 
     Khoá lạc quan cùng kiểu Task 12 dự định dùng cho `apply_transition`:
     `FOR UPDATE` rồi mới so `version`, tránh mất-cập-nhật khi hai request ghi
     cùng lúc. Thứ tự kiểm: không tồn tại (404) → trạng thái không cho sửa
     (403) → version lệch (409, kèm version + values HIỆN TẠI để FE vá lại
     form) → mã chỉ tiêu lặp trong payload (400) → dữ liệu không hợp lệ theo
-    report_rules (400) → ghi.
+    report_rules (400) → mã trường chữ lạ hoặc nội dung quá dài (400) → ghi.
 
     `report.state` không có quan hệ ORM (chỉ có `state_id`) nên đọc
     `WorkflowState` bằng một query riêng, không khoá FOR UPDATE — đó là bảng
@@ -467,6 +491,29 @@ def ghi_gia_tri(
             errors=[{"indicator_code": e.indicator_code, "message": e.message} for e in loi],
         )
 
+    # Trường chữ nhóm C. `texts` rỗng ({} hoặc None) không có gì để kiểm cũng
+    # không có gì để ghi — nhưng vẫn là một lượt ghi hợp lệ, `version` vẫn tăng.
+    # Kiểm ở đây, TRƯỚC mọi lệnh ghi, để payload bị từ chối không để lại nửa ô.
+    if texts:
+        ma_hop_le = {
+            ma for (ma,) in
+            db.query(TemplateTextField.code).filter_by(template_id=r.template_id)
+        }
+        loi_chu = []
+        for ma, noi_dung in texts.items():
+            if ma not in ma_hop_le:
+                loi_chu.append({"field_code": ma,
+                                "message": "Trường chữ không có trong mẫu báo cáo"})
+            elif noi_dung is not None and len(noi_dung) > TOI_DA_CHU:
+                loi_chu.append({"field_code": ma,
+                                "message": f"Nội dung tối đa {TOI_DA_CHU} ký tự"})
+        if loi_chu:
+            # `field_code` chứ không phải `indicator_code`: C1..C3 không phải mã
+            # chỉ tiêu, nhét chúng vào khoá `indicator_code` sẽ khiến FE tìm ô
+            # trong bảng không thấy mà cũng không biết vì sao. Thân lỗi vẫn phẳng
+            # `{"detail", "errors"}` như mọi 400 khác (hop-dong-loi-backend.md).
+            raise ValidationError("Dữ liệu không hợp lệ", errors=loi_chu)
+
     # Nạp trước các dòng đang có bằng MỘT query thay vì một query mỗi ô (Ctrl+S
     # sau khi điền cả form ~53 ô là 59 round-trip với bản cũ; đích chạy là
     # Render free + pooler Supabase).
@@ -481,27 +528,50 @@ def ghi_gia_tri(
     for v in values:                       # CHỈ ô được gửi — payload một phần
         ind = theo_ma[v.indicator_code]
         gia_tri = da_lam_tron[v.indicator_code]
+        # Trường CÓ MẶT trong JSON người dùng gửi, kể cả khi mang `null`. Điều
+        # kiện phải là "có mặt", KHÔNG phải `is not None`: `is not None` biến
+        # `{"this_period": null}` (người nhập xoá trắng một ô) thành lệnh không
+        # làm gì, ô cũ quay về sau khi tải lại dù dải đầu vừa báo "Đã lưu".
+        # Đổi ngược lại — bỏ hẳn điều kiện, ghi thẳng mọi trường — còn tệ hơn:
+        # FE chỉ gửi ô đã đổi nên payload `{indicator_code, this_period}` KHÔNG
+        # có khoá `note`, và mỗi lần sửa một con số sẽ xoá sạch ghi chú dòng đó.
+        co_mat = v.model_fields_set
         row = dong_theo_chi_tieu.get(ind.id)
         if row is None:
             row = ReportValue(report_id=r.id, indicator_id=ind.id)
             db.add(row)
             dong_theo_chi_tieu[ind.id] = row
         if ind.agg_type == "sum":
-            if gia_tri.this_period is not None:
+            if "this_period" in co_mat:
                 row.this_period = gia_tri.this_period
             row.acc_prev_entered = None    # nhập sống: hai cột acc luôn NULL cho dòng sum
             row.acc_total_entered = None
         elif ind.agg_type == "counter":
-            if gia_tri.this_period is not None:
+            if "this_period" in co_mat:
                 row.this_period = gia_tri.this_period
-            if gia_tri.acc_total_entered is not None:
+            if "acc_total_entered" in co_mat:
                 row.acc_total_entered = gia_tri.acc_total_entered
         elif ind.agg_type == "snapshot":
-            if gia_tri.acc_total_entered is not None:
+            if "acc_total_entered" in co_mat:
                 row.acc_total_entered = gia_tri.acc_total_entered
-        # "computed": validate_values ở trên đã chặn (COT_NHAP_DUOC rỗng), không tới đây
-        if v.note is not None:
+        # "computed": validate_values ở trên đã chặn mọi giá trị số gửi vào dòng
+        # tự tính (COT_NHAP_DUOC rỗng) nên không có nhánh ghi số nào ở đây.
+        if "note" in co_mat:
             row.note = v.note
+
+    if texts:
+        dong_chu = {
+            row.field_code: row
+            for row in db.query(ReportText).filter(
+                ReportText.report_id == r.id, ReportText.field_code.in_(list(texts))
+            ).all()
+        }
+        for ma, noi_dung in texts.items():
+            row_chu = dong_chu.get(ma)
+            if row_chu is None:
+                db.add(ReportText(report_id=r.id, field_code=ma, content=noi_dung))
+            else:
+                row_chu.content = noi_dung
 
     r.version += 1
     r.source = "live"

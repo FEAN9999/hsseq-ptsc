@@ -94,7 +94,14 @@ class ValueIn(ApiModel):
     chỉ mã chỉ tiêu CÓ MẶT trong danh sách `values` của request bị đụng tới,
     ô nào không gửi giữ nguyên nội dung đang lưu (xem docstring
     `validate_values` ở app/domain/report_rules.py). Không có trường
-    `acc_prev_entered` — không agg_type nào cho nhập cột đó (luôn tự điền)."""
+    `acc_prev_entered` — không agg_type nào cho nhập cột đó (luôn tự điền).
+
+    "Một phần" dừng ở cấp MÃ CHỈ TIÊU. Ở cấp TRƯỜNG thì KHÔNG: gửi
+    `{"indicator_code": "B-2.1", "this_period": null}` là XOÁ TRẮNG ô Tháng
+    này, còn "giữ nguyên" nghĩa là payload KHÔNG có khoá `this_period`.
+    `ghi_gia_tri` phân biệt hai chuyện đó bằng `model_fields_set`, nên mặc
+    định `None` dưới đây chỉ để đọc `v.this_period` cho gọn — TUYỆT ĐỐI không
+    dùng chính nó để suy ra người dùng có gửi trường đó hay không."""
     indicator_code: str
     this_period: JsonNumber = None
     acc_total_entered: JsonNumber = None
@@ -107,6 +114,10 @@ class ValueIn(ApiModel):
 class PutValuesIn(ApiModel):
     version: int
     values: list[ValueIn]
+    # Cùng hình dạng với `ReportDetailOut.texts` để FE không phải đổi kiểu
+    # giữa đọc và ghi. VẮNG MẶT (None) = lượt ghi này không đụng `report_text`;
+    # có mặt thì chỉ mã nằm trong dict bị ghi, và `null` là XOÁ TRẮNG ô chữ.
+    texts: dict[str, str | None] | None = None
 
 
 class PutValuesOut(ApiModel):

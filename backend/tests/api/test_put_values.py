@@ -143,9 +143,17 @@ def test_khong_ghi_duoc_vao_chi_tieu_computed(client, db):
 
 # --- vòng sửa 1 (task-11-fix-brief.md) --------------------------------------
 
-def _ghi(client, h, report_id, version, values):
-    return client.put(f"/api/v1/reports/{report_id}/values",
-                      json={"version": version, "values": values}, headers=h)
+# Phân biệt "thân request KHÔNG có khoá `texts`" với "`texts: null`" — hai thứ
+# này cùng nghĩa với backend (không đụng report_text) nhưng phải gửi được cả
+# hai dạng mới khoá được điều đó.
+_KHONG_GUI = object()
+
+
+def _ghi(client, h, report_id, version, values, texts=_KHONG_GUI):
+    than = {"version": version, "values": values}
+    if texts is not _KHONG_GUI:
+        than["texts"] = texts
+    return client.put(f"/api/v1/reports/{report_id}/values", json=than, headers=h)
 
 
 def _o(body, ma):
@@ -504,3 +512,446 @@ def test_ghi_nhieu_o_khong_ton_them_query_moi_o(client, db):
 
     assert muoi_o["n"] == mot_o["n"], \
         f"N+1 ở đường ghi: 1 ô = {mot_o['n']} query, 10 ô = {muoi_o['n']} query"
+
+
+# =========================================================================
+# Task 23b — hai đường mất dữ liệu ở chỗ Task 22 (dựng form) gặp Task 23
+# (lưu form), xem task-23b-brief.md.
+# =========================================================================
+
+# --- Lỗ hổng 2: `null` phải XOÁ ô; chỉ trường VẮNG MẶT mới là "giữ nguyên" ---
+# Mỗi trường phải khoá CẢ HAI chiều, vì sửa sai một chiều chỉ đổi lỗi mất dữ
+# liệu này lấy lỗi mất dữ liệu khác. Chiều "vắng mặt giữ nguyên" của `note` và
+# của hai cột `counter` đã có test từ vòng sửa 1 ở trên
+# (test_note_luu_that_va_khong_bi_xoa_khi_luot_sau_chi_gui_so,
+# test_counter_ghi_mot_cot_khong_xoa_cot_kia,
+# test_sua_moi_ghi_chu_cua_dong_dang_co_so_van_luu_duoc) — phần dưới bổ sung
+# chiều `null`-xoá cho cả bốn chỗ, cộng hai chiều còn thiếu của `sum`/`snapshot`.
+
+def test_null_xoa_trang_o_thang_nay_cua_dong_sum(client, db):
+    """Người nhập gõ nhầm 1000, bôi đen xoá trắng rồi rời ô: FE gửi đúng khoá
+    với `this_period: null` (Task 23 đã có ca khoá điều đó). Bản cũ chỉ ghi khi
+    `is not None` nên lượt ấy là lệnh không làm gì — dải đầu vẫn báo "Đã lưu",
+    tải lại trang thì 1000 quay về và người nhập không hiểu vì sao."""
+    seed_all(db)
+    h = dang_nhap(client, "u22@ptsc.local")
+    bc = _nhap_08(client, h)
+
+    v = _xem(client, h, bc["id"])["version"]
+    r = _ghi(client, h, bc["id"], v, [{"indicator_code": "B-1.1", "this_period": 1000}])
+    assert r.status_code == 200, r.text
+    assert _o(r.json(), "B-1.1")["this_period"] == 1000.0
+
+    v = _xem(client, h, bc["id"])["version"]
+    r = _ghi(client, h, bc["id"], v, [{"indicator_code": "B-1.1", "this_period": None}])
+    assert r.status_code == 200, r.text
+    assert _o(r.json(), "B-1.1")["this_period"] is None, "phản hồi 200 vẫn trả số cũ"
+    assert _o(_xem(client, h, bc["id"]), "B-1.1")["this_period"] is None, \
+        "tải lại trang thì số đã xoá quay về"
+
+
+def test_ghi_so_vao_dong_sum_khong_xoa_ghi_chu_cua_chinh_dong_do(client, db):
+    """Chiều ngược lại của test trên, cho `sum` — 43/53 chỉ tiêu FM01 là `sum`
+    nên đây là dòng thường gặp nhất. FE chỉ gửi ô ĐÃ đổi, nên payload
+    `{indicator_code, this_period}` KHÔNG có khoá `note`: hiểu "vắng mặt" thành
+    "xoá" sẽ xoá sạch ghi chú mỗi lần người dùng sửa một con số.
+    test_note_luu_that_... ở trên khoá đúng tính chất này nhưng trên dòng
+    `counter` (B-1.5), nhánh code khác."""
+    seed_all(db)
+    h = dang_nhap(client, "u22@ptsc.local")
+    bc = _nhap_08(client, h)
+
+    v = _xem(client, h, bc["id"])["version"]
+    r = _ghi(client, h, bc["id"], v,
+             [{"indicator_code": "B-1.1", "note": "số của nhà thầu phụ chưa về"}])
+    assert r.status_code == 200, r.text
+
+    v = _xem(client, h, bc["id"])["version"]
+    r = _ghi(client, h, bc["id"], v, [{"indicator_code": "B-1.1", "this_period": 8}])
+    assert r.status_code == 200, r.text
+    o = _o(r.json(), "B-1.1")
+    assert o["this_period"] == 8.0
+    assert o["note"] == "số của nhà thầu phụ chưa về", "ghi ô số đã xoá ghi chú của dòng"
+
+
+def test_null_xoa_dung_mot_cot_cua_dong_counter_con_cot_kia_giu_nguyen(client, db):
+    """`counter` là agg_type DUY NHẤT có hai cột nhập được, nên nó là chỗ duy
+    nhất mà nhầm lẫn "vắng mặt" ↔ "null" xoá nhầm sang cột bên cạnh. Bốn lượt
+    ghi dưới đây đi đủ hai chiều cho cả hai cột."""
+    seed_all(db)
+    h = dang_nhap(client, "u22@ptsc.local")
+    bc = _nhap_08(client, h)
+
+    v = _xem(client, h, bc["id"])["version"]
+    r = _ghi(client, h, bc["id"], v,
+             [{"indicator_code": "B-1.5", "this_period": 7, "acc_total_entered": 20}])
+    assert r.status_code == 200, r.text
+    assert (_o(r.json(), "B-1.5")["this_period"],
+            _o(r.json(), "B-1.5")["acc_total_entered"]) == (7.0, 20.0)
+
+    v = _xem(client, h, bc["id"])["version"]
+    r = _ghi(client, h, bc["id"], v, [{"indicator_code": "B-1.5", "this_period": None}])
+    assert r.status_code == 200, r.text
+    o = _o(r.json(), "B-1.5")
+    assert o["this_period"] is None, "null không xoá được cột Tháng này"
+    assert o["acc_total_entered"] == 20.0, "xoá Tháng này đã xoá lây Cộng dồn"
+
+    v = _xem(client, h, bc["id"])["version"]
+    r = _ghi(client, h, bc["id"], v, [{"indicator_code": "B-1.5", "this_period": 9}])
+    assert r.status_code == 200, r.text
+
+    v = _xem(client, h, bc["id"])["version"]
+    r = _ghi(client, h, bc["id"], v,
+             [{"indicator_code": "B-1.5", "acc_total_entered": None}])
+    assert r.status_code == 200, r.text
+    o = _o(r.json(), "B-1.5")
+    assert o["acc_total_entered"] is None, "null không xoá được cột Cộng dồn"
+    assert o["this_period"] == 9.0, "xoá Cộng dồn đã xoá lây Tháng này"
+    sau = _o(_xem(client, h, bc["id"]), "B-1.5")
+    assert (sau["this_period"], sau["acc_total_entered"]) == (9.0, None)
+
+
+def test_null_xoa_trang_ghi_chu(client, db):
+    """`counter_check` khuyên người dùng ghi lý do lệch vào Ghi chú; xoá lại
+    lời khuyên đó khi đã hết lệch là thao tác có thật. Không xoá được nghĩa là
+    dòng chữ cũ dính vĩnh viễn trên bản in gửi Ban ATCL."""
+    seed_all(db)
+    h = dang_nhap(client, "u22@ptsc.local")
+    bc = _nhap_08(client, h)
+
+    v = _xem(client, h, bc["id"])["version"]
+    r = _ghi(client, h, bc["id"], v,
+             [{"indicator_code": "B-1.5", "note": "reset sau LTI 12/08"}])
+    assert r.status_code == 200, r.text
+    assert _o(r.json(), "B-1.5")["note"] == "reset sau LTI 12/08"
+
+    v = _xem(client, h, bc["id"])["version"]
+    r = _ghi(client, h, bc["id"], v, [{"indicator_code": "B-1.5", "note": None}])
+    assert r.status_code == 200, r.text
+    assert _o(r.json(), "B-1.5")["note"] is None
+    assert _o(_xem(client, h, bc["id"]), "B-1.5")["note"] is None, \
+        "tải lại trang thì ghi chú đã xoá quay về"
+
+
+def _them_chi_tieu_snapshot(db):
+    """FM01 KHÔNG khai chỉ tiêu `snapshot` nào (app/seed/catalog_fm01.py chỉ có
+    sum/counter/computed), nên nhánh `snapshot` của `ghi_gia_tri` — một trong
+    bốn chỗ brief bắt sửa — không có đường dữ liệu thật nào đi qua. Dựng một
+    chỉ tiêu snapshot ngay trong transaction của test là cách duy nhất khoá
+    được nhánh đó; nó sống và chết cùng transaction, không rò sang test khác."""
+    from app.models import Indicator, ReportTemplate, TemplateSection
+    tpl = db.query(ReportTemplate).filter_by(code="FM01").one()
+    sec = db.query(TemplateSection).filter_by(template_id=tpl.id, code="B-1").one()
+    db.add(Indicator(
+        template_id=tpl.id, section_id=sec.id, code="S-TEST",
+        name_vi="Chỉ tiêu ảnh chụp dựng trong test", agg_type="snapshot",
+        formula=None, reset_rule="none", decimals=0, required=False,
+        sort_order=999, active=True,
+    ))
+    db.flush()
+
+
+def test_dong_snapshot_null_xoa_cong_don_con_truong_vang_mat_giu_nguyen(client, db):
+    seed_all(db)
+    _them_chi_tieu_snapshot(db)
+    h = dang_nhap(client, "u22@ptsc.local")
+    bc = _nhap_08(client, h)
+
+    v = _xem(client, h, bc["id"])["version"]
+    r = _ghi(client, h, bc["id"], v,
+             [{"indicator_code": "S-TEST", "acc_total_entered": 15}])
+    assert r.status_code == 200, r.text
+    assert _o(r.json(), "S-TEST")["acc_total_entered"] == 15.0
+
+    # trường VẮNG MẶT: lượt chỉ gửi Ghi chú không được đụng cột Cộng dồn
+    v = _xem(client, h, bc["id"])["version"]
+    r = _ghi(client, h, bc["id"], v,
+             [{"indicator_code": "S-TEST", "note": "kiểm kê ngày 31/08"}])
+    assert r.status_code == 200, r.text
+    assert _o(r.json(), "S-TEST")["acc_total_entered"] == 15.0, \
+        "ghi mỗi Ghi chú đã xoá Cộng dồn của dòng snapshot"
+
+    # trường CÓ MẶT mang null: xoá trắng
+    v = _xem(client, h, bc["id"])["version"]
+    r = _ghi(client, h, bc["id"], v,
+             [{"indicator_code": "S-TEST", "acc_total_entered": None}])
+    assert r.status_code == 200, r.text
+    assert _o(r.json(), "S-TEST")["acc_total_entered"] is None
+    assert _o(_xem(client, h, bc["id"]), "S-TEST")["acc_total_entered"] is None
+
+
+# --- Lỗ hổng 1: ba ô chữ nhóm C phải lưu được ------------------------------
+# Trước Task 23b KHÔNG endpoint nào ghi `report_text`: người dùng gõ ghi chú
+# nhóm C, dải đầu báo "Đã lưu", đóng tab, chữ mất sạch.
+
+def test_ghi_texts_luu_that_va_GET_doc_lai_dung_noi_dung(client, db):
+    seed_all(db)
+    h = dang_nhap(client, "u22@ptsc.local")
+    bc = _nhap_08(client, h)
+    assert _xem(client, h, bc["id"])["texts"] == {"C1": None, "C2": None, "C3": None}, \
+        "tiền đề: báo cáo chưa gõ chữ nào"
+
+    v = _xem(client, h, bc["id"])["version"]
+    r = _ghi(client, h, bc["id"], v, [], texts={"C1": "Diễn tập PCCC ngày 12/08"})
+    assert r.status_code == 200, r.text
+    assert _xem(client, h, bc["id"])["texts"] == {
+        "C1": "Diễn tập PCCC ngày 12/08", "C2": None, "C3": None}
+
+
+def test_texts_vang_mat_hoac_null_khong_dung_toi_chu_da_luu(client, db):
+    """Mọi ca test có từ trước Task 23b đều gửi thân KHÔNG có khoá `texts` và
+    phải vẫn xanh nguyên — khoá đúng tính chất đó ở đây, cho cả hai dạng
+    "vắng mặt" (không có khoá) và `texts: null`."""
+    seed_all(db)
+    h = dang_nhap(client, "u22@ptsc.local")
+    bc = _nhap_08(client, h)
+
+    v = _xem(client, h, bc["id"])["version"]
+    assert _ghi(client, h, bc["id"], v, [], texts={"C2": "Huấn luyện tháng 9"}
+                ).status_code == 200
+
+    v = _xem(client, h, bc["id"])["version"]
+    r = _ghi(client, h, bc["id"], v, [{"indicator_code": "B-2.1", "this_period": 3}])
+    assert r.status_code == 200, r.text
+    assert _xem(client, h, bc["id"])["texts"]["C2"] == "Huấn luyện tháng 9", \
+        "lượt ghi không gửi `texts` đã xoá chữ nhóm C"
+
+    v = _xem(client, h, bc["id"])["version"]
+    r = _ghi(client, h, bc["id"], v, [], texts=None)
+    assert r.status_code == 200, r.text
+    assert _xem(client, h, bc["id"])["texts"]["C2"] == "Huấn luyện tháng 9", \
+        "`texts: null` phải là không-đụng-gì, không phải xoá cả ba ô"
+
+
+def test_texts_chi_ghi_ma_co_mat_ma_vang_mat_giu_nguyen(client, db):
+    """Cùng luật "payload một phần" với `values`: người dùng sửa C2 thì C1 và
+    C3 phải nguyên vẹn, kể cả khi FE chỉ gửi mỗi ô vừa đổi."""
+    seed_all(db)
+    h = dang_nhap(client, "u22@ptsc.local")
+    bc = _nhap_08(client, h)
+
+    v = _xem(client, h, bc["id"])["version"]
+    assert _ghi(client, h, bc["id"], v, [],
+                texts={"C1": "nổi bật", "C3": "đề xuất"}).status_code == 200
+
+    v = _xem(client, h, bc["id"])["version"]
+    r = _ghi(client, h, bc["id"], v, [], texts={"C2": "dự kiến tháng tới"})
+    assert r.status_code == 200, r.text
+    assert _xem(client, h, bc["id"])["texts"] == {
+        "C1": "nổi bật", "C2": "dự kiến tháng tới", "C3": "đề xuất"}
+
+
+def test_texts_null_xoa_trang_o_chu(client, db):
+    """`null` là XOÁ TRẮNG, không phải "bỏ qua" — cùng quy ước với `values`.
+    Không xoá được thì người nhập dán nhầm cả trang Word vào C1 là kẹt vĩnh
+    viễn (textarea rỗng nhưng server vẫn giữ bản cũ)."""
+    seed_all(db)
+    h = dang_nhap(client, "u22@ptsc.local")
+    bc = _nhap_08(client, h)
+
+    v = _xem(client, h, bc["id"])["version"]
+    assert _ghi(client, h, bc["id"], v, [], texts={"C1": "dán nhầm"}).status_code == 200
+
+    v = _xem(client, h, bc["id"])["version"]
+    r = _ghi(client, h, bc["id"], v, [], texts={"C1": None})
+    assert r.status_code == 200, r.text
+    assert _xem(client, h, bc["id"])["texts"]["C1"] is None
+
+
+def test_texts_ma_ngoai_mau_bao_cao_tra_400_va_khong_ghi_gi(client, db):
+    """Hai đường vào cùng một lỗi: mã không tồn tại ở đâu cả, và mã CÓ THẬT
+    nhưng thuộc MẪU KHÁC (mẫu thứ hai dựng ngay trong test — FM01 là mẫu duy
+    nhất của seed nên bỏ điều kiện `template_id` vẫn xanh nếu chỉ thử mã bịa).
+    Payload bị từ chối không được để lại ô số nào đã ghi: `ghi_gia_tri` kiểm
+    trường chữ TRƯỚC vòng ghi, `version` phải đứng yên."""
+    seed_all(db)
+    from app.models import ReportTemplate, TemplateTextField
+    mau_khac = ReportTemplate(code="FM99", name_vi="Mẫu khác (dựng trong test)",
+                              name_en=None, period_type="month", version=1, active=True)
+    db.add(mau_khac)
+    db.flush()
+    db.add(TemplateTextField(template_id=mau_khac.id, code="Z9",
+                             label_vi="Ô chữ của mẫu khác", sort_order=1))
+    db.flush()
+
+    h = dang_nhap(client, "u22@ptsc.local")
+    bc = _nhap_08(client, h)
+    v0 = _xem(client, h, bc["id"])["version"]
+    truoc = _o(_xem(client, h, bc["id"]), "B-2.1")
+
+    # Mã HỢP LỆ đứng trước mã lạ trong cùng dict: vòng kiểm phải duyệt hết, và
+    # ô chữ hợp lệ đi kèm cũng không được ghi khi lượt đó bị từ chối.
+    for ma in ("C9", "Z9"):
+        r = _ghi(client, h, bc["id"], v0,
+                 [{"indicator_code": "B-2.1", "this_period": 3}],
+                 texts={"C1": "ô hợp lệ đi cùng lượt", ma: "x"})
+        assert r.status_code == 400, f"{ma} → {r.status_code} {r.text}"
+        assert r.json()["detail"] == "Dữ liệu không hợp lệ", ma
+        assert r.json()["errors"] == [
+            {"field_code": ma, "message": "Trường chữ không có trong mẫu báo cáo"}], ma
+
+    # `db.flush()` là phần KHÔNG bỏ được của phép kiểm "không ghi gì". Session
+    # để `autoflush=False` (core/db.py) nên một ô ghi TRƯỚC lúc ném lỗi không
+    # hiện ra ở câu SELECT kế tiếp — nó nằm im trong session rồi đổ xuống DB ở
+    # lần flush sau. Thiếu dòng này thì dời phép kiểm trường chữ xuống SAU vòng
+    # ghi ô số vẫn xanh (đã đo: đột biến M25 sống), tức bất biến "kiểm xong hết
+    # rồi mới ghi" mất hẳn người canh và mọi 400 phải trông cậy vào rollback.
+    db.flush()
+    assert _xem(client, h, bc["id"])["version"] == v0, "payload bị từ chối mà version vẫn tăng"
+    assert _o(_xem(client, h, bc["id"]), "B-2.1") == truoc, \
+        "payload bị từ chối mà ô số trong cùng lượt vẫn được ghi"
+    assert _xem(client, h, bc["id"])["texts"] == {"C1": None, "C2": None, "C3": None}
+
+
+def test_texts_ma_la_va_dai_qua_tran_cung_luc_chi_bao_mot_loi(client, db):
+    """Cùng quy ước với `validate_values` ("một ô chỉ báo lỗi cụ thể nhất,
+    không chồng thêm lỗi lên cùng một mã"): đổi `elif` thành `if` sẽ trả hai
+    mục lỗi cho một textarea, FE tô hai câu chồng nhau dưới cùng một ô."""
+    seed_all(db)
+    h = dang_nhap(client, "u22@ptsc.local")
+    bc = _nhap_08(client, h)
+    v = _xem(client, h, bc["id"])["version"]
+
+    r = _ghi(client, h, bc["id"], v, [], texts={"C9": "y" * 2001})
+    assert r.status_code == 400, r.text
+    assert r.json()["errors"] == [
+        {"field_code": "C9", "message": "Trường chữ không có trong mẫu báo cáo"}]
+
+
+def test_texts_dai_qua_2000_ky_tu_tra_400_dung_2000_van_luu_duoc(client, db):
+    """2000 là con số của thiết kế (dòng 625, 719) và là `maxLength` của
+    textarea phía FE. Chặn phải đúng ở ranh giới: 2000 lưu được, 2001 bị từ
+    chối — nới thành `>=` là chặn nhầm đúng người dùng gõ kín ô."""
+    seed_all(db)
+    h = dang_nhap(client, "u22@ptsc.local")
+    bc = _nhap_08(client, h)
+
+    v = _xem(client, h, bc["id"])["version"]
+    r = _ghi(client, h, bc["id"], v, [], texts={"C1": "x" * 2000})
+    assert r.status_code == 200, r.text
+    assert _xem(client, h, bc["id"])["texts"]["C1"] == "x" * 2000
+
+    v = _xem(client, h, bc["id"])["version"]
+    r = _ghi(client, h, bc["id"], v, [], texts={"C1": "y" * 2001})
+    assert r.status_code == 400, r.text
+    assert r.json()["detail"] == "Dữ liệu không hợp lệ"
+    assert r.json()["errors"] == [
+        {"field_code": "C1", "message": "Nội dung tối đa 2000 ký tự"}]
+    db.flush()          # xem chú thích `db.flush()` ở ca mã trường chữ lạ
+    assert _xem(client, h, bc["id"])["texts"]["C1"] == "x" * 2000, \
+        "payload bị từ chối mà ô chữ vẫn bị ghi đè"
+    assert _xem(client, h, bc["id"])["version"] == v
+
+
+def test_texts_sai_tren_bao_cao_khong_sua_duoc_van_la_403_chu_khong_phai_400(client, db):
+    """Thứ tự kiểm của `ghi_gia_tri` (404 → 403 → 409 → 400) không được xê
+    dịch vì có thêm `texts`. Báo cáo đã duyệt phải nhận 403 kể cả khi payload
+    còn mang mã trường chữ sai — người nhập cần biết "báo cáo đã khoá", chứ
+    không phải một câu lỗi dữ liệu đẩy họ đi sửa payload rồi vẫn hỏng."""
+    seed_all(db)
+    h = dang_nhap(client, "u01@ptsc.local")
+    ds = client.get("/api/v1/reports?template=FM01&period=2026-07", headers=h).json()
+    da_duyet = next(r for r in ds if r["state"] == "approved")
+    r = _ghi(client, h, da_duyet["id"], 1, [], texts={"C9": "x"})
+    assert r.status_code == 403, r.text
+    assert r.json()["detail"] == "Báo cáo ở trạng thái không cho sửa"
+
+
+def test_version_lech_thang_loi_trong_chu_nen_van_tra_409(client, db):
+    """Vế thứ hai của cùng thứ tự đó: lượt vừa lệch `version` vừa mang mã
+    trường chữ sai phải nhận 409, không phải 400. Thân 409 mang `version` +
+    `values` để FE vẽ lại bảng (hop-dong-loi-backend.md mục 1); đổi thành 400
+    thì FE chỉ tô một câu lỗi dữ liệu và người nhập kẹt lại ở bản cũ."""
+    seed_all(db)
+    h = dang_nhap(client, "u22@ptsc.local")
+    bc = _nhap_08(client, h)
+    v0 = _xem(client, h, bc["id"])["version"]
+    assert _ghi(client, h, bc["id"], v0, [], texts={"C1": "lượt thắng"}).status_code == 200
+
+    r = _ghi(client, h, bc["id"], v0, [], texts={"C9": "mã sai"})
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"] == "Người khác vừa sửa báo cáo này"
+    assert r.json()["version"] == v0 + 1
+
+
+def test_luot_chi_co_texts_van_tang_version_dung_mot_lan(client, db):
+    """Ruling 250: một endpoint, một `version`. Lượt ghi chỉ đụng nhóm C
+    (`values` rỗng) vẫn là một lượt ghi — không tăng `version` thì hai tab mở
+    song song cùng ghi đè chữ của nhau mà khoá lạc quan không thấy gì."""
+    seed_all(db)
+    h = dang_nhap(client, "u22@ptsc.local")
+    bc = _nhap_08(client, h)
+
+    v0 = _xem(client, h, bc["id"])["version"]
+    r = _ghi(client, h, bc["id"], v0, [], texts={"C1": "chỉ có chữ"})
+    assert r.status_code == 200, r.text
+    assert r.json()["version"] == v0 + 1
+    assert _xem(client, h, bc["id"])["version"] == v0 + 1
+
+    # gửi lại version cũ phải 409 — chứng minh version mới là thật, không chỉ
+    # là con số trong phản hồi
+    r = _ghi(client, h, bc["id"], v0, [], texts={"C1": "ghi đè"})
+    assert r.status_code == 409, r.text
+    db.flush()          # xem chú thích `db.flush()` ở ca mã trường chữ lạ
+    assert _xem(client, h, bc["id"])["texts"]["C1"] == "chỉ có chữ", \
+        "lượt bị 409 vẫn ghi được chữ nhóm C"
+
+
+def test_ghi_texts_lan_hai_cap_nhat_dong_cu_khong_them_dong_moi(client, db):
+    """`report_text` khoá chính là (report_id, field_code): INSERT lần hai nổ
+    UniqueViolation thành 500 trần ngay ở lần sửa thứ hai của cùng một ô chữ —
+    tức lần gõ thứ hai của mọi người dùng."""
+    seed_all(db)
+    from app.models import ReportText
+    h = dang_nhap(client, "u22@ptsc.local")
+    bc = _nhap_08(client, h)
+
+    for noi_dung in ("bản nháp", "bản sửa", "bản cuối"):
+        v = _xem(client, h, bc["id"])["version"]
+        r = _ghi(client, h, bc["id"], v, [], texts={"C1": noi_dung})
+        assert r.status_code == 200, f"{noi_dung} → {r.status_code} {r.text}"
+        assert _xem(client, h, bc["id"])["texts"]["C1"] == noi_dung
+
+    assert db.query(ReportText).filter_by(report_id=bc["id"], field_code="C1").count() == 1
+
+
+def test_ghi_texts_chi_dung_bao_cao_dang_sua(client, db):
+    """Tương quan `report_id`: bỏ điều kiện đó thì lượt ghi C1 của đơn vị này
+    cập nhật nhầm dòng C1 của báo cáo khác (bảng `report_text` chung cho mọi
+    báo cáo). GET đã có test tương quan tương tự ở test_reports.py, đường GHI
+    thì chưa."""
+    seed_all(db)
+    from app.models import ReportText
+    h = dang_nhap(client, "u22@ptsc.local")
+    bc = _nhap_08(client, h)
+    khac = _bao_cao_cua(db, "U01", "2026-08")
+    db.add(ReportText(report_id=khac.id, field_code="C1", content="chữ của U01"))
+    db.flush()
+
+    v = _xem(client, h, bc["id"])["version"]
+    r = _ghi(client, h, bc["id"], v, [], texts={"C1": "chữ của P05"})
+    assert r.status_code == 200, r.text
+    assert _xem(client, h, bc["id"])["texts"]["C1"] == "chữ của P05"
+    assert db.query(ReportText).filter_by(
+        report_id=khac.id, field_code="C1").one().content == "chữ của U01", \
+        "lượt ghi đã đụng vào chữ của báo cáo khác"
+
+
+def test_ghi_texts_cung_luot_voi_values_chi_tang_version_mot_lan(client, db):
+    """Ctrl+S sau khi vừa sửa số vừa gõ nhóm C gửi CẢ HAI trong một thân
+    request. Hai lần tăng `version` trong một lượt sẽ làm lần lưu kế tiếp của
+    chính người đó nhận 409 giả."""
+    seed_all(db)
+    h = dang_nhap(client, "u22@ptsc.local")
+    bc = _nhap_08(client, h)
+
+    v0 = _xem(client, h, bc["id"])["version"]
+    r = _ghi(client, h, bc["id"], v0, [{"indicator_code": "B-2.1", "this_period": 4}],
+             texts={"C3": "đề nghị cấp thêm găng tay"})
+    assert r.status_code == 200, r.text
+    assert r.json()["version"] == v0 + 1
+    assert _o(r.json(), "B-2.1")["this_period"] == 4.0
+    sau = _xem(client, h, bc["id"])
+    assert sau["version"] == v0 + 1
+    assert sau["texts"]["C3"] == "đề nghị cấp thêm găng tay"
+    assert _o(sau, "B-2.1")["this_period"] == 4.0

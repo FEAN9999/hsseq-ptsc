@@ -149,7 +149,8 @@ def ghi_gia_tri_bao_cao(
     u: CurrentUser = Depends(current_user),
     db: Session = Depends(get_db),
 ):
-    version, values = ghi_gia_tri(db, r.id, payload.version, payload.values, actor=u)
+    version, values = ghi_gia_tri(db, r.id, payload.version, payload.values, actor=u,
+                                  texts=payload.texts)
     return PutValuesOut(version=version, values=values)
 
 
