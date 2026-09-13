@@ -567,6 +567,14 @@ def ghi_gia_tri(
             ).all()
         }
         for ma, noi_dung in texts.items():
+            # `""` và `null` là CÙNG một ý "ô rỗng" — chuẩn hoá về `None`. FE nạp
+            # bằng `noiDung ?? ''` (frontend/.../ReportForm.tsx:182) nên ô bị xoá
+            # trắng gửi lên `""`, còn ô chưa ai gõ bao giờ là `NULL`: để nguyên
+            # thì `report_text.content` có HAI cách biểu diễn "rỗng" và mọi truy
+            # vấn `WHERE content IS NOT NULL` ở đường in/xuất sau này đếm sai.
+            # Chuẩn hoá ở BACKEND chứ không ở FE — đây là chỗ nghẹt duy nhất mọi
+            # client đi qua, sửa ở FE thì client sau lại đẻ ra bản thứ hai.
+            noi_dung = noi_dung or None
             row_chu = dong_chu.get(ma)
             if row_chu is None:
                 db.add(ReportText(report_id=r.id, field_code=ma, content=noi_dung))

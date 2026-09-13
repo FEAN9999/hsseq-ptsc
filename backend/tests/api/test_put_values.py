@@ -136,12 +136,25 @@ def test_khong_ghi_duoc_vao_chi_tieu_computed(client, db):
     assert r.json()["errors"] == [
         {"indicator_code": "B-1.4", "message": "Dòng tự tính, không nhận giá trị gửi lên"}]
 
-    sau = client.get(f"/api/v1/reports/{bc['id']}", headers=h).json()
-    o = next(v for v in sau["values"] if v["indicator_code"] == "B-1.4")
-    assert o["acc_total_entered"] is None
+    # Khẳng định "không ghi gì" của ca này KHÔNG đi qua GET được:
+    # `lay_chi_tiet_bao_cao` ép `acc_total_entered = None` cho MỌI dòng
+    # `computed`, nên `o["acc_total_entered"] is None` luôn đúng dù dòng có bị
+    # ghi hay không — nó không canh được gì (đo thật: probe ghi 777 vào đúng
+    # dòng B-1.4 rồi mới ném 400, ca vẫn xanh). Đọc thẳng `report_value`, và
+    # `db.flush()` trước vì `autoflush=False` + fixture `client` ghi đè `get_db`
+    # giấu mọi thứ chưa flush khỏi câu SELECT kế tiếp.
+    db.flush()
+    from app.models import Indicator, ReportValue
+    ind = db.query(Indicator).filter_by(code="B-1.4").one()
+    assert db.query(ReportValue).filter_by(
+        report_id=bc["id"], indicator_id=ind.id).count() == 0, \
+        "payload bị từ chối mà dòng tự tính vẫn được ghi"
 
 
 # --- vòng sửa 1 (task-11-fix-brief.md) --------------------------------------
+# (`_KHONG_GUI` và tham số `texts` của `_ghi` ngay dưới đây là mã của Task 23b,
+# không phải của vòng sửa 1 — để chung ở đây vì mọi ca dưới banner này gọi cùng
+# một hàm trợ giúp.)
 
 # Phân biệt "thân request KHÔNG có khoá `texts`" với "`texts: null`" — hai thứ
 # này cùng nghĩa với backend (không đụng report_text) nhưng phải gửi được cả
@@ -203,6 +216,11 @@ def test_so_am_bi_tu_choi_ke_ca_khi_lam_tron_ve_khong(client, db):
         assert r.json()["errors"] == [
             {"indicator_code": "B-2.1", "message": "Số không được âm"}], f"{so}"
 
+    # Xem chú thích dài về `db.flush()` ở
+    # test_texts_ma_ngoai_mau_bao_cao_tra_400_va_khong_ghi_gi: thiếu dòng này thì
+    # khẳng định ngay dưới KHÔNG bao giờ thấy dữ liệu đã ghi (autoflush=False +
+    # fixture `client` ghi đè `get_db`), tức ca này canh mà không canh gì cả.
+    db.flush()
     assert _o(_xem(client, h, bc["id"]), "B-2.1") == truoc, \
         "payload bị từ chối mà ô vẫn đổi"
 
@@ -335,6 +353,11 @@ def test_so_qua_lon_tra_400_tieng_viet_khong_phai_500(client, db):
         assert r.json()["errors"] == [
             {"indicator_code": "B-2.1",
              "message": "Số quá lớn, tối đa 16 chữ số phần nguyên"}], f"{so}"
+    # Xem chú thích dài về `db.flush()` ở
+    # test_texts_ma_ngoai_mau_bao_cao_tra_400_va_khong_ghi_gi: thiếu dòng này thì
+    # khẳng định ngay dưới KHÔNG bao giờ thấy dữ liệu đã ghi (autoflush=False +
+    # fixture `client` ghi đè `get_db`), tức ca này canh mà không canh gì cả.
+    db.flush()
     assert _o(_xem(client, h, bc["id"]), "B-2.1") == truoc
 
     # ngay dưới ngưỡng vẫn ghi được — chặn không được nới rộng thành chặn nhầm
@@ -369,6 +392,11 @@ def test_trung_ma_chi_tieu_trong_cung_payload_tra_400(client, db):
     assert r.json()["detail"] == "Dữ liệu không hợp lệ"
     assert r.json()["errors"] == [
         {"indicator_code": "B-2.1", "message": "Mã chỉ tiêu bị lặp trong cùng một payload"}]
+    # Xem chú thích dài về `db.flush()` ở
+    # test_texts_ma_ngoai_mau_bao_cao_tra_400_va_khong_ghi_gi: thiếu dòng này thì
+    # khẳng định ngay dưới KHÔNG bao giờ thấy dữ liệu đã ghi (autoflush=False +
+    # fixture `client` ghi đè `get_db`), tức ca này canh mà không canh gì cả.
+    db.flush()
     assert _xem(client, h, bc_id)["version"] == 1, "payload bị từ chối mà version vẫn tăng"
 
 
@@ -398,6 +426,11 @@ def test_returned_ghi_duoc_con_submitted_thi_403(client, db):
     r = _ghi(client, h, bc["id"], v, [{"indicator_code": "B-2.1", "this_period": 6}])
     assert r.status_code == 403, r.text
     assert r.json()["detail"] == "Báo cáo ở trạng thái không cho sửa"
+    # Xem chú thích dài về `db.flush()` ở
+    # test_texts_ma_ngoai_mau_bao_cao_tra_400_va_khong_ghi_gi: thiếu dòng này thì
+    # khẳng định ngay dưới KHÔNG bao giờ thấy dữ liệu đã ghi (autoflush=False +
+    # fixture `client` ghi đè `get_db`), tức ca này canh mà không canh gì cả.
+    db.flush()
     assert _o(_xem(client, h, bc["id"]), "B-2.1")["this_period"] == 5.0
 
 
@@ -551,8 +584,10 @@ def test_null_xoa_trang_o_thang_nay_cua_dong_sum(client, db):
 
 
 def test_ghi_so_vao_dong_sum_khong_xoa_ghi_chu_cua_chinh_dong_do(client, db):
-    """Chiều ngược lại của test trên, cho `sum` — 43/53 chỉ tiêu FM01 là `sum`
-    nên đây là dòng thường gặp nhất. FE chỉ gửi ô ĐÃ đổi, nên payload
+    """Chiều ngược lại của test trên, cho `sum` — 48/53 chỉ tiêu FM01 là `sum`
+    (`Counter({'sum': 48, 'counter': 4, 'computed': 1})`; 43/53 là số dòng
+    `decimals=0`, con số của docstring ngay phía trên) nên đây là dòng thường
+    gặp nhất. FE chỉ gửi ô ĐÃ đổi, nên payload
     `{indicator_code, this_period}` KHÔNG có khoá `note`: hiểu "vắng mặt" thành
     "xoá" sẽ xoá sạch ghi chú mỗi lần người dùng sửa một con số.
     test_note_luu_that_... ở trên khoá đúng tính chất này nhưng trên dòng
@@ -818,29 +853,43 @@ def test_texts_ma_la_va_dai_qua_tran_cung_luc_chi_bao_mot_loi(client, db):
         {"field_code": "C9", "message": "Trường chữ không có trong mẫu báo cáo"}]
 
 
-def test_texts_dai_qua_2000_ky_tu_tra_400_dung_2000_van_luu_duoc(client, db):
+def test_texts_tran_2000_dem_KY_TU_va_ap_cho_moi_o_trong_luot(client, db):
     """2000 là con số của thiết kế (dòng 625, 719) và là `maxLength` của
-    textarea phía FE. Chặn phải đúng ở ranh giới: 2000 lưu được, 2001 bị từ
-    chối — nới thành `>=` là chặn nhầm đúng người dùng gõ kín ô."""
+    textarea phía FE. Ranh giới 2000 lưu được / 2001 bị chặn là một nửa; hai
+    nửa còn lại từng bị hụt vì payload quá hiền:
+
+    1. Đơn vị là KÝ TỰ, không phải byte. Chuỗi ASCII không phân biệt được hai
+       cách đếm, mà ba ô nhóm C là ba ô văn xuôi TIẾNG VIỆT (mỗi ký tự 3 byte
+       UTF-8): đếm byte thì người dùng gõ ~667 ký tự đã bị 400 trong khi bộ đếm
+       trên màn hình mới hiện 700/2000.
+    2. Trần áp cho MỌI ô trong lượt, không riêng ô đầu dict — nên ô vi phạm
+       dưới đây đứng THỨ HAI, sau một ô hợp lệ.
+    """
     seed_all(db)
     h = dang_nhap(client, "u22@ptsc.local")
     bc = _nhap_08(client, h)
+    dung_tran = "ố" * 2000
+    qua_tran = "ồ" * 2001
+    assert (len(dung_tran), len(dung_tran.encode())) == (2000, 6000), \
+        "tiền đề: chuỗi dựng sẵn phải là 2000 KÝ TỰ tiếng Việt = 6000 byte"
+    assert len(qua_tran) == 2001
 
     v = _xem(client, h, bc["id"])["version"]
-    r = _ghi(client, h, bc["id"], v, [], texts={"C1": "x" * 2000})
+    r = _ghi(client, h, bc["id"], v, [], texts={"C1": dung_tran})
     assert r.status_code == 200, r.text
-    assert _xem(client, h, bc["id"])["texts"]["C1"] == "x" * 2000
+    assert _xem(client, h, bc["id"])["texts"]["C1"] == dung_tran
 
     v = _xem(client, h, bc["id"])["version"]
-    r = _ghi(client, h, bc["id"], v, [], texts={"C1": "y" * 2001})
+    r = _ghi(client, h, bc["id"], v, [], texts={"C1": "ngắn, hợp lệ", "C2": qua_tran})
     assert r.status_code == 400, r.text
     assert r.json()["detail"] == "Dữ liệu không hợp lệ"
     assert r.json()["errors"] == [
-        {"field_code": "C1", "message": "Nội dung tối đa 2000 ký tự"}]
+        {"field_code": "C2", "message": "Nội dung tối đa 2000 ký tự"}]
     db.flush()          # xem chú thích `db.flush()` ở ca mã trường chữ lạ
-    assert _xem(client, h, bc["id"])["texts"]["C1"] == "x" * 2000, \
-        "payload bị từ chối mà ô chữ vẫn bị ghi đè"
-    assert _xem(client, h, bc["id"])["version"] == v
+    sau = _xem(client, h, bc["id"])
+    assert sau["texts"]["C1"] == dung_tran, "payload bị từ chối mà ô chữ vẫn bị ghi đè"
+    assert sau["texts"]["C2"] is None
+    assert sau["version"] == v
 
 
 def test_texts_sai_tren_bao_cao_khong_sua_duoc_van_la_403_chu_khong_phai_400(client, db):
@@ -955,3 +1004,203 @@ def test_ghi_texts_cung_luot_voi_values_chi_tang_version_mot_lan(client, db):
     assert sau["version"] == v0 + 1
     assert sau["texts"]["C3"] == "đề nghị cấp thêm găng tay"
     assert _o(sau, "B-2.1")["this_period"] == 4.0
+
+
+# =========================================================================
+# Task 23b — vòng sửa 1 (task-23b-fix-1.md). Mười một mục dưới đây là KHOÁ
+# TEST cho mã đã đúng: người soát tự nghĩ 22 đột biến mới và 11 cái sống, gần
+# như tất cả vì hai giả định không bao giờ bị phá trong file này — mọi ca chạy
+# trên báo cáo 2026-08 ĐÃ CÓ SẴN dòng `report_value`, và mọi ca `texts` chỉ gửi
+# MỘT mã chữ mỗi lượt. Các ca dưới đây phá đúng hai giả định đó.
+# =========================================================================
+
+def test_o_chu_rong_duoc_chuan_hoa_ve_null(client, db):
+    """FE nạp bằng `noiDung ?? ''` (ReportForm.tsx:182) nên ô bị xoá trắng gửi
+    lên `""` chứ KHÔNG phải `null` — đường `null` mà mấy ca trên khoá rất kỹ có
+    thể không bao giờ được FE đi qua. Không chuẩn hoá thì `report_text.content`
+    có hai cách biểu diễn "rỗng" (`NULL` cho ô chưa ai gõ, `''` cho ô đã xoá) và
+    mọi truy vấn `WHERE content IS NOT NULL` ở đường in/xuất sau này đếm sai.
+    Khoá cả hai đường ghi: ô ĐÃ CÓ dòng (UPDATE) và ô chưa có dòng (INSERT)."""
+    seed_all(db)
+    from app.models import ReportText
+    h = dang_nhap(client, "u22@ptsc.local")
+    bc = _nhap_08(client, h)
+
+    v = _xem(client, h, bc["id"])["version"]
+    assert _ghi(client, h, bc["id"], v, [], texts={"C1": "có chữ"}).status_code == 200
+
+    v = _xem(client, h, bc["id"])["version"]
+    r = _ghi(client, h, bc["id"], v, [], texts={"C1": ""})
+    assert r.status_code == 200, r.text
+    assert _xem(client, h, bc["id"])["texts"]["C1"] is None
+    assert db.query(ReportText).filter_by(
+        report_id=bc["id"], field_code="C1").one().content is None, \
+        "đường UPDATE lưu `''` xuống DB thay vì NULL"
+
+    v = _xem(client, h, bc["id"])["version"]
+    r = _ghi(client, h, bc["id"], v, [], texts={"C2": ""})
+    assert r.status_code == 200, r.text
+    assert _xem(client, h, bc["id"])["texts"]["C2"] is None
+    assert db.query(ReportText).filter_by(
+        report_id=bc["id"], field_code="C2").one().content is None, \
+        "đường INSERT lưu `''` xuống DB thay vì NULL"
+
+
+def test_hai_o_chu_dang_co_noi_dung_cap_nhat_duoc_trong_cung_mot_luot(client, db):
+    """Ctrl+S sau khi sửa CẢ HAI ô chữ đã có nội dung. Nạp trước dòng
+    `report_text` mà chỉ lấy mã ĐẦU thì ô thứ hai đi đường INSERT →
+    UNIQUE(report_id, field_code) → 500 trần, mất cả lượt gõ (cả số lẫn chữ).
+    test_ghi_texts_lan_hai_cap_nhat_dong_cu_... ở trên chỉ gửi MỘT mã mỗi lượt
+    nên không thấy."""
+    seed_all(db)
+    from app.models import ReportText
+    h = dang_nhap(client, "u22@ptsc.local")
+    bc = _nhap_08(client, h)
+
+    v = _xem(client, h, bc["id"])["version"]
+    assert _ghi(client, h, bc["id"], v, [],
+                texts={"C1": "cũ 1", "C2": "cũ 2"}).status_code == 200
+
+    v = _xem(client, h, bc["id"])["version"]
+    r = _ghi(client, h, bc["id"], v, [], texts={"C1": "mới 1", "C2": "mới 2"})
+    assert r.status_code == 200, r.text
+    assert _xem(client, h, bc["id"])["texts"] == {
+        "C1": "mới 1", "C2": "mới 2", "C3": None}
+    assert db.query(ReportText).filter_by(report_id=bc["id"]).count() == 2, \
+        "ô chữ thứ hai đi đường INSERT thay vì UPDATE"
+
+
+def test_ghi_chu_dau_tien_cua_dong_tren_bao_cao_moi_tao_khong_bi_nuot(client, db):
+    """Báo cáo kỳ mới chưa có dòng `report_value` nào, nên lượt ghi đầu tiên của
+    một dòng vừa tạo dòng vừa ghi. Mọi ca khác của file chạy trên báo cáo
+    2026-08 đã có sẵn dòng từ fixture, nên lỗi dạng "chỉ ghi khi dòng ĐÃ TỒN
+    TẠI" đi lọt hết — mà đó đúng là đường demo."""
+    seed_all(db)
+    h = dang_nhap(client, "u22@ptsc.local")
+    tao = client.post("/api/v1/reports",
+                      json={"template": "FM01", "period_key": "2026-09"}, headers=h)
+    assert tao.status_code == 201, tao.text
+    bc_id = tao.json()["id"]
+    assert _o(_xem(client, h, bc_id), "B-1.1")["this_period"] is None, \
+        "tiền đề: báo cáo mới, chưa có dòng report_value nào"
+
+    r = _ghi(client, h, bc_id, 1, [{"indicator_code": "B-1.1", "this_period": 7,
+                                    "note": "ghi chú đầu tiên của dòng"}])
+    assert r.status_code == 200, r.text
+    o = _o(_xem(client, h, bc_id), "B-1.1")
+    assert o["this_period"] == 7.0, "ô số bị nuốt ở lần ghi đầu của dòng"
+    assert o["note"] == "ghi chú đầu tiên của dòng", "Ghi chú bị nuốt ở lần ghi đầu của dòng"
+
+
+def test_dong_sum_ep_NULL_hai_cot_acc_ke_ca_luot_chi_gui_ghi_chu(client, db):
+    """Hai dòng ép NULL của nhánh `sum` nằm NGOÀI `if "this_period" in co_mat`
+    — cố ý. Fixture ghi cả `acc_prev_entered` lẫn `acc_total_entered` cho MỌI
+    dòng, kể cả dòng `sum` vốn không nhập được hai cột đó, và GET trả nguyên cột
+    acc của dòng sum rồi tính "Lệch" từ nó. Chui hai dòng ép NULL vào trong `if`
+    thì lượt chỉ sửa Ghi chú không chuẩn hoá nữa, cột "Lệch" của 48/53 dòng hiện
+    số rác và không có cách nào tự hết. test_dong_sum_ghi_NULL_vao_hai_cot_acc ở
+    trên luôn gửi kèm `this_period` nên không phân biệt được."""
+    seed_all(db)
+    from app.models import Indicator, ReportValue
+    h = dang_nhap(client, "u22@ptsc.local")
+    bc = _nhap_08(client, h)
+    ind = db.query(Indicator).filter_by(code="B-3.2").one()
+    rv = db.query(ReportValue).filter_by(report_id=bc["id"], indicator_id=ind.id).one()
+    assert ind.agg_type == "sum"
+    assert rv.acc_prev_entered is not None and rv.acc_total_entered is not None, \
+        "tiền đề: dòng sum nạp từ Excel có sẵn cả hai cột acc"
+
+    v = _xem(client, h, bc["id"])["version"]
+    r = _ghi(client, h, bc["id"], v,
+             [{"indicator_code": "B-3.2", "note": "chỉ sửa mỗi ghi chú"}])
+    assert r.status_code == 200, r.text
+    rv = db.query(ReportValue).filter_by(report_id=bc["id"], indicator_id=ind.id).one()
+    assert rv.acc_prev_entered is None and rv.acc_total_entered is None, \
+        "lượt chỉ sửa Ghi chú không chuẩn hoá hai cột acc của dòng sum"
+
+
+def test_cot_cong_don_cua_dong_counter_duoc_lam_tron_theo_decimals(client, db):
+    """Spec dòng 231: server làm tròn rồi mới lưu. Hai ca `test_quantize_*` ở
+    trên chỉ phủ cột "Tháng này"; cột "Cộng dồn" của dòng `counter` đi qua một
+    lệnh gán KHÁC nên có thể ghi thẳng giá trị chưa quantize mà không ai thấy.
+    Dùng B-1.7 (counter, `decimals=0`) — B-1.5 là `decimals=2` nên 3,5 lưu
+    nguyên vẫn hợp lệ, không phân biệt được hai đường."""
+    seed_all(db)
+    h = dang_nhap(client, "u22@ptsc.local")
+    bc = _nhap_08(client, h)
+
+    v = _xem(client, h, bc["id"])["version"]
+    r = _ghi(client, h, bc["id"], v,
+             [{"indicator_code": "B-1.7", "acc_total_entered": 3.5}])
+    assert r.status_code == 200, r.text
+    assert _o(r.json(), "B-1.7")["acc_total_entered"] == 4.0, "Cộng dồn chưa được làm tròn"
+    assert _o(_xem(client, h, bc["id"]), "B-1.7")["acc_total_entered"] == 4.0
+
+
+def test_texts_ma_la_mang_null_van_bi_tu_choi_khong_de_lai_dong_rac(client, db):
+    """FE xoá trắng một ô gửi `null`. Nếu mã đó lệch phiên bản mẫu thì lượt vẫn
+    phải 400: bỏ qua mã mang `null` sẽ đẻ dòng rác trong `report_text`, và
+    `GET /reports/{id}` trả thêm khoá lạ trong `texts` (`texts.update(...)`
+    không lọc lại theo mẫu) — form mọc thêm một textarea không ai khai."""
+    seed_all(db)
+    from app.models import ReportText
+    h = dang_nhap(client, "u22@ptsc.local")
+    bc = _nhap_08(client, h)
+
+    v = _xem(client, h, bc["id"])["version"]
+    r = _ghi(client, h, bc["id"], v, [], texts={"C9": None})
+    assert r.status_code == 400, r.text
+    assert r.json()["errors"] == [
+        {"field_code": "C9", "message": "Trường chữ không có trong mẫu báo cáo"}]
+    db.flush()          # xem chú thích `db.flush()` ở ca mã trường chữ lạ
+    assert db.query(ReportText).filter_by(
+        report_id=bc["id"], field_code="C9").count() == 0, "mã chữ lạ lọt xuống report_text"
+    assert set(_xem(client, h, bc["id"])["texts"]) == {"C1", "C2", "C3"}
+
+
+def test_hai_o_chu_sai_trong_cung_luot_bao_du_hai_muc_loi(client, db):
+    """Cắt `errors` xuống một mục thì FE tô đỏ một textarea, ô thứ hai im lặng:
+    người dùng sửa xong ô được tô rồi lưu lại vẫn 400 mà không biết vì sao."""
+    seed_all(db)
+    h = dang_nhap(client, "u22@ptsc.local")
+    bc = _nhap_08(client, h)
+    v = _xem(client, h, bc["id"])["version"]
+
+    r = _ghi(client, h, bc["id"], v, [], texts={"C8": "x", "C9": "y"})
+    assert r.status_code == 400, r.text
+    assert r.json()["errors"] == [
+        {"field_code": "C8", "message": "Trường chữ không có trong mẫu báo cáo"},
+        {"field_code": "C9", "message": "Trường chữ không có trong mẫu báo cáo"},
+    ]
+
+
+def test_luot_chi_sua_nhom_C_van_doi_source_tu_seed_sang_live(client, db):
+    """D21, vế mà test_ghi_song_doi_source_tu_seed_sang_live chưa phủ: một lượt
+    ghi SỐNG có thể chỉ đụng ba ô chữ nhóm C, `values` rỗng. Vẫn còn nhãn `seed`
+    thì trong buổi demo Ban ATCL không phân biệt được số thật với số mẫu."""
+    seed_all(db)
+    bc = _bao_cao_cua(db, "U01", "2026-08")
+    assert bc.source == "seed", "tiền đề: báo cáo này là dữ liệu nạp từ Excel"
+    bc.state_id = _trang_thai(db, "draft").id
+    db.flush()
+
+    h = dang_nhap(client, "u01@ptsc.local")
+    r = _ghi(client, h, bc.id, bc.version, [], texts={"C1": "chỉ sửa nhóm C"})
+    assert r.status_code == 200, r.text
+    assert _xem(client, h, bc.id)["source"] == "live"
+
+
+def test_payload_sai_ca_so_lan_o_chu_thi_bao_loi_SO_truoc(client, db):
+    """Thứ tự hai loại 400: lỗi giá trị số (`validate_values`) chạy TRƯỚC lỗi
+    trường chữ. Đảo lại thì payload vừa sai số vừa sai mã chữ trả lỗi CHỮ — FE
+    tô sai ô, người nhập sửa xong ô chữ mà vẫn 400 không hiểu vì sao."""
+    seed_all(db)
+    h = dang_nhap(client, "u22@ptsc.local")
+    bc = _nhap_08(client, h)
+    v = _xem(client, h, bc["id"])["version"]
+
+    r = _ghi(client, h, bc["id"], v,
+             [{"indicator_code": "B-2.1", "this_period": -5}], texts={"C9": "mã chữ sai"})
+    assert r.status_code == 400, r.text
+    assert r.json()["errors"] == [
+        {"indicator_code": "B-2.1", "message": "Số không được âm"}]

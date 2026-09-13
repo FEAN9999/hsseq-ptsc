@@ -3,13 +3,18 @@
 // Một chỗ duy nhất gọi fetch tới backend + bắt lỗi thống nhất. Thân lỗi backend LUÔN phẳng
 // {"detail": <chuỗi>, **extra} (AppError.body(), backend/app/core/errors.py) — không có JSON
 // lồng nào để đào sâu hơn một cấp. Các `extra` khác nhau tuỳ nơi ném (đối chiếu tại đúng dòng,
-// bản CHUẨN — quét bằng AST, đủ 7 điểm — xem hop-dong-loi-backend.md; task-17-carry.md phần C1
+// bản CHUẨN — quét bằng AST, đủ 8 điểm — xem hop-dong-loi-backend.md; task-17-carry.md phần C1
 // đã LỖI THỜI, tự nhận thiếu 2 ca vì quét bằng grep theo dòng):
 //   409 khoá lạc quan (chuyển trạng thái)  services/workflow.py:198,218    {state, version}
-//   409 khoá lạc quan (PUT .../values)     services/reports.py:414-417     {state, version, values}
+//   409 khoá lạc quan (PUT .../values)     services/reports.py:438-442     {state, version, values}
 //   409 báo cáo đã tồn tại                 api/reports.py:94               {existing_id}
 //   400 thiếu ô bắt buộc lúc chuyển trạng   services/workflow.py:229        {errors:[{indicator_code,message}]}
-//   400 mã lặp / sai luật giá trị           services/reports.py:427,465     {errors:[{indicator_code,message}]}
+//   400 mã lặp / sai luật giá trị           services/reports.py:451,489     {errors:[{indicator_code,message}]}
+//   400 trường chữ nhóm C (Task 23b)       services/reports.py:515         {errors:[{field_code,message}]}
+// HAI hình dạng `errors` khác nhau: bốn điểm dùng khoá `indicator_code`, MỘT điểm (ba ô chữ
+// nhóm C) dùng `field_code` — C1..C3 không phải mã chỉ tiêu. `ApiErrorItem` dưới đây vẫn khai
+// `indicator_code` BẮT BUỘC, cố ý chưa nới: nới kiểu là việc của task nối FE, nơi lỗi ô chữ mới
+// thật sự có chỗ hiện (hiện chưa màn hình nào đọc `.errors`).
 // CHÚ Ý: lỗi sai luật nghiệp vụ (ValidationError) là 400, KHÔNG phải 422 — 422 ở dự án này chỉ
 // xảy ra khi payload sai schema Pydantic (lỗi lập trình FE), không phải khi sai luật nghiệp vụ.
 // 409 có HAI nghĩa khác hẳn nhau (xung đột phiên bản cần nạp lại `values`/`version`, hay thao
