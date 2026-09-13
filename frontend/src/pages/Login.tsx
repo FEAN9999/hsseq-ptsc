@@ -71,20 +71,37 @@ async function dangNhap(email: string, matKhau: string): Promise<string[]> {
   }
 }
 
-// C5: '?next=' là dữ liệu người lạ điều khiển được — chỉ chấp nhận đường dẫn bắt đầu bằng ĐÚNG
-// một '/' (ký tự thứ hai không phải '/', vì '//evil.example' là URL tuyệt đối theo giao thức
-// hiện tại). Mọi giá trị khác (URL tuyệt đối như 'https://evil.example', hoặc rỗng) coi như
-// không có next.
-function laDuongDanAnToan(duongDan: string): boolean {
-  return duongDan.startsWith('/') && duongDan[1] !== '/'
+// F1 (task-19-fix-brief.md) — vòng sửa 1: bản trước (`d.startsWith('/') && d[1] !== '/'`) đoán
+// ký tự xấu, và đoán thiếu — '/\\evil.example', '/\\/evil.example', '/\t/evil.example' đều qua
+// được bộ lọc cũ nhưng bộ phân tích URL thật (WHATWG — chính thứ `location.assign` dùng) lại quy
+// chúng về 'https://evil.example/' (trong scheme http/https, '\' tương đương '/'; TAB/CR/LF bị
+// xoá trước khi phân tích). Sửa đúng: hỏi CHÍNH bộ phân tích đó thay vì liệt thêm ký tự.
+//
+// Base giả cố định, KHÔNG đọc `location.origin`: test stub `location` bằng object trần (không có
+// `origin`), và hành vi phân tích của `new URL` giống hệt nhau với mọi origin hợp lệ.
+const GOC_AO = 'http://x.invalid'
+
+/** Trả về đường dẫn nội bộ đã chuẩn hoá (pathname+search+hash), hoặc null nếu `duongDan` thoát ra
+ * ngoài origin (kể cả khi `duongDan` không parse được, ví dụ 'javascript:alert(1)'). */
+function duongDanNoiBo(duongDan: string): string | null {
+  try {
+    const u = new URL(duongDan, GOC_AO)
+    if (u.origin !== GOC_AO) return null
+    return u.pathname + u.search + u.hash
+  } catch {
+    return null
+  }
 }
 
 // Mã vai trò đúng là chuỗi 'reporter' (backend/app/seed/__init__.py). roles chỉ đọc tại chỗ để
 // quyết định landing, KHÔNG đưa vào store (session.ts cố ý không giữ roles).
 function dieuHuongSauDangNhap(roles: string[]): void {
   const next = new URLSearchParams(location.search).get('next')
-  if (next !== null && laDuongDanAnToan(next)) {
-    location.assign(next)
+  const noiBo = next === null ? null : duongDanNoiBo(next)
+  if (noiBo !== null) {
+    // Điều hướng tới chuỗi ĐÃ CHUẨN HOÁ (noiBo), không phải `next` thô — để không còn lần phân
+    // tích thứ hai nào (của chính location.assign) có thể hiểu khác đi so với lần đã kiểm ở trên.
+    location.assign(noiBo)
     return
   }
   location.assign(roles.includes('reporter') ? '/reports' : '/dashboard')
@@ -197,7 +214,7 @@ export function Login() {
             {dangGui ? 'Đang đăng nhập…' : 'Đăng nhập'}
           </button>
           {dangDanhThuc && (
-            <p className="text-[13px] mt-2.5 text-sec">Đang đánh thức máy chủ… (tối đa 1 phút)</p>
+            <p className="text-[13px] mt-2.5 text-sec">Đang đánh thức máy chủ… (thường mất dưới 1 phút)</p>
           )}
           {loiKetNoi && (
             <p className="text-[13px] mt-2.5 text-danger">

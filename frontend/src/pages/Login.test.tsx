@@ -144,12 +144,39 @@ describe('/login — session ghi đúng hình dạng sau khi đăng nhập (C1)'
   })
 })
 
-// C5 (task-19-carry.md) — brief không có ca nào cho next=, dù next= nằm trong dòng Produces của
-// chính brief. '?next=' là dữ liệu người lạ điều khiển được qua thanh địa chỉ (đến từ RequireAuth
-// hoặc client.ts khi phiên hết hạn) — không lọc là lỗ open redirect thật: '//evil.example' và
-// 'https://evil.example' đều phải bị chặn, chỉ đường dẫn tương đối (đúng MỘT '/' ở đầu) được đi.
-describe('/login — lọc next= (chống open redirect)', () => {
+// F1 (task-19-fix-brief.md, vòng sửa 1) — carry C5 gốc chỉ liệt hai ca ('//evil', 'https://evil')
+// và bộ lọc cũ (`d.startsWith('/') && d[1] !== '/'`) qua được cả hai NHƯNG vẫn thủng:
+// '/\evil.example', '/\/evil.example', '/\t/evil.example' đều bị bộ phân tích URL thật (WHATWG —
+// chính thứ location.assign dùng) quy về 'https://evil.example/' ('\' tương đương '/' trong scheme
+// http/https; TAB/CR/LF bị xoá trước khi phân tích) dù bộ lọc cũ cho qua. Bài học: liệt ký tự chỉ
+// bắt được ký tự ta nghĩ ra nổi. Test bắt buộc viết dưới dạng BẤT BIẾN, không phải danh sách ca:
+// bất kể next= là gì, giá trị truyền vào location.assign khi phân tích lại với một origin BẤT KỲ
+// phải vẫn nằm trong chính origin đó — origin thử lại ở đây ('https://hseq.test') CỐ Ý khác
+// GOC_AO nội bộ của Login.tsx ('http://x.invalid'), để không vô tình chỉ đối chiếu trùng một hằng
+// số dùng chung giữa mã và test.
+const HIEM = [
+  '//evil.example',
+  'https://evil.example',
+  '/\\evil.example',
+  '/\\/evil.example',
+  '/\t/evil.example',
+  'javascript:alert(1)',
+]
+
+describe('/login — lọc next= (chống open redirect, F1)', () => {
   beforeEach(() => vi.unstubAllGlobals())
+
+  it.each(HIEM)('next=%s: giá trị đưa cho location.assign không thoát khỏi origin', async (gtNext) => {
+    vi.stubGlobal('fetch', fetchDangNhapThanhCong(['reporter']))
+    const nhay = vi.fn()
+    vi.stubGlobal('location', {
+      pathname: '/login', search: `?next=${encodeURIComponent(gtNext)}`, assign: nhay,
+    } as never)
+    render(<Login />)
+    await dangNhapThu()
+    await waitFor(() => expect(nhay).toHaveBeenCalled())
+    expect(new URL(nhay.mock.calls[0][0] as string, 'https://hseq.test').origin).toBe('https://hseq.test')
+  })
 
   it('next= là đường dẫn tương đối hợp lệ: nhảy đúng về đó, giữ cả query', async () => {
     vi.stubGlobal('fetch', fetchDangNhapThanhCong(['reporter']))
@@ -160,30 +187,6 @@ describe('/login — lọc next= (chống open redirect)', () => {
     render(<Login />)
     await dangNhapThu()
     await waitFor(() => expect(nhay).toHaveBeenCalledWith('/status?period=2026-08'))
-  })
-
-  it('next=//evil.example (URL tuyệt đối theo giao thức hiện tại): KHÔNG nhảy ra ngoài', async () => {
-    vi.stubGlobal('fetch', fetchDangNhapThanhCong(['reporter']))
-    const nhay = vi.fn()
-    vi.stubGlobal('location', {
-      pathname: '/login', search: `?next=${encodeURIComponent('//evil.example')}`, assign: nhay,
-    } as never)
-    render(<Login />)
-    await dangNhapThu()
-    await waitFor(() => expect(nhay).toHaveBeenCalledWith('/reports'))
-    expect(nhay).not.toHaveBeenCalledWith(expect.stringContaining('evil.example'))
-  })
-
-  it('next=https://evil.example (URL tuyệt đối): KHÔNG nhảy ra ngoài', async () => {
-    vi.stubGlobal('fetch', fetchDangNhapThanhCong(['reporter']))
-    const nhay = vi.fn()
-    vi.stubGlobal('location', {
-      pathname: '/login', search: `?next=${encodeURIComponent('https://evil.example')}`, assign: nhay,
-    } as never)
-    render(<Login />)
-    await dangNhapThu()
-    await waitFor(() => expect(nhay).toHaveBeenCalledWith('/reports'))
-    expect(nhay).not.toHaveBeenCalledWith(expect.stringContaining('evil.example'))
   })
 
   it('không có next=, vai trò chứa reporter: về /reports', async () => {
