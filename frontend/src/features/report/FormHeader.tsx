@@ -4,9 +4,10 @@
 // "<đơn vị> · <mẫu> · <kỳ>", dòng meta, chip trạng thái, và 5 ô phần đầu theo schema `report`
 // (D7: Số báo cáo · Địa điểm · Ngày báo cáo · Người lập · Chức vụ).
 //
-// KHÔNG có chỗ cho "trạng thái lưu" (D23: "Đang lưu…" / "Đã lưu 14:02" / "Chưa lưu (3 ô)") —
-// đó là Task 23, task-23-carry.md C8 khai rõ ReportForm là file "Modify" của task đó. Không
-// dựng sẵn khe trống ở đây (mã đầu cơ, CLAUDE.md #2).
+// "Trạng thái lưu" (D23: "Đang lưu…" / "Đã lưu 14:02" / "Chưa lưu (3 ô)") đứng cạnh chip trạng
+// thái, đúng vị trí thiết kế dòng 625 xếp nó. Câu chữ và màu do `ReportForm` quyết (nó cầm
+// `useSaveValues`), file này chỉ nhận một dòng đã gọt sẵn — `null` thì KHÔNG vẽ gì cả, vì một
+// khe trống nằm im cạnh chip đọc như "trạng thái lưu đang hỏng".
 import { Chip, type ChipKind } from '../../components/ui/Chip'
 import { formatDateTime, formatDue, formatPeriod } from '../../lib/format'
 import type { DauBaoCao } from './ReportForm'
@@ -73,6 +74,7 @@ export function FormHeader({
   isLate,
   kyThieu,
   now,
+  trangThaiLuu,
 }: {
   dau: DauBaoCao
   state: string
@@ -80,6 +82,8 @@ export function FormHeader({
   isLate: boolean
   kyThieu: string[]
   now: Date
+  /** Dòng trạng thái lưu đã gọt sẵn (Task 23), `null` khi chưa có gì để nói. */
+  trangThaiLuu: { chu: string; canhBao: boolean } | null
 }) {
   const han = formatDue(dau.due_at, now)
   return (
@@ -95,6 +99,14 @@ export function FormHeader({
         </div>
       </div>
       <div className="self-center flex items-center gap-2">
+        {/* `role="status"` (vùng sống lịch sự): "Đang lưu…" → "Đã lưu 14:02" là chuỗi sự kiện
+            người dùng cần biết mà không rời tay khỏi bàn phím. `alert` sẽ cắt ngang họ giữa lúc
+            gõ, đúng điều fix-1 S12 đã chốt cho các banner tĩnh. */}
+        {trangThaiLuu !== null && (
+          <span role="status" className={`text-xs ${trangThaiLuu.canhBao ? 'text-warning' : 'text-sec'}`}>
+            {trangThaiLuu.chu}
+          </span>
+        )}
         <Chip kind={kindTrangThai(state, isLate)} outline={source === 'seed'} />
         {/* D14 chế độ 4: báo cáo nạp từ file tổng hợp phải nói ra, vì số của nó không do ai trong
             đơn vị gõ — người đọc cần biết trước khi tin vào nó. */}

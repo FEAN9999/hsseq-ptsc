@@ -26,11 +26,12 @@ import { useSession } from '../../app/session'
 import { parseViNumber } from '../../lib/parseViNumber'
 import { formatDateTime, formatPeriod } from '../../lib/format'
 import { cellPolicy, type AggType, type Cell, type Mode } from './cellPolicy'
-import { NumberCell, dinhDangSoBang } from './NumberCell'
+import { NumberCell, dinhDangSoBang, type NumberCellProps } from './NumberCell'
 import { FormHeader } from './FormHeader'
 import { FormModeBar, maNeo } from './FormModeBar'
 import { GroupHeader, type NhomMau } from './GroupHeader'
 import { useKeyboardNav } from './useKeyboardNav'
+import { useSaveValues, type KetQuaLuu, type ODoi } from './useSaveValues'
 
 // ---------------------------------------------------------------- hợp đồng API
 // Hình dạng chép từ backend: `ReportDetailOut` (app/schemas/report.py:80) và
@@ -166,6 +167,7 @@ type HanhDongForm =
   | { type: 'chu'; ma: string; noiDung: string }
   | { type: 'bam-nop' }
   | { type: 'xung-dot'; loi: LoiXungDot }
+  | { type: 'gia-tri-server'; phienBan: number; values: GiaTriBaoCao[] }
 
 function khoiTao(chiTiet: ChiTietBaoCao): TrangThaiForm {
   const nhap: Record<string, ONhap> = {}
@@ -205,6 +207,16 @@ function rutGon(s: TrangThaiForm, h: HanhDongForm): TrangThaiForm {
       return { ...s, chu: { ...s.chu, [h.ma]: h.noiDung } }
     case 'bam-nop':
       return { ...s, daBamNop: true }
+    case 'gia-tri-server': {
+      // task-23-carry.md C9: phản hồi của `PUT /reports/{id}/values` mang `values` đã TÍNH LẠI
+      // (dòng computed, lũy kế, cột Lệch, kiểm tra bộ đếm) — cùng đường tính với GET. Đây là con
+      // đường DUY NHẤT để dòng "Tổng giờ công" đổi số, vì không có bản sao `evaluate_computed`
+      // nào phía TypeScript. Vá ĐÚNG cột chỉ đọc + `version`, y như nhánh 409 ngay dưới: `nhap`/
+      // `ghiChu`/`chu` là thứ người dùng đang gõ, server không có quyền đè lên.
+      const server = { ...s.server }
+      for (const v of h.values) server[v.indicator_code] = v
+      return { ...s, version: h.phienBan, server }
+    }
     case 'xung-dot': {
       // CHỈ cột chỉ đọc + version. `nhap`/`ghiChu`/`chu` giữ nguyên: người khác vừa ghi đè bản
       // trên server không có nghĩa là số đang nằm dưới tay người này bị vứt đi.
@@ -271,6 +283,25 @@ function giaTriBatBuoc(o: ONhap, cot: Cell): number | null {
   return cot === 'thisPeriod' ? o.thisPeriod : o.accTotal
 }
 
+/** Ô đã đổi của lớp lưu, theo TÊN CỘT. Không có nhánh `accPrev` vì cùng lý do với `giaTriBatBuoc`:
+ * không agg_type nào cho nhập cột đó nên không ô nào bắn ra được. */
+function oDoi(cot: Cell, value: number | null): ODoi {
+  return cot === 'thisPeriod' ? { thisPeriod: value } : { accTotal: value }
+}
+
+/** Dòng trạng thái lưu ở dải đầu (thiết kế dòng 681). `null` = chưa có gì để nói (chưa đụng vào
+ * form) — không hiện một khe trống.
+ *
+ * Thứ tự ba nhánh là thứ tự ĐỘ KHẨN, không phải thứ tự của `status`: còn ô chưa lưu thì câu đó
+ * thắng "Đã lưu 14:02" cũ, và `error` cũng hiện "Chưa lưu (n ô)" chứ không hiện một câu lỗi
+ * riêng — thiết kế nói "lưu thất bại mạng → giữ 'Chưa lưu' + banner offline", lỗi nói ở banner. */
+function dongTrangThaiLuu(l: KetQuaLuu): { chu: string; canhBao: boolean } | null {
+  if (l.status === 'saving') return { chu: 'Đang lưu…', canhBao: false }
+  if (l.dirtyCount > 0) return { chu: `Chưa lưu (${l.dirtyCount} ô)`, canhBao: true }
+  if (l.savedAt !== null) return { chu: `Đã lưu ${l.savedAt}`, canhBao: false }
+  return null
+}
+
 // ---------------------------------------------------------------- ô của bảng
 
 const TD = 'h-9 px-3 border-b border-hair align-middle'
@@ -297,6 +328,7 @@ function OGiaTri({
   cot,
   loiNgoai,
   onChange,
+  onCommit,
   onPasteColumn,
 }: {
   mode: Mode
@@ -309,6 +341,9 @@ function OGiaTri({
   /** Không bắt buộc: cột "Lũy kế tháng trước" không agg_type nào cho nhập, nên nó gọi component
    * này mà không có dây nào cả (fix-1 S9). */
   onChange?: (value: number | null) => void
+  /** Rời ô CÓ SỬA — nơi lớp lưu (Task 23) bám vào. Khác `onChange` (mỗi phím gõ, để cột "Cộng
+   * dồn" cộng tức thì): một PUT mỗi phím là thứ debounce sinh ra để tránh. */
+  onCommit?: NumberCellProps['onCommit']
   onPasteColumn?: (dong: string[]) => void
 }) {
   // C9: `empty` khác `derived`. Ô này KHÔNG tồn tại với loại chỉ tiêu đang xét, nên không nhãn,
@@ -327,6 +362,7 @@ function OGiaTri({
         ariaLabel={nhan}
         loiNgoai={loiNgoai}
         onChange={(kq) => onChange?.(kq.value)}
+        onCommit={onCommit}
         onPasteColumn={onPasteColumn}
       />
     </td>
@@ -349,15 +385,26 @@ export function ReportForm({ mau, chiTiet, xungDot, onLuu, onChuyenTrangThai }: 
   const [s, dispatch] = useReducer(rutGon, chiTiet, khoiTao)
   const quyen = useSession((st) => st.permissions)
   const formRef = useRef<HTMLDivElement>(null)
+  const luuGiaTri = useSaveValues(chiTiet.id, chiTiet.version)
 
-  const luu = onLuu ?? (() => {})
+  const luu = onLuu ?? (() => void luuGiaTri.saveNow())
   // Gắn ở GỐC form chứ không ở riêng khung bảng: Ctrl+S phải chạy cả khi người dùng đang đứng
   // trong textarea nhóm C — vừa gõ xong phần nhận xét là lúc người ta bấm lưu nhiều nhất.
   useKeyboardNav(formRef, luu)
 
+  // 409 tới từ HAI đường: hook lưu ngay trong form này (đường thật), và prop `xungDot` cho nơi gọi
+  // nào cầm sẵn một lỗi 409 của đường khác. Cả hai đều theo dõi bằng DANH TÍNH object — mỗi lần
+  // xung đột là một object mới, nên effect chạy đúng một lần cho mỗi lần xung đột.
+  const xungDotHienTai = luuGiaTri.xungDot ?? xungDot ?? null
   useEffect(() => {
-    if (xungDot) dispatch({ type: 'xung-dot', loi: xungDot })
-  }, [xungDot])
+    if (xungDotHienTai) dispatch({ type: 'xung-dot', loi: xungDotHienTai })
+  }, [xungDotHienTai])
+
+  // C9: mỗi lần lưu thành công, server trả về giá trị đã tính lại — vá vào cột chỉ đọc.
+  const giaTriMoi = luuGiaTri.giaTriMoi
+  useEffect(() => {
+    if (giaTriMoi) dispatch({ type: 'gia-tri-server', phienBan: giaTriMoi.version, values: giaTriMoi.values })
+  }, [giaTriMoi])
 
   const trangThai = mau.states.find((t) => t.code === chiTiet.state)
   const suaDuoc = (trangThai?.is_editable ?? false) && quyen.has('report.edit')
@@ -410,14 +457,19 @@ export function ReportForm({ mau, chiTiet, xungDot, onLuu, onChuyenTrangThai }: 
       // Dòng không đọc được thì GIỮ NGUYÊN ô đích. Ghi `null` đè lên số cũ là xoá dữ liệu vì một
       // ô rác trong vùng copy — dòng TRỐNG thì khác, `parseViNumber('')` trả null không lỗi và
       // đúng nghĩa "ô này để trống" (NumberCell fix-1 S5).
-      if (error === null) dispatch({ type: 'nhap-o', ma: ct.code, cot, value })
-      else boQua.push(ct.code)
+      if (error === null) {
+        dispatch({ type: 'nhap-o', ma: ct.code, cot, value })
+        // Dán cột PHẢI tự đánh dấu chưa lưu: `NumberCell` chỉ bắn `onCommit` cho đúng ô đang đứng
+        // (và cũng chỉ khi chữ trong ô đó đổi), nên 54 ô còn lại của một cột vừa dán sẽ không bao
+        // giờ được gửi đi nếu chỉ trông vào blur — đúng lớp lỗi "dán rồi mất số" của fix-1 S1.
+        luuGiaTri.markDirty(ct.code, oDoi(cot, value))
+      } else boQua.push(ct.code)
     })
     // Bắn CẢ KHI lần dán này trọn vẹn: đó là cách xoá thông điệp của lần dán trước.
     dispatch({ type: 'dan-xong', boQua, tran })
   }
 
-  function bamChuyenTrangThai(c: ChuyenTrangThai) {
+  async function bamChuyenTrangThai(c: ChuyenTrangThai) {
     if (c.action_code === 'submit') {
       dispatch({ type: 'bam-nop' })
       const conThieu = mau.indicators.some((ct) => {
@@ -430,6 +482,10 @@ export function ReportForm({ mau, chiTiet, xungDot, onLuu, onChuyenTrangThai }: 
       // để người nộp thấy ĐÚNG Ô nào thiếu thay vì một câu lỗi sau một vòng mạng.
       if (conThieu) return
     }
+    // D23: "Nộp luôn lưu trước rồi mới transition". Lưu hỏng thì DỪNG: chuyển trạng thái bằng số
+    // chưa lên tới server là nộp thiếu đúng những ô vừa gõ, và khoá `version` của lượt transition
+    // cũng đã cũ. Câu vì sao đã nằm ở banner/dải đầu do lượt lưu vừa rồi dựng lên.
+    if (!(await luuGiaTri.saveNow())) return
     onChuyenTrangThai?.(c)
   }
 
@@ -444,6 +500,7 @@ export function ReportForm({ mau, chiTiet, xungDot, onLuu, onChuyenTrangThai }: 
         isLate={chiTiet.is_late}
         kyThieu={chiTiet.missing_periods}
         now={new Date()}
+        trangThaiLuu={dongTrangThaiLuu(luuGiaTri)}
       />
 
       {/* Điều kiện `state === 'returned'` KHÔNG thừa: `workflow.py:247` chỉ ghi `decision_note` ở
@@ -459,6 +516,24 @@ export function ReportForm({ mau, chiTiet, xungDot, onLuu, onChuyenTrangThai }: 
             </b>{' '}
             {chiTiet.header.decision_note}
           </span>
+        </Banner>
+      )}
+
+      {/* D23: "lưu thất bại mạng → giữ 'Chưa lưu' + banner offline, thử lại khi online". Số không
+          mất: ô vẫn nằm trong hàng chờ của `useSaveValues` và tự gửi lại khi trình duyệt báo có
+          mạng — câu dưới đây phải nói đúng điều đó, nếu không người dùng sẽ gõ lại từ đầu. */}
+      {luuGiaTri.offline && (
+        <Banner kind="warning">
+          <span role="alert">Mất kết nối. Ô chưa lưu vẫn được giữ và sẽ tự gửi lại khi có mạng.</span>
+        </Banner>
+      )}
+
+      {/* Lỗi server KHÔNG phải xung đột phiên bản (400 sai luật, 403 trạng thái không cho sửa,
+          409 loại "thao tác không hợp lệ"). Hiện `detail` NGUYÊN VĂN: câu của 409 loại này dựng
+          động từ tên transition trong DB, viết cứng ở đây là hiện sai câu (C2). */}
+      {luuGiaTri.loiLuu !== null && (
+        <Banner kind="danger">
+          <span role="alert">Không lưu được: {luuGiaTri.loiLuu}</span>
         </Banner>
       )}
 
@@ -530,6 +605,7 @@ export function ReportForm({ mau, chiTiet, xungDot, onLuu, onChuyenTrangThai }: 
                   thieuBatBuoc={thieuBatBuoc}
                   dispatch={dispatch}
                   danCot={danCot}
+                  markDirty={luuGiaTri.markDirty}
                 />
               ))}
             </tbody>
@@ -588,6 +664,7 @@ function Nhom({
   thieuBatBuoc,
   dispatch,
   danCot,
+  markDirty,
 }: {
   nhom: NhomMau
   ds: ChiTieuMau[]
@@ -598,6 +675,7 @@ function Nhom({
   thieuBatBuoc: string[]
   dispatch: (h: HanhDongForm) => void
   danCot: (maBatDau: string, cot: Cell, dong: string[]) => void
+  markDirty: (ma: string, o: ODoi) => void
 }) {
   return (
     <>
@@ -614,6 +692,7 @@ function Nhom({
           thieu={thieuBatBuoc.includes(ct.code)}
           dispatch={dispatch}
           danCot={danCot}
+          markDirty={markDirty}
         />
       ))}
     </>
@@ -630,6 +709,7 @@ function Dong({
   thieu,
   dispatch,
   danCot,
+  markDirty,
 }: {
   ct: ChiTieuMau
   sv: GiaTriBaoCao
@@ -640,6 +720,7 @@ function Dong({
   thieu: boolean
   dispatch: (h: HanhDongForm) => void
   danCot: (maBatDau: string, cot: Cell, dong: string[]) => void
+  markDirty: (ma: string, o: ODoi) => void
 }) {
   const { cs, accPrev, thisPeriod, accTotal } = giaTriDong(ct, sv, nhap)
   const ten = `${ct.code} ${ct.name_vi}`
@@ -647,6 +728,14 @@ function Dong({
   const { requiredCell } = cellPolicy(ct.agg_type as AggType)
   // "Bắt buộc" chỉ treo lên ĐÚNG ô mà `cellPolicy` chấm là bắt buộc, không treo lên cả dòng.
   const loiNgoai = (cot: Cell) => (thieu && requiredCell === cot ? 'Bắt buộc' : null)
+  /** Rời ô có sửa → xếp ô đó vào hàng chờ lưu. `NumberCell` đã tự lọc "chỉ Tab ngang qua" (fix-1
+   * S6) nên ở đây chỉ còn phải lọc ô ĐANG LỖI: giá trị của nó là `null` do phân tích hỏng, gửi
+   * lên là xoá đúng con số cũ mà người dùng chưa hề xoá. */
+  const roiO =
+    (cot: Cell): NonNullable<NumberCellProps['onCommit']> =>
+    (kq) => {
+      if (kq.error === null) markDirty(ct.code, oDoi(cot, kq.value))
+    }
   return (
     <tr id={maNeo(ct.code)} className="scroll-mt-20 focus-within:bg-canvas">
       <td className={`${TD} whitespace-normal text-ink`} title={ct.name_en}>
@@ -679,6 +768,7 @@ function Dong({
         cot="thisPeriod"
         loiNgoai={loiNgoai('thisPeriod')}
         onChange={(value) => dispatch({ type: 'nhap-o', ma: ct.code, cot: 'thisPeriod', value })}
+        onCommit={roiO('thisPeriod')}
         onPasteColumn={(dong) => danCot(ct.code, 'thisPeriod', dong)}
       />
       <OGiaTri
@@ -690,6 +780,7 @@ function Dong({
         cot="accTotal"
         loiNgoai={loiNgoai('accTotal')}
         onChange={(value) => dispatch({ type: 'nhap-o', ma: ct.code, cot: 'accTotal', value })}
+        onCommit={roiO('accTotal')}
         onPasteColumn={(dong) => danCot(ct.code, 'accTotal', dong)}
       />
       {coCotLech && <ODoc nhan={`${ten}, Lệch`} value={sv.diff} decimals={ct.decimals} mo />}
@@ -700,6 +791,13 @@ function Dong({
             aria-label={`${ten}, Ghi chú`}
             value={ghiChu}
             onChange={(e) => dispatch({ type: 'ghi-chu', ma: ct.code, noiDung: e.target.value })}
+            // Ghi chú cũng là một Ô của `PUT .../values` (`ValueIn.note`), và là chỗ D25 bảo người
+            // nhập giải thích bộ đếm lệch — không lưu nó là mất đúng câu giải thích đó. So với
+            // `sv.note` (bản server đang giữ, đã được vá lại sau mỗi lần lưu) chứ không so với một
+            // mốc lúc focus: Tab ngang qua ô ghi chú không được sinh ra PUT nào.
+            onBlur={() => {
+              if (ghiChu !== (sv.note ?? '')) markDirty(ct.code, { note: ghiChu })
+            }}
             className="block w-full h-7 border border-hair rounded-input px-2 bg-surface text-ink focus:outline-2 focus:outline-cyan focus:-outline-offset-2"
           />
         </td>

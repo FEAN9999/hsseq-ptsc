@@ -17,11 +17,14 @@
 //
 // PHẢI `npm run build` trước khi chạy file này: các khẳng định màu banner đọc CSS THẬT đã build
 // (`resolveCascadeWinner`, task-20-carry.md C4) chứ không hỏi `className.includes`.
-import { render, screen, waitFor } from '@testing-library/react'
+import { useState, type ReactElement, type ReactNode } from 'react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ReportForm, type ChiTietBaoCao, type GiaTriBaoCao, type MauBaoCao, type ChiTieuMau, type LoiXungDot } from './ReportForm'
+import { api, ApiError } from '../../api/client'
 import { useSession } from '../../app/session'
 import { resolveCascadeWinner } from '../../components/ui/cascade'
 
@@ -120,6 +123,19 @@ interface VeOpts {
   onChuyenTrangThai?: (c: (typeof CHUYEN)[number]) => void
 }
 
+/** Cây thật bọc form trong `QueryClientProvider` (app/routes.tsx): lớp lưu của Task 23 nằm NGAY
+ * TRONG form (`useSaveValues` → `useQueryClient()` để invalidate cache sau mỗi lần lưu), nên thiếu
+ * provider là ném ngay lúc render. Mỗi cây một client RIÊNG — dùng chung là đường cho cache rò từ
+ * ca này sang ca kia. */
+function BocQuery({ children }: { children: ReactNode }) {
+  const [qc] = useState(() => new QueryClient())
+  return <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+}
+
+function veCay(ui: ReactElement) {
+  return render(ui, { wrapper: BocQuery })
+}
+
 function ve(opts: VeOpts = {}) {
   const mau = opts.mau ?? MAU_FM01
   const quyen =
@@ -153,10 +169,13 @@ function ve(opts: VeOpts = {}) {
   }
 
   const props = { mau, chiTiet, onLuu: opts.onLuu, onChuyenTrangThai: opts.onChuyenTrangThai }
-  const r = render(<ReportForm {...props} />)
+  const r = veCay(<ReportForm {...props} />)
   return {
     ...r,
-    /** 409 tới từ Task 23 (`useSaveValues`) qua prop `xungDot` — đây là đúng đường đi thật. */
+    /** Bơm 409 qua prop `xungDot`. Task 22 dựng prop này cho đường đi dự kiến của Task 23; Task 23
+     * đặt `useSaveValues` NGAY TRONG form nên đường THẬT là hook (đo ở khối "đường lỗi của lớp
+     * lưu" cuối file). Prop vẫn là đường hợp lệ cho nơi gọi nào cầm sẵn một lỗi 409 của lượt khác,
+     * và các ca dưới đây đo phần hiển thị 409 mà không phải dựng cả một lượt lưu hỏng. */
     batLoi409: (loi: LoiXungDot) => r.rerender(<ReportForm {...props} xungDot={loi} />),
   }
 }
@@ -195,8 +214,23 @@ function theoDoiChan(key: string) {
   return ket
 }
 
+// Lớp lưu của Task 23 nằm NGAY TRONG form: rời một ô có sửa là hẹn một `PUT` sau 1,5 giây. Chặn
+// `api.put` cho CẢ file — ca nào không nói gì về lưu cũng không được bắn request thật ra ngoài.
+const putSpy = vi.spyOn(api, 'put')
+
+/** Thân của lần `api.put` thứ `lan` (`mock.calls[lan]` là `[path, body]`). */
+function thanPut(lan: number): { version: number; values: Record<string, unknown>[] } {
+  return putSpy.mock.calls[lan][1] as { version: number; values: Record<string, unknown>[] }
+}
+
 beforeEach(() => {
   useSession.getState().logout()
+  putSpy.mockReset()
+  putSpy.mockResolvedValue({ version: 9, values: [] })
+})
+
+afterEach(() => {
+  vi.useRealTimers()
 })
 
 // ============================================================ 5 chế độ (D14)
@@ -905,7 +939,7 @@ describe('bàn phím kiểu Excel', () => {
       missing_periods: [], values: [giaTri({ indicator_code: 'B-1.1' })], texts: { C1: null },
     } as ChiTietBaoCao
     useSession.getState().login('tok-test', NGUOI_DUNG, DON_VI, QUYEN_REPORTER)
-    const r = render(<ReportForm mau={mau} chiTiet={chiTiet} onLuu={cu} />)
+    const r = veCay(<ReportForm mau={mau} chiTiet={chiTiet} onLuu={cu} />)
     r.rerender(<ReportForm mau={mau} chiTiet={chiTiet} onLuu={moi} />)
 
     await userEvent.keyboard('{Control>}s{/Control}')
@@ -1404,7 +1438,7 @@ describe('nhóm C, mục lục và dải đầu', () => {
   it('kỳ tháng 1 thì lũy kế tính tới tháng 12 NĂM TRƯỚC', () => {
     useSession.getState().login('tok', NGUOI_DUNG, DON_VI, QUYEN_REPORTER)
     const mau = mauNho([chiTieu({ code: 'B-1.1' })])
-    render(
+    veCay(
       <ReportForm
         mau={mau}
         chiTiet={{
@@ -1441,7 +1475,7 @@ describe('nhóm C, mục lục và dải đầu', () => {
     // `report_no` mặc định có giá trị; ở đây dựng lại với null để đo đúng nhánh trống.
     const mau = mauNho([chiTieu({ code: 'B-1.1' })])
     useSession.getState().login('tok', NGUOI_DUNG, DON_VI, QUYEN_REPORTER)
-    const { container } = render(
+    const { container } = veCay(
       <ReportForm
         mau={mau}
         chiTiet={{
@@ -1636,9 +1670,366 @@ describe('trạng thái form tách khỏi dữ liệu server', () => {
       values: [giaTri({ indicator_code: 'B-1.1', this_period: null })],
       texts: { C1: null },
     }
-    const r = render(<ReportForm mau={mau} chiTiet={chiTiet} />)
+    const r = veCay(<ReportForm mau={mau} chiTiet={chiTiet} />)
     await userEvent.type(o('B-1.1', 'Tháng này'), '77')
     r.rerender(<ReportForm mau={mau} chiTiet={chiTiet} />)
     await waitFor(() => expect(chu(o('B-1.1', 'Tháng này'))).toBe('77'))
+  })
+})
+
+// ============================================================ lưu khi rời ô (Task 23)
+
+/** Đồng hồ giả CÓ nhích theo thời gian thật: `userEvent` treo cứng với đồng hồ giả đứng yên (đã
+ * đo — click/keyboard không bao giờ resolve). Debounce 1,5 giây vẫn phải do `choDebounce()` đẩy
+ * tới, vì không ca test nào chạy thật 1,5 giây. */
+function dongHoGia() {
+  vi.useFakeTimers({ shouldAdvanceTime: true })
+}
+
+function nguoiDung() {
+  return userEvent.setup({ advanceTimers: (ms) => vi.advanceTimersByTime(ms) })
+}
+
+/** Đẩy qua mốc debounce rồi vét microtask, trong `act` — trạng thái đổi từ callback `setTimeout`
+ * và từ `.then` của request, cả hai đều nằm ngoài `act` nếu không bọc. */
+async function choDebounce() {
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1600)
+  })
+}
+
+// task-23-carry.md C8: brief liệt ba chuỗi dải đầu nhưng không có ca nào chạm tới `ReportForm`.
+// Cả khối này đo ĐƯỜNG THẬT — từ phím gõ trong ô tới thân `PUT` — chứ không đo hook một mình
+// (đã có useSaveValues.test.ts) hay prop giả nào.
+describe('lưu khi rời ô', () => {
+  beforeEach(dongHoGia)
+
+  const MAU_HAI_DONG = () => mauNho([chiTieu({ code: 'B-1.1' }), chiTieu({ code: 'B-1.2' })])
+
+  it('rời ô CÓ SỬA thì 1,5 giây sau gửi đúng ô đó kèm version', async () => {
+    const u = nguoiDung()
+    ve({ state: 'draft', vai: 'reporter', version: 8, mau: MAU_HAI_DONG() })
+    await u.click(o('B-1.1', 'Tháng này'))
+    await u.keyboard('12')
+    await u.tab()
+    expect(putSpy).not.toHaveBeenCalled() // chưa hết debounce: chưa gửi gì
+
+    await choDebounce()
+    expect(putSpy).toHaveBeenCalledTimes(1)
+    expect(putSpy.mock.calls[0][0]).toBe('/reports/12/values')
+    expect(thanPut(0)).toEqual({ version: 8, values: [{ indicator_code: 'B-1.1', this_period: 12 }] })
+  })
+
+  // Cột "Cộng dồn" của dòng `counter` là ô NHẬP và lưu vào `acc_total_entered` (cellPolicy.ts).
+  // Đánh dấu nhầm cột là số của "Cộng dồn" chui vào "Tháng này" trên server — không test nào của
+  // cột "Tháng này" bắt được.
+  it('rời ô "Cộng dồn" gửi acc_total_entered, không gửi nhầm this_period', async () => {
+    const u = nguoiDung()
+    ve({
+      state: 'draft',
+      vai: 'reporter',
+      mau: mauNho([chiTieu({ code: 'B-8.1', agg_type: 'counter', name_vi: 'Số ngày không tai nạn' })]),
+    })
+    await u.click(o('B-8.1', 'Cộng dồn'))
+    await u.keyboard('9')
+    await u.tab()
+    await choDebounce()
+    expect(thanPut(0).values).toEqual([{ indicator_code: 'B-8.1', acc_total_entered: 9 }])
+  })
+
+  it('Tab ngang qua ô mà không sửa gì thì không gửi request nào', async () => {
+    const u = nguoiDung()
+    ve({ state: 'draft', vai: 'reporter', mau: MAU_HAI_DONG(), values: [{ indicator_code: 'B-1.1', this_period: 5 }] })
+    await u.click(o('B-1.1', 'Tháng này'))
+    await u.tab()
+    await choDebounce()
+    expect(putSpy).not.toHaveBeenCalled()
+  })
+
+  it('ô gõ sai (không đọc được số) thì KHÔNG gửi lên, không xoá số cũ trên server', async () => {
+    const u = nguoiDung()
+    ve({ state: 'draft', vai: 'reporter', mau: MAU_HAI_DONG(), values: [{ indicator_code: 'B-1.1', this_period: 5 }] })
+    await u.click(o('B-1.1', 'Tháng này'))
+    await u.keyboard('abc')
+    await u.tab()
+    await choDebounce()
+    expect(putSpy).not.toHaveBeenCalled()
+  })
+
+  it('dán một cột đánh dấu HẾT các dòng đã ghi, không chỉ ô đang đứng', async () => {
+    const u = nguoiDung()
+    ve({
+      state: 'draft',
+      vai: 'reporter',
+      mau: mauNho([chiTieu({ code: 'B-1.1' }), chiTieu({ code: 'B-1.2' }), chiTieu({ code: 'B-1.3' })]),
+    })
+    await u.click(o('B-1.1', 'Tháng này'))
+    await u.paste('10\n20\n30')
+    await choDebounce()
+    expect(putSpy).toHaveBeenCalledTimes(1)
+    expect(thanPut(0).values).toEqual([
+      { indicator_code: 'B-1.1', this_period: 10 },
+      { indicator_code: 'B-1.2', this_period: 20 },
+      { indicator_code: 'B-1.3', this_period: 30 },
+    ])
+  })
+
+  // Ghi chú của dòng THỨ HAI, không phải dòng đầu: mã chỉ tiêu phải đi theo đúng dòng người dùng
+  // gõ, không phải một mã viết cứng.
+  it('sửa ghi chú rồi rời ô thì gửi note kèm đúng mã dòng; Tab ngang qua ghi chú không đổi thì không gửi', async () => {
+    const u = nguoiDung()
+    ve({
+      state: 'draft',
+      vai: 'reporter',
+      mau: MAU_HAI_DONG(),
+      values: [{ indicator_code: 'B-1.1', note: 'Ghi chú cũ' }],
+    })
+    await u.click(screen.getByLabelText(/^B-1\.1 .+, Ghi chú$/))
+    await u.tab()
+    await choDebounce()
+    expect(putSpy).not.toHaveBeenCalled()
+
+    await u.click(screen.getByLabelText(/^B-1\.2 .+, Ghi chú$/))
+    await u.keyboard('Bộ đếm lệch do chuyển ca')
+    await u.tab()
+    await choDebounce()
+    expect(thanPut(0).values).toEqual([{ indicator_code: 'B-1.2', note: 'Bộ đếm lệch do chuyển ca' }])
+  })
+
+  it('dán vào cột "Cộng dồn" gửi acc_total_entered cho từng dòng, không gửi this_period', async () => {
+    const u = nguoiDung()
+    ve({
+      state: 'draft',
+      vai: 'reporter',
+      mau: mauNho([
+        chiTieu({ code: 'B-8.1', agg_type: 'counter', name_vi: 'Số ngày không tai nạn' }),
+        chiTieu({ code: 'B-8.2', agg_type: 'counter', name_vi: 'Số giờ không tai nạn' }),
+      ]),
+    })
+    await u.click(o('B-8.1', 'Cộng dồn'))
+    await u.paste('10\n20')
+    await choDebounce()
+    expect(thanPut(0).values).toEqual([
+      { indicator_code: 'B-8.1', acc_total_entered: 10 },
+      { indicator_code: 'B-8.2', acc_total_entered: 20 },
+    ])
+  })
+
+  it('Ctrl+S (không có onLuu) gửi NGAY và huỷ luôn lượt hẹn đang chờ', async () => {
+    const u = nguoiDung()
+    ve({ state: 'draft', vai: 'reporter', mau: MAU_HAI_DONG() })
+    await u.click(o('B-1.1', 'Tháng này'))
+    await u.keyboard('7')
+    await u.tab()
+    await u.keyboard('{Control>}s{/Control}')
+    expect(putSpy).toHaveBeenCalledTimes(1) // chưa qua 1,5 s
+
+    await choDebounce()
+    expect(putSpy).toHaveBeenCalledTimes(1) // hẹn cũ đã bị huỷ, không có PUT thứ hai
+  })
+
+  it('nút Lưu (không có onLuu) cũng gửi ngay', async () => {
+    const u = nguoiDung()
+    ve({ state: 'draft', vai: 'reporter', mau: MAU_HAI_DONG() })
+    await u.click(o('B-1.1', 'Tháng này'))
+    await u.keyboard('7')
+    await u.click(screen.getByRole('button', { name: 'Lưu' }))
+    expect(putSpy).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('dải đầu — trạng thái lưu', () => {
+  beforeEach(dongHoGia)
+
+  const MAU_BA_DONG = () =>
+    mauNho([chiTieu({ code: 'B-1.1' }), chiTieu({ code: 'B-1.2' }), chiTieu({ code: 'B-1.3' })])
+
+  async function goVao(u: ReturnType<typeof nguoiDung>, ma: string, so: string) {
+    await u.click(o(ma, 'Tháng này'))
+    await u.keyboard(so)
+    await u.tab()
+  }
+
+  it('chưa đụng vào form thì KHÔNG có dòng trạng thái lưu nào', () => {
+    ve({ state: 'draft', vai: 'reporter', mau: MAU_BA_DONG() })
+    expect(screen.queryByText(/Đang lưu|Đã lưu|Chưa lưu/)).toBeNull()
+  })
+
+  it('còn ô chưa lưu thì hiện "Chưa lưu (n ô)" với ĐÚNG n, màu cảnh báo', async () => {
+    const u = nguoiDung()
+    ve({ state: 'draft', vai: 'reporter', mau: MAU_BA_DONG() })
+    await goVao(u, 'B-1.1', '1')
+    expect(screen.getByText('Chưa lưu (1 ô)')).toBeTruthy()
+    await goVao(u, 'B-1.2', '2')
+    await goVao(u, 'B-1.3', '3')
+    const dong = screen.getByText('Chưa lưu (3 ô)')
+    expect(resolveCascadeWinner(dong.className, 'color')).toBe('text-warning')
+  })
+
+  it('đang gửi thì hiện "Đang lưu…"', async () => {
+    putSpy.mockReturnValueOnce(new Promise(() => {})) // treo: đo đúng lúc request còn bay
+    const u = nguoiDung()
+    ve({ state: 'draft', vai: 'reporter', mau: MAU_BA_DONG() })
+    await goVao(u, 'B-1.1', '1')
+    await choDebounce()
+    expect(screen.getByText('Đang lưu…')).toBeTruthy()
+    expect(screen.queryByText(/Chưa lưu/)).toBeNull()
+  })
+
+  it('lưu xong thì hiện "Đã lưu 14:02" theo giờ Việt Nam', async () => {
+    vi.setSystemTime(new Date('2026-09-20T07:02:00Z')) // 14:02 giờ VN
+    const u = nguoiDung()
+    ve({ state: 'draft', vai: 'reporter', mau: MAU_BA_DONG() })
+    await goVao(u, 'B-1.1', '1')
+    await choDebounce()
+    expect(screen.getByText('Đã lưu 14:02')).toBeTruthy()
+    expect(screen.queryByText(/Chưa lưu/)).toBeNull()
+  })
+
+  it('gõ tiếp sau khi đã lưu thì quay lại "Chưa lưu", không giữ "Đã lưu"', async () => {
+    const u = nguoiDung()
+    ve({ state: 'draft', vai: 'reporter', mau: MAU_BA_DONG() })
+    await goVao(u, 'B-1.1', '1')
+    await choDebounce()
+    await goVao(u, 'B-1.2', '2')
+    expect(screen.getByText('Chưa lưu (1 ô)')).toBeTruthy()
+    expect(screen.queryByText(/Đã lưu/)).toBeNull()
+  })
+})
+
+describe('phản hồi PUT vẽ lại cột chỉ đọc (C9)', () => {
+  beforeEach(dongHoGia)
+
+  it('dòng tự tính đổi số sau khi lưu, lấy từ values của phản hồi', async () => {
+    const u = nguoiDung()
+    const mau = mauNho([
+      chiTieu({ code: 'B-1.1', name_vi: 'Giờ công nhân viên', decimals: 0 }),
+      chiTieu({ code: 'B-1.4', name_vi: 'Tổng giờ công', agg_type: 'computed', formula: 'B-1.1,B-1.2,B-1.3', decimals: 0 }),
+    ])
+    putSpy.mockResolvedValueOnce({
+      version: 9,
+      values: [giaTri({ indicator_code: 'B-1.4', this_period: 402_100, acc_total_computed: 402_100 })],
+    })
+    ve({ state: 'draft', vai: 'reporter', mau })
+    // Trước khi lưu: không có bản sao `evaluate_computed` nào ở TypeScript nên dòng tổng còn trống.
+    expect(o('B-1.4', 'Tháng này').textContent).toBe('—')
+
+    await u.click(o('B-1.1', 'Tháng này'))
+    await u.keyboard('402100')
+    await u.tab()
+    await choDebounce()
+    expect(o('B-1.4', 'Tháng này').textContent).toBe('402.100')
+    expect(o('B-1.4', 'Cộng dồn').textContent).toBe('402.100')
+    // Ô người dùng đang gõ KHÔNG bị phản hồi đè lên (phản hồi không hề nhắc tới B-1.1).
+    expect(chu(o('B-1.1', 'Tháng này'))).toBe('402.100')
+  })
+})
+
+describe('đường lỗi của lớp lưu', () => {
+  beforeEach(dongHoGia)
+
+  async function goRoiCho(u: ReturnType<typeof nguoiDung>) {
+    await u.click(o('B-1.1', 'Tháng này'))
+    await u.keyboard('12')
+    await u.tab()
+    await choDebounce()
+  }
+
+  it('mất mạng: banner offline, số vẫn nằm trên màn hình và vẫn là "Chưa lưu"', async () => {
+    putSpy.mockRejectedValueOnce(new TypeError('Failed to fetch'))
+    const u = nguoiDung()
+    ve({ state: 'draft', vai: 'reporter', mau: mauNho([chiTieu({ code: 'B-1.1' }), chiTieu({ code: 'B-1.2' })]) })
+    await goRoiCho(u)
+    expect(screen.getByText(/Mất kết nối/).textContent).toContain('sẽ tự gửi lại khi có mạng')
+    expect(screen.getByText('Chưa lưu (1 ô)')).toBeTruthy()
+    expect(chu(o('B-1.1', 'Tháng này'))).toBe('12')
+  })
+
+  it('có mạng trở lại thì tự gửi lại, banner offline biến mất', async () => {
+    putSpy.mockRejectedValueOnce(new TypeError('Failed to fetch'))
+    const u = nguoiDung()
+    ve({ state: 'draft', vai: 'reporter', mau: mauNho([chiTieu({ code: 'B-1.1' }), chiTieu({ code: 'B-1.2' })]) })
+    await goRoiCho(u)
+    await act(async () => {
+      window.dispatchEvent(new Event('online'))
+    })
+    expect(putSpy).toHaveBeenCalledTimes(2)
+    expect(screen.queryByText(/Mất kết nối/)).toBeNull()
+  })
+
+  it('lỗi server KHÔNG phải xung đột: hiện nguyên văn detail, không đổi thành câu tự chế', async () => {
+    putSpy.mockRejectedValueOnce(new ApiError(403, { detail: 'Báo cáo ở trạng thái không cho sửa' }))
+    const u = nguoiDung()
+    ve({ state: 'draft', vai: 'reporter', mau: mauNho([chiTieu({ code: 'B-1.1' }), chiTieu({ code: 'B-1.2' })]) })
+    await goRoiCho(u)
+    expect(screen.getByText(/Báo cáo ở trạng thái không cho sửa/)).toBeTruthy()
+    expect(screen.queryByText(/Mất kết nối/)).toBeNull()
+  })
+
+  it('409 từ chính lượt lưu: banner vàng, cột chỉ đọc vá theo server, ô đang gõ giữ nguyên', async () => {
+    putSpy.mockRejectedValueOnce(
+      new ApiError(409, {
+        detail: 'Người khác vừa sửa báo cáo này',
+        state: 'draft',
+        version: 11,
+        values: [giaTri({ indicator_code: 'B-1.4', this_period: 777 })],
+      }),
+    )
+    const u = nguoiDung()
+    const mau = mauNho([
+      chiTieu({ code: 'B-1.1' }),
+      chiTieu({ code: 'B-1.4', name_vi: 'Tổng giờ công', agg_type: 'computed', formula: 'B-1.1', decimals: 0 }),
+    ])
+    ve({ state: 'draft', vai: 'reporter', version: 8, mau })
+    await goRoiCho(u)
+
+    const bao = await screen.findByRole('alert')
+    expect(bao.textContent).toContain('Người khác vừa sửa báo cáo này')
+    expect(bao.textContent).toContain('phiên bản 8 → 11')
+    expect(o('B-1.4', 'Tháng này').textContent).toBe('777')
+    expect(chu(o('B-1.1', 'Tháng này'))).toBe('12')
+    // Ô vẫn nằm trong hàng chờ: bấm Lưu lần nữa là gửi lại với version mới.
+    expect(screen.getByText('Chưa lưu (1 ô)')).toBeTruthy()
+    await u.click(screen.getByRole('button', { name: 'Lưu' }))
+    expect(thanPut(1)).toEqual({ version: 11, values: [{ indicator_code: 'B-1.1', this_period: 12 }] })
+  })
+})
+
+describe('Nộp luôn lưu trước rồi mới chuyển trạng thái', () => {
+  beforeEach(dongHoGia)
+
+  it('bấm Nộp khi còn ô chưa lưu: PUT đi trước, transition đi sau', async () => {
+    const u = nguoiDung()
+    const onChuyenTrangThai = vi.fn()
+    ve({
+      state: 'draft',
+      vai: 'reporter',
+      mau: mauNho([chiTieu({ code: 'B-1.1' })]),
+      onChuyenTrangThai,
+    })
+    await u.click(o('B-1.1', 'Tháng này'))
+    await u.keyboard('12')
+    await u.click(screen.getByRole('button', { name: 'Nộp báo cáo' }))
+
+    expect(thanPut(0).values).toEqual([{ indicator_code: 'B-1.1', this_period: 12 }])
+    expect(onChuyenTrangThai).toHaveBeenCalledTimes(1)
+    expect(putSpy.mock.invocationCallOrder[0]).toBeLessThan(onChuyenTrangThai.mock.invocationCallOrder[0])
+  })
+
+  it('lưu hỏng thì KHÔNG chuyển trạng thái — nộp bằng số chưa lên server là nộp thiếu', async () => {
+    putSpy.mockRejectedValueOnce(new TypeError('Failed to fetch'))
+    const u = nguoiDung()
+    const onChuyenTrangThai = vi.fn()
+    ve({
+      state: 'draft',
+      vai: 'reporter',
+      mau: mauNho([chiTieu({ code: 'B-1.1' })]),
+      onChuyenTrangThai,
+    })
+    await u.click(o('B-1.1', 'Tháng này'))
+    await u.keyboard('12')
+    await u.click(screen.getByRole('button', { name: 'Nộp báo cáo' }))
+    expect(putSpy).toHaveBeenCalledTimes(1)
+    expect(onChuyenTrangThai).not.toHaveBeenCalled()
   })
 })

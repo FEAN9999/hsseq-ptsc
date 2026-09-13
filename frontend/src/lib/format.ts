@@ -33,6 +33,22 @@ export function formatDateTime(iso: string): string {
   return `${lay('day')}/${lay('month')}/${lay('year')} ${lay('hour')}:${lay('minute')}`
 }
 
+/** ISO UTC -> "HH:mm" theo giờ Việt Nam — dải đầu form nói "Đã lưu 14:02" (thiết kế dòng 681).
+ *
+ * Cùng `MUI_GIO_VN` và cùng cách ráp `formatToParts` với `formatDateTime` ngay trên: tự chế múi
+ * giờ lần thứ hai là chỗ để hai dòng giờ trong cùng một trang lệch nhau khi máy chạy ở múi khác.
+ */
+export function formatTime(iso: string): string {
+  const parts = new Intl.DateTimeFormat('vi-VN', {
+    timeZone: MUI_GIO_VN,
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(new Date(iso))
+  const lay = (type: string) => parts.find((p) => p.type === type)?.value ?? ''
+  return `${lay('hour')}:${lay('minute')}`
+}
+
 /** Chỉ số ngày lịch (theo giờ VN) của một thời điểm — dùng để trừ ra số NGÀY LỊCH,
  * không trừ mili-giây: khoảng cách tính bằng mili-giây và khoảng cách tính bằng ngày lịch là
  * hai đại lượng khác nhau (23:59 và 00:01 hôm sau chỉ cách nhau 2 phút nhưng khác ngày lịch;

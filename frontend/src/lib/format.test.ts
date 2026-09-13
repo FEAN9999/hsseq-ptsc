@@ -1,6 +1,6 @@
 // frontend/src/lib/format.test.ts
 import { describe, expect, it } from 'vitest'
-import { formatDateTime, formatDue, formatNumber, formatPeriod } from './format'
+import { formatDateTime, formatDue, formatNumber, formatPeriod, formatTime } from './format'
 
 describe('format', () => {
   it('kỳ hiện 08/2026 chứ không phải 2026-08', () => {
@@ -10,6 +10,19 @@ describe('format', () => {
   it('thời điểm theo giờ Việt Nam', () => {
     // 2026-09-05T10:00:00Z = 17:00 giờ VN
     expect(formatDateTime('2026-09-05T10:00:00Z')).toBe('05/09/2026 17:00')
+  })
+
+  it('giờ:phút theo giờ Việt Nam, đệm 0 ở đầu', () => {
+    // 2026-09-20T07:02:00Z = 14:02 giờ VN
+    expect(formatTime('2026-09-20T07:02:00Z')).toBe('14:02')
+    // 2026-09-20T02:05:00Z = 09:05 giờ VN — giờ một chữ số vẫn phải là "09", không phải "9"
+    expect(formatTime('2026-09-20T02:05:00Z')).toBe('09:05')
+  })
+
+  // Nửa đêm giờ VN: `hour12: false` ở vài phiên bản ICU cho "24:00" thay vì "00:00". Khoá lại vì
+  // ca lưu lúc 00:xx là ca người nhập gõ nốt trước hạn cuối tháng, không phải ca hiếm.
+  it('nửa đêm giờ Việt Nam hiện 00:xx, không phải 24:xx', () => {
+    expect(formatTime('2026-09-19T17:03:00Z')).toBe('00:03')
   })
 
   it('hạn nộp còn hạn thì đếm ngược, title là ngày tuyệt đối', () => {
