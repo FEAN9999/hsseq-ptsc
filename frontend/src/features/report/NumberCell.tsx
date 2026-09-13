@@ -40,11 +40,15 @@ function soThoDeSua(value: number, decimals: number): string {
 const PHAN_CACH_DONG = /\r\n|\r|\n/
 
 export function NumberCell({ value, decimals, ariaLabel, onChange, onCommit, onPasteColumn }: NumberCellProps) {
-  // fix-1 S9: khởi tạo '' thay vì `formatNumber(value, decimals)` — effect ngay dưới đây LUÔN
-  // chạy một lần lúc mount và ghi đè giá trị này trước khi người dùng thấy gì (React flush effect
-  // trong `act()` của test; ở trình duyệt thật là ngay khung hình kế tiếp), nên định dạng sẵn ở
-  // đây là mã thừa, không ai phân biệt được với bản rỗng.
-  const [text, setText] = useState('')
+  // fix-2 T1 — ĐỪNG xoá initializer này (fix-1 S9 từng xoá nhầm nó, coi là mã chết — SAI).
+  // Đây là chữ của LẦN VẼ ĐẦU TIÊN; `useEffect` ngay dưới chỉ lo các lần `value` đổi VỀ SAU,
+  // vì hợp đồng React chạy effect SAU khi trình duyệt đã vẽ — không phải "ngay lập tức" như
+  // comment cũ (đã sai) từng khẳng định. Test RTL không thấy được khoảng trống này vì
+  // `render()` flush effect đồng bộ trong `act()`, nhưng trình duyệt thật thì có: đo bằng
+  // `flushSync`/`renderToString` (task-21-rereview-1.md §3) cho khung hình đầu rỗng thật —
+  // dựng 165 ô kiểu bảng FM01 thì 165/165 ô rỗng ở khung đầu, kể cả ô hiện `—`. Không có test
+  // nào bắt được nếu xoá dòng này (đã xác nhận: 0 ca đỏ) — ĐỪNG suy ra từ đó là mã thừa.
+  const [text, setText] = useState(() => formatNumber(value, decimals))
   const [error, setError] = useState<string | null>(null)
   const dangFocus = useRef(false)
   // fix-1 S6: mốc so sánh — nhớ `text` tại thời điểm focus, blur mà `text` không đổi so với mốc
@@ -107,7 +111,9 @@ export function NumberCell({ value, decimals, ariaLabel, onChange, onCommit, onP
     // fix-1 S5: chỉ cắt các dòng trắng THỪA Ở CUỐI (artefact của Excel luôn kết thúc một vùng đã
     // copy bằng dấu xuống dòng) — dòng trắng Ở GIỮA vẫn giữ nguyên, vì nó mang nghĩa "ô này để
     // trống", một tín hiệu khác hẳn với đuôi thừa của phép tách chuỗi.
-    while (dong.length > 0 && dong[dong.length - 1] === '') dong.pop()
+    // fix-2 T5: bỏ canh `dong.length > 0` — `split` không bao giờ trả mảng rỗng, và khi mảng
+    // rỗng thì `dong[-1]` là `undefined !== ''` nên vòng lặp tự dừng, canh này là thừa.
+    while (dong[dong.length - 1] === '') dong.pop()
     onPasteColumn(dong)
   }
 

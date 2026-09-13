@@ -34,5 +34,8 @@ export function parseViNumber(raw: string, decimals: number): { value: number | 
   if (Math.abs(so) >= GIOI_HAN_DO_LON) return { value: null, error: 'Số quá lớn, tối đa 16 chữ số phần nguyên' }
   if (chuSoThapPhan(so) > decimals) return { value: null, error: `Chỉ nhận tối đa ${decimals} chữ số thập phân` }
 
-  return { value: so, error: null }
+  // fix-2 T9: `-?` ở cổng kiểm nhóm hàng nghìn (trên) cho lọt đúng một họ vô hại về giá trị —
+  // '-0.000' dạng: `so < 0` là false với -0 (IEEE754, -0 không nhỏ hơn 0) nên rơi tới đây thành
+  // công với `so` là -0. Chuẩn hoá về 0 thường để tránh trả một giá trị "âm" nhìn giống dương.
+  return { value: so === 0 ? 0 : so, error: null }
 }

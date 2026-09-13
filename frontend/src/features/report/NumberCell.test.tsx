@@ -259,4 +259,69 @@ describe('NumberCell', () => {
     rerender(<NumberCell value={999} decimals={0} ariaLabel="x" />)
     expect(o.value).toBe('55')
   })
+
+  // ============ Vòng sửa 2 (task-21-fix-2.md) ============
+
+  // fix-2 T4 (rereview §4b mutation T11 + T12) — `decimals` truyền vào `parseViNumber` ở CẢ
+  // `xuLyChange` lẫn `xuLyBlur` chưa từng được khẳng định với decimals > 0: ca decimals=2 duy
+  // nhất trước đây (N7) chỉ nhìn `.value` hiển thị, không nhìn payload callback nào. Ép cứng
+  // decimals=0 ở một trong hai chỗ đó sẽ làm ô B-1.x (Giờ công, decimals=2) báo lỗi sai và bật
+  // aria-invalid trên một giá trị hợp lệ — mà không ca nào từng đỏ.
+  it('decimals=2 được truyền đúng vào parseViNumber ở CẢ onChange lẫn onCommit, không bị ép về 0 (fix-2 T4)', async () => {
+    const onChange = vi.fn()
+    const onCommit = vi.fn()
+    render(<NumberCell value={null} decimals={2} ariaLabel="x" onChange={onChange} onCommit={onCommit} />)
+    const o = screen.getByLabelText('x') as HTMLInputElement
+    await userEvent.click(o)
+    await userEvent.type(o, '12,35')
+    expect(onChange).toHaveBeenLastCalledWith({ value: 12.35, error: null })
+    await userEvent.tab()
+    expect(onCommit).toHaveBeenCalledWith({ value: 12.35, error: null })
+    expect(o.getAttribute('aria-invalid')).toBeNull()
+  })
+
+  // fix-2 T6 (rereview §4b mutation T5) — nhánh LỖI của `xuLyFocus` (S3) phải cập nhật
+  // `textLucFocus.current` bằng CHÍNH `text` hiện tại (không phải hằng số/rỗng) — nếu không,
+  // Tab ngang qua một ô ĐANG LỖI lần thứ hai (không sửa gì thêm) vẫn bị coi là "có sửa" và bắn
+  // `onCommit` một cách sai, đúng thứ S6 sinh ra để chặn.
+  it('Tab ngang qua một ô ĐANG LỖI (không sửa thêm gì) cũng KHÔNG bắn onCommit lần hai (fix-2 T6)', async () => {
+    const onCommit = vi.fn()
+    render(<NumberCell value={null} decimals={0} ariaLabel="x" onCommit={onCommit} />)
+    const o = screen.getByLabelText('x')
+    await userEvent.type(o, 'abc')
+    await userEvent.tab()
+    expect(o.getAttribute('aria-invalid')).toBe('true')
+    onCommit.mockClear()
+    await userEvent.click(o)
+    await userEvent.tab()
+    expect(onCommit).not.toHaveBeenCalled()
+  })
+
+  // fix-2 T7 (rereview §4b mutation T7) — ca S5 cũ chỉ có ĐÚNG MỘT dòng trắng thừa ở cuối, nên
+  // không phân biệt được `while` (cắt hết) với `if` (chỉ cắt một lần). Hai dòng trắng liền nhau
+  // ở cuối mới lộ ra khác biệt.
+  it('nhiều dòng trắng liền nhau ở cuối đều bị cắt hết, không chỉ cắt một lần (fix-2 T7)', async () => {
+    const onPasteColumn = vi.fn()
+    render(<NumberCell value={null} decimals={0} ariaLabel="x" onPasteColumn={onPasteColumn} />)
+    const o = screen.getByLabelText('x')
+    await userEvent.click(o)
+    await userEvent.paste('10\n20\n\n')
+    expect(onPasteColumn).toHaveBeenCalledWith(['10', '20'])
+  })
+
+  // fix-2 T8 (rereview §4b mutation T13) — canh `!dangFocus.current` bọc `setError(null)` (mã S2)
+  // chưa từng được khẳng định trong đúng tổ hợp "đang focus VÀ đang lỗi": nếu canh bị bỏ, cha đổi
+  // `value` trong lúc người dùng đang gõ dở trên một ô lỗi sẽ bị xoá trắng aria-invalid ngay dưới
+  // tay họ dù chữ sai vẫn còn nguyên trên màn hình.
+  it('đang focus VÀ đang lỗi mà value đổi từ ngoài thì vẫn giữ lỗi, không bị xoá trắng (fix-2 T8)', async () => {
+    const { rerender } = render(<NumberCell value={null} decimals={0} ariaLabel="x" />)
+    const o = screen.getByLabelText('x') as HTMLInputElement
+    await userEvent.type(o, 'abc')
+    await userEvent.tab()
+    expect(o.getAttribute('aria-invalid')).toBe('true')
+    await userEvent.click(o)
+    rerender(<NumberCell value={999} decimals={0} ariaLabel="x" />)
+    expect(o.getAttribute('aria-invalid')).toBe('true')
+    expect(o.value).toBe('abc')
+  })
 })

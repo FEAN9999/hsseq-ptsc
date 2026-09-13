@@ -93,4 +93,39 @@ describe('parseViNumber', () => {
     expect(r.value).toBeNull()
     expect(r.error).toBe('Chỉ nhập số')
   })
+
+  // ============ Vòng sửa 2 (task-21-fix-2.md) ============
+
+  // fix-2 T2 (task-21-rereview-1.md §4b mutation T4) — không ca nào trước đây có CẢ dấu chấm
+  // (nhóm hàng nghìn) LẪN dấu phẩy (thập phân) cùng lúc, nên nhóm `(,\d+)?` của regex S1 chưa
+  // từng được test chạy qua. Đây đúng dạng vi-VN đầy đủ mà một ô decimals>0 nhận khi dán từ Excel.
+  it('12. dấu chấm ngăn ngàn VÀ dấu phẩy thập phân cùng lúc vẫn phân tích đúng (fix-2 T2)', () => {
+    const r = parseViNumber('1.284.500,25', 2)
+    expect(r).toEqual({ value: 1284500.25, error: null })
+  })
+
+  // fix-2 T3 (rereview §4b mutation T2) — độ rộng nhóm `\d{1,3}` chưa từng được test: nới thành
+  // `\d{1,4}` thì '1234.567' lọt thành 1234567 (nhân 1000, đúng loại lỗi mà S1 sinh ra để chặn)
+  // mà không ca nào đỏ.
+  it('13. nhóm hàng nghìn có 4 chữ số (không phải 3) báo lỗi, không được lọt thành số nhân 1000 (fix-2 T3)', () => {
+    const r = parseViNumber('1234.567', 0)
+    expect(r.value).toBeNull()
+    expect(r.error).toBe('Chỉ nhập số')
+  })
+
+  // fix-2 T9 — `-?` (tự thêm khi vá S1, xem 10c) đúng và được giữ, nhưng nó mở đúng một họ vô
+  // hại về giá trị: '-0.000' khớp nhóm hàng nghìn hợp lệ, qua được cổng kiểm, rồi `so < 0` là
+  // false với -0 (theo IEEE754, -0 không nhỏ hơn 0) nên lọt xuống thành công với value = -0 —
+  // không sai giá trị (báo cáo/backend đều hiểu -0 là 0) nhưng là một dị thường nên chuẩn hoá
+  // luôn cho sạch, rẻ hơn là để lại ghi nợ.
+  it.each([
+    ['-0.000', 3],
+    ['-000.000', 3],
+    ['-0.000.000', 3],
+  ])('14. "%s" chuẩn hoá về 0, không trả -0 (fix-2 T9)', (raw, decimals) => {
+    const r = parseViNumber(raw, decimals)
+    expect(r.error).toBeNull()
+    expect(Object.is(r.value, -0)).toBe(false)
+    expect(r.value).toBe(0)
+  })
 })
