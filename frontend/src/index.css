@@ -1,0 +1,17 @@
+@import "tailwindcss";
+@config "../tailwind.config.ts";
+
+:root { color-scheme: light; }
+body {
+  margin: 0;
+  background: #fafaf9;
+  color: #0c0a09;
+  font: 14px/1.45 Inter, system-ui, sans-serif;
+  font-feature-settings: "tnum";   /* mọi con số thẳng cột */
+}
+.tnum { font-feature-settings: "tnum"; }
+@media (prefers-reduced-motion: reduce) {
+  .flash { animation: none !important; }
+}
+@keyframes flash-bg { from { background: #c1e1f7 } to { background: #fff } }
+.flash { animation: flash-bg 600ms ease-out; }   /* chuyển động DUY NHẤT của app */
