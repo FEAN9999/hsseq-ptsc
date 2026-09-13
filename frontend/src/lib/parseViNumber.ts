@@ -1,0 +1,29 @@
+/**
+ * Phân tích chuỗi người dùng gõ/dán vào ô số FM01 (định dạng vi-VN: dấu chấm ngăn hàng nghìn,
+ * dấu phẩy ngăn thập phân) thành `number | null` — logic thuần, không React.
+ *
+ * task-21-carry.md C1: ba luật giá trị (âm, số chữ số thập phân, giới hạn độ lớn) DÙNG LẠI đúng
+ * hằng/hàm đã cài ở `zodSchemaFromCatalog` (Task 16), không chép lại lần hai — hai nơi chép cùng
+ * một luật mà lệch nhau nghĩa là người dùng gõ được số mà form nhận rồi backend từ chối.
+ *
+ * task-21-carry.md C5: câu lỗi dùng NGUYÊN VĂN đã chốt ở `zodSchemaFromCatalog`/backend, cộng
+ * 'Chỉ nhập số' cho ký tự lạ (thiết kế dòng 671) — không viết câu mới.
+ */
+import { GIOI_HAN_DO_LON, chuSoThapPhan } from '../features/report/zodSchemaFromCatalog'
+
+export function parseViNumber(raw: string, decimals: number): { value: number | null; error: string | null } {
+  const khongKhoangTrang = raw.replace(/\s/g, '')
+  if (khongKhoangTrang === '') return { value: null, error: null }
+
+  // '.' luôn là dấu ngăn hàng nghìn (bỏ hẳn), ',' luôn là dấu thập phân (đổi thành '.' cho Number)
+  // — đúng quy ước vi-VN, không đoán theo ngữ cảnh.
+  const khongChamNgan = khongKhoangTrang.replace(/\./g, '')
+  const so = Number(khongChamNgan.replace(',', '.'))
+
+  if (!Number.isFinite(so)) return { value: null, error: 'Chỉ nhập số' }
+  if (so < 0) return { value: null, error: 'Số không được âm' }
+  if (Math.abs(so) >= GIOI_HAN_DO_LON) return { value: null, error: 'Số quá lớn, tối đa 16 chữ số phần nguyên' }
+  if (chuSoThapPhan(so) > decimals) return { value: null, error: `Chỉ nhận tối đa ${decimals} chữ số thập phân` }
+
+  return { value: so, error: null }
+}

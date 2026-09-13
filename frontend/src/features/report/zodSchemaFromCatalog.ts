@@ -32,8 +32,12 @@ export interface Catalog {
 
 /** `report_rules.py:71`: Postgres (`Numeric(18,2)`) từ chối |giá trị| >= 10^16 bằng một lỗi
  * 500 trần. Chặn ở đây với cùng ngưỡng và cùng câu để người dán nhầm ô Excel dạng mũ thấy
- * lỗi ngay khi gõ, không phải sau khi bấm nộp. */
-const GIOI_HAN_DO_LON = 10 ** 16
+ * lỗi ngay khi gõ, không phải sau khi bấm nộp.
+ *
+ * Export để `parseViNumber` (Task 21, task-21-carry.md C1) dùng LẠI đúng hằng số này — hai nơi
+ * chép cùng một ngưỡng mà lệch nhau nghĩa là người dùng gõ được số mà form nhận rồi backend
+ * từ chối. */
+export const GIOI_HAN_DO_LON = 10 ** 16
 
 /** Số chữ số thập phân THỰC SỰ của `v`. Đếm từ biểu diễn CHUỖI của `v`, không nhân với luỹ
  * thừa 10 (task-16-carry.md C3): `8.29 * 100 = 828.9999999999999` vì sai số dấu phẩy động.
@@ -41,8 +45,11 @@ const GIOI_HAN_DO_LON = 10 ** 16
  * `Number.prototype.toString()` tự chuyển sang ký hiệu mũ ở cả hai đầu phổ — số rất nhỏ
  * (`String(1e-7) === '1e-7'`, task-16-fix-brief.md F5) lẫn số rất lớn (`String(1e21) ===
  * '1e+21'`) — nên phải tách mantissa/số mũ rồi cộng/trừ số mũ vào số thập phân của mantissa,
- * không thể chỉ tìm dấu `.` một lần trên toàn chuỗi. */
-function chuSoThapPhan(v: number): number {
+ * không thể chỉ tìm dấu `.` một lần trên toàn chuỗi.
+ *
+ * Export để `parseViNumber` (Task 21, task-21-carry.md C1) gọi lại đúng hàm này thay vì viết một
+ * bản đếm khác — tránh hai bản lệch nhau trên input dạng mũ (`1e-7`, `1e21`). */
+export function chuSoThapPhan(v: number): number {
   const s = v.toString()
   const iE = s.indexOf('e')
   if (iE === -1) {
