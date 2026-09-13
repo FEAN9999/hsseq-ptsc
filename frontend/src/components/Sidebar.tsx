@@ -62,12 +62,25 @@ export function Sidebar() {
 
   const co = (ma: string) => permissions.has(ma)
 
-  // Một slot "báo cáo" duy nhất trong sidebar: report.approve THẮNG report.edit/submit/
-  // view_own_unit. Bắt buộc phải có nhánh loại trừ này — vai admin_atcl thật (seed) nắm TOÀN BỘ
-  // danh mục quyền, tức có report.approve LẪN report.view_own_unit cùng lúc; thiếu nhánh này sẽ
-  // hiện cả "Duyệt báo cáo" lẫn "Báo cáo của đơn vị" một lúc, sai mọi mockup (chỉ "Duyệt báo cáo").
-  const coDuyet = co('report.approve')
-  const coBaoCaoDonVi = !coDuyet && (co('report.edit') || co('report.submit') || co('report.view_own_unit'))
+  // Một slot "báo cáo" duy nhất trong sidebar — BA nhánh loại trừ nhau theo đúng thứ tự, bắt buộc
+  // phải là if/else (không phải 3 biến boolean độc lập): vai admin_atcl thật (seed) nắm TOÀN BỘ
+  // danh mục quyền nên trúng cả ba nhánh cùng lúc; thiếu thứ tự sẽ hiện lẫn nhãn, sai mọi mockup.
+  //   1. report.approve  → "Duyệt báo cáo" (duyệt được)
+  //   2. report.view_all → "Báo cáo" (xem mọi đơn vị, không duyệt — vai viewer, seed)
+  //   3. report.edit/submit/view_own_unit → "Báo cáo của đơn vị" (chỉ đơn vị mình — vai reporter)
+  // F1 (task-18-fix-brief.md): report.view_all trước đây không nằm nhánh nào — viewer@ptsc.local
+  // (seed: report.view_all + dashboard.view + status.view) đăng nhập chỉ thấy Dashboard + Tình
+  // trạng nộp, không có lối nào tới báo cáo dù quyền này cho xem toàn bộ thật
+  // (backend/app/api/deps.py:157, backend/app/services/reports.py:254). Nhãn "Báo cáo" là quyết
+  // định controller (Ruling 170) — không mockup nào vẽ vai này; "Duyệt báo cáo" sai vì không duyệt
+  // được, "Báo cáo của đơn vị" sai vì thấy mọi đơn vị chứ không riêng đơn vị mình.
+  const nhanBaoCao = co('report.approve')
+    ? 'Duyệt báo cáo'
+    : co('report.view_all')
+      ? 'Báo cáo'
+      : co('report.edit') || co('report.submit') || co('report.view_own_unit')
+        ? 'Báo cáo của đơn vị'
+        : null
 
   const mucQuanTriDuocPhep = MUC_QUAN_TRI.filter((m) => co(m.quyen))
 
@@ -76,8 +89,7 @@ export function Sidebar() {
       <Wordmark />
       <nav>
         {co('dashboard.view') && <MucNav to="/dashboard">Dashboard</MucNav>}
-        {coDuyet && <MucNav to="/reports">Duyệt báo cáo</MucNav>}
-        {coBaoCaoDonVi && <MucNav to="/reports">Báo cáo của đơn vị</MucNav>}
+        {nhanBaoCao && <MucNav to="/reports">{nhanBaoCao}</MucNav>}
         {co('status.view') && <MucNav to="/status">Tình trạng nộp</MucNav>}
         {mucQuanTriDuocPhep.length > 0 && (
           <>

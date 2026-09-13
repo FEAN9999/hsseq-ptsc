@@ -8,7 +8,7 @@
 // — cast đó dập tắt lỗi kiểu, đúng thứ carry cảnh báo là "che mất người duy nhất có thể báo sai".
 import { fireEvent, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, Route, Routes } from 'react-router-dom'
 
 import { AppShell } from './AppShell'
 import { resolveCascadeWinner } from './ui/cascade'
@@ -68,12 +68,30 @@ describe('Sidebar theo quyền', () => {
   // dưới đây thêm ngoài brief — mỗi test vá một khoảng trống mà 5 test gốc không chạm tới, phát
   // hiện qua tự đột biến (bảng chi tiết trong task-18-report.md).
 
-  it('admin_atcl thật (seed: TOÀN BỘ quyền, gồm cả report.approve LẪN report.view_own_unit) → chỉ "Duyệt báo cáo", không lặp "Báo cáo của đơn vị"', () => {
-    // 5 test gốc không có ca nào cấp report.approve CÙNG LÚC với report.edit/submit/
+  it('admin_atcl thật (seed: TOÀN BỘ quyền, gồm cả report.view_all) → chỉ "Duyệt báo cáo", không lặp hai nhãn kia — F1', () => {
+    // 5 test gốc không có ca nào cấp report.approve CÙNG LÚC với report.view_all/edit/submit/
     // view_own_unit — nhưng backend/app/seed/__init__.py cho vai admin_atcl NGUYÊN VẸN danh sách
-    // PERMISSIONS (gồm cả report.view_own_unit), nên đây là ca THẬT, không phải suy diễn.
-    veVoiQuyen(['report.approve', 'report.edit', 'report.submit', 'report.view_own_unit'])
+    // PERMISSIONS, nên đây là ca THẬT, không phải suy diễn. Dùng ĐÚNG danh sách PERMISSIONS của
+    // seed (không bịa bớt) — đúng yêu cầu task-18-fix-brief.md F1: "phiên admin (toàn bộ quyền,
+    // kể cả report.view_all) → vẫn CHỈ thấy Duyệt báo cáo, không thấy hai nhãn kia".
+    veVoiQuyen([
+      'report.create', 'report.edit', 'report.submit', 'report.return', 'report.approve',
+      'report.view_own_unit', 'report.view_all', 'dashboard.view', 'status.view',
+      'template.manage', 'workflow.manage', 'org.manage', 'user.manage', 'audit.view',
+    ])
     expect(screen.getByText('Duyệt báo cáo')).toBeTruthy()
+    expect(screen.queryByText('Báo cáo của đơn vị')).toBeNull()
+    expect(screen.queryByText('Báo cáo')).toBeNull()
+  })
+
+  it('viewer thật (seed: report.view_all + dashboard.view + status.view) thấy "Báo cáo" — F1, lỗ hổng thật đã vá', () => {
+    // F1 (task-18-fix-brief.md): report.view_all trước đây không nằm nhánh nào của slot báo cáo —
+    // viewer@ptsc.local đăng nhập chỉ thấy Dashboard + Tình trạng nộp, không có lối nào tới báo
+    // cáo, dù quyền này cho xem toàn bộ thật (backend/app/api/deps.py:157). Dùng ĐÚNG bộ quyền
+    // seed của vai viewer (backend/app/seed/__init__.py:71), không bịa bộ quyền cho vừa test.
+    veVoiQuyen(['report.view_all', 'dashboard.view', 'status.view'])
+    expect(screen.getByText('Báo cáo')).toBeTruthy()
+    expect(screen.queryByText('Duyệt báo cáo')).toBeNull()
     expect(screen.queryByText('Báo cáo của đơn vị')).toBeNull()
   })
 
@@ -118,5 +136,48 @@ describe('Bố cục AppShell (đo bằng cascade CSS thật, không phải toCo
     const main = container.querySelector('main')
     expect(main).toBeTruthy()
     expect(resolveCascadeWinner(main!.className, 'padding')).toBe('p-6')
+  })
+})
+
+// F2 (task-18-fix-brief.md): nhánh isActive của NavLink chưa từng chạy trong test — veVoiQuyen()
+// bọc <MemoryRouter> trần không <Routes>, nên mọi mục luôn nhận className "không đang mở". Ở đây
+// dựng router thật với <Routes> + initialEntries để CÓ một địa chỉ đang mở, rồi đo bằng
+// resolveCascadeWinner (không phải toContain — carry C3): mục đang mở phải THẮNG cascade nền
+// bg-mutedbg, mục khác thì không thắng nền nào cả (LOP_MUC không có utility nền nào để thắng).
+describe('Trạng thái mục đang mở (NavLink isActive) — F2', () => {
+  it('đang ở /status: "Tình trạng nộp" thắng cascade nền bg-mutedbg, "Dashboard" thì không', () => {
+    useSession.setState({
+      token: 't',
+      user: { id: 1, email: 'x@ptsc.local', full_name: 'X', position: null },
+      orgUnit: { id: 1, code: 'MC', name: 'PTSC M&C' },
+      permissions: new Set(['dashboard.view', 'status.view']),
+    })
+    render(
+      <MemoryRouter initialEntries={['/status']}>
+        <Routes>
+          <Route
+            path="/dashboard"
+            element={
+              <AppShell>
+                <div />
+              </AppShell>
+            }
+          />
+          <Route
+            path="/status"
+            element={
+              <AppShell>
+                <div />
+              </AppShell>
+            }
+          />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    const dangMo = screen.getByText('Tình trạng nộp')
+    const khongDangMo = screen.getByText('Dashboard')
+    expect(resolveCascadeWinner(dangMo.className, 'background-color')).toBe('bg-mutedbg')
+    expect(resolveCascadeWinner(khongDangMo.className, 'background-color')).toBeNull()
   })
 })
