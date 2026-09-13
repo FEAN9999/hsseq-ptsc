@@ -67,11 +67,18 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   // thấy token cũ còn tồn tại dù đã biết phiên hết hạn.
   if (res.status === 401 && !BO_QUA_401.some((p) => path.startsWith(p))) {
     useSession.getState().logout()
-    location.assign(`/login?next=${encodeURIComponent(location.pathname)}`)
+    // pathname + search (không chỉ pathname): route lọc theo query string (vd. /status?period=…)
+    // mất hết bộ lọc nếu next= không giữ query — cùng quy ước với RequireAuth (app/router.tsx).
+    location.assign(`/login?next=${encodeURIComponent(location.pathname + location.search)}`)
   }
 
   if (!res.ok) {
-    throw new ApiError(res.status, await res.json())
+    // Render free tier ngủ rồi thức dậy rất dễ trả 502/503 với thân HTML (gateway), không phải
+    // JSON — res.json() lúc đó tự ném SyntaxError trần, làm mất luôn instanceof ApiError ở nơi
+    // gọi. Không parse được thì coi như thân rỗng: constructor đã tự rơi về câu tiếng Việt mặc
+    // định ('Có lỗi xảy ra') khi thiếu `detail`, status vẫn là status thật từ response.
+    const than = await res.json().catch(() => ({}))
+    throw new ApiError(res.status, than)
   }
 
   return res.json() as Promise<T>
