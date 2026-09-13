@@ -3,7 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { Login } from './Login'
+import { Login, duongDanNoiBo } from './Login'
 import { useSession } from '../app/session'
 
 describe('/login', () => {
@@ -154,6 +154,10 @@ describe('/login — session ghi đúng hình dạng sau khi đăng nhập (C1)'
 // phải vẫn nằm trong chính origin đó — origin thử lại ở đây ('https://hseq.test') CỐ Ý khác
 // GOC_AO nội bộ của Login.tsx ('http://x.invalid'), để không vô tình chỉ đối chiếu trùng một hằng
 // số dùng chung giữa mã và test.
+// F3 (task-19-fix-brief-2.md, vòng sửa 2) — thêm 2 giá trị: '//x.invalid//evil.example' là chính
+// lỗ F3 vá (HIEM cũ không có nó nên 158 test vòng sửa 1 xanh trong khi lỗ nằm ngay trong hàm đang
+// test); 'http://[' là lý do M15 (vòng sửa 1) ra xanh — new URL('http://[', base) CÓ ném
+// TypeError thật, try/catch là mã sống nhưng trước đó chưa đầu vào nào chạm tới.
 const HIEM = [
   '//evil.example',
   'https://evil.example',
@@ -161,9 +165,11 @@ const HIEM = [
   '/\\/evil.example',
   '/\t/evil.example',
   'javascript:alert(1)',
+  '//x.invalid//evil.example',
+  'http://[',
 ]
 
-describe('/login — lọc next= (chống open redirect, F1)', () => {
+describe('/login — lọc next= (chống open redirect, F1+F3)', () => {
   beforeEach(() => vi.unstubAllGlobals())
 
   it.each(HIEM)('next=%s: giá trị đưa cho location.assign không thoát khỏi origin', async (gtNext) => {
@@ -205,5 +211,29 @@ describe('/login — lọc next= (chống open redirect, F1)', () => {
     render(<Login />)
     await dangNhapThu()
     await waitFor(() => expect(nhay).toHaveBeenCalledWith('/dashboard'))
+  })
+})
+
+// F4 (task-19-fix-brief-2.md, vòng sửa 2) — HIEM dù dài tới đâu vẫn chỉ bắt được thứ ta nghĩ ra
+// nổi (đó là lý do lỗ '//x.invalid//evil.example' lọt hai vòng sửa). Ca này gọi thẳng
+// duongDanNoiBo() (không qua submit form) trên ~7.4 nghìn chuỗi sinh từ tổ hợp token, đòi MỌI
+// chuỗi không bị chặn (khác null) phải vẫn ở đúng origin khi phân tích lại — đây phải ĐỎ trên mã
+// TRƯỚC F3 (chỉ so `u.origin`, không so lại chuỗi trả ra) và XANH sau F3.
+describe('/login — duongDanNoiBo là điểm bất động, không chỉ liệt ca (F4)', () => {
+  it('bất kể next= là gì, chuỗi đem đi điều hướng không bao giờ thoát origin', () => {
+    const TOKEN = ['/', '//', '\\', ':', '.', 'a', '\t', 'x.invalid', 'evil.example']
+    const APP = 'https://hseq.test'
+    const thu: string[] = []
+    const sinh = (s: string, con: number) => {
+      thu.push(s)
+      if (con) for (const t of TOKEN) sinh(s + t, con - 1)
+    }
+    for (const t of TOKEN) sinh(t, 3) // ~7.4 nghìn chuỗi, chạy dưới một giây
+
+    for (const d of thu) {
+      const ra = duongDanNoiBo(d)
+      if (ra === null) continue
+      expect(new URL(ra, APP).origin, `next=${JSON.stringify(d)}`).toBe(APP)
+    }
   })
 })

@@ -81,13 +81,32 @@ async function dangNhap(email: string, matKhau: string): Promise<string[]> {
 // `origin`), và hành vi phân tích của `new URL` giống hệt nhau với mọi origin hợp lệ.
 const GOC_AO = 'http://x.invalid'
 
-/** Trả về đường dẫn nội bộ đã chuẩn hoá (pathname+search+hash), hoặc null nếu `duongDan` thoát ra
- * ngoài origin (kể cả khi `duongDan` không parse được, ví dụ 'javascript:alert(1)'). */
-function duongDanNoiBo(duongDan: string): string | null {
+// F3 (task-19-fix-brief-2.md) — vòng sửa 2: F1 hỏi bộ phân tích cho ĐẦU VÀO (`duongDan`) nhưng
+// quên hỏi lại cho chính chuỗi TRẢ RA (`ra`) — 'next=//x.invalid//evil.example' có origin đúng
+// GOC_AO ở lần phân tích đầu (host khớp), nhưng `ra` trích ra ('//evil.example') lại tự nó là một
+// tham chiếu tương đối theo giao thức — location.assign sẽ phân tích `ra` thêm đúng một lần nữa,
+// và lần đó mới quy ra 'https://evil.example/'.
+//
+// `ra` phải là ĐIỂM BẤT ĐỘNG thật: phân tích lại nó phải cho ra CHÍNH XÁC lại `ra` — không chỉ
+// "cùng origin". Hai điều đó KHÁC NHAU: 'next=/.//x.invalid' cho `ra = '//x.invalid'`; phân tích
+// lại '//x.invalid' với GOC_AO vẫn ra origin GOC_AO (vì host trùng NGẪU NHIÊN với host của chính
+// GOC_AO) nhưng lại ra pathname '/' — KHÁC `ra`. Không hằng số nội bộ nào (dù đổi tên) tránh được
+// kiểu tự-trùng này, vì mọi hằng số đều lộ trong bundle đã build và tấn công luôn dựng lại được
+// đúng pathname đó qua chuẩn hoá đoạn '.'. Đây KHÔNG phải kiểm ký tự — không đoán '//' hay bất kỳ
+// ký tự nào, chỉ hỏi lại bộ phân tích và so sánh CHUỖI nó trả về. Đã đo vét cạn theo bảng token
+// của ca tính chất (Login.test.tsx): 0/66429 lọt ở độ sâu 4 token (brief chỉ đòi độ sâu 3).
+//
+// Export CHỈ để ca tính chất ở Login.test.tsx gọi trực tiếp (không đi vòng qua submit form) — lý
+// do chính đáng duy nhất để export hàm nội bộ này.
+export function duongDanNoiBo(duongDan: string): string | null {
   try {
     const u = new URL(duongDan, GOC_AO)
     if (u.origin !== GOC_AO) return null
-    return u.pathname + u.search + u.hash
+    const ra = u.pathname + u.search + u.hash
+    const laiLan2 = new URL(ra, GOC_AO)
+    if (laiLan2.origin !== GOC_AO) return null
+    if (laiLan2.pathname + laiLan2.search + laiLan2.hash !== ra) return null
+    return ra
   } catch {
     return null
   }
