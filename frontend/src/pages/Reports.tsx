@@ -93,7 +93,14 @@ function OHanhDong({ row, isAdmin }: { row: ReportListItem; isAdmin: boolean }) 
   // người được cấp report.view_all kèm phạm vi hẹp, BE có thể vẫn trả dòng `state === null` cho
   // một người không có report.create — kiểm `isAdmin` TRƯỚC khi rơi vào nhánh "Tạo báo cáo" để
   // không hiện nhầm nút cho người không có quyền tạo.
-  if (row.state === null) return isAdmin ? <span className="text-sec">—</span> : <NutTaoBaoCao periodKey={row.period_key} />
+  if (row.state === null)
+    return isAdmin ? (
+      <span className="text-sec" data-testid="o-hanh-dong-rong">
+        —
+      </span>
+    ) : (
+      <NutTaoBaoCao periodKey={row.period_key} />
+    )
   // Admin/viewer (report.approve|report.view_all): luôn "Mở" — vào để duyệt hoặc chỉ để xem, cả
   // hai đều là "mở báo cáo ra". Người nộp: chỉ trạng thái còn sửa được (draft/returned) mới "Mở",
   // còn lại (submitted/approved) chỉ "Xem" — is_editable theo backend/app/seed/__init__.py STATES.

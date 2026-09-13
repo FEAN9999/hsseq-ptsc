@@ -13,7 +13,12 @@
 // (không resetModules() + import lại: session.ts/client.ts kéo theo React, dựng lại module trong
 // cùng file test dễ vỡ "invalid hook call" do lẫn hai bản React — cơ chế session.ts thật sự ĐỌC
 // sessionStorage lúc khởi tạo được khoá riêng, hẹp, ở session.test.ts).
-import { render, screen } from '@testing-library/react'
+//
+// R2 (vòng sửa 2, task-20-fix-2.md): /auth/me lỗi KHÔNG phải xác thực (mất mạng, 5xx — đúng kiểu
+// Render free tier ngủ dậy) không còn tự logout() nữa — phải GIỮ phiên, hiện lỗi tại chỗ kèm nút
+// Thử lại. Chỉ 401/403 mới logout().
+import { render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { RequireAuth } from './router'
@@ -100,15 +105,69 @@ describe('RequireAuth', () => {
     expect(useSession.getState().token).toBeNull()
   })
 
-  // Khác ca 401 ở trên: lỗi MẠNG (fetch tự reject, không có response) không đi qua nhánh 401 của
-  // client.ts (không có `res.status` để so — client.ts không tự logout() trong trường hợp này).
-  // RequireAuth phải tự lo lấy, nếu không sẽ kẹt mãi ở "Đang tải…" với một token không dùng được.
-  it('S1b: /auth/me lỗi mạng (không phải 401) cũng đăng xuất và đá về /login, không kẹt ở "Đang tải…"', async () => {
-    useSession.setState({ token: 'tok-mat-mang' })
+  // R2 (vòng sửa 2, task-20-fix-2.md) — LỖI THẬT của bản trước: bắt MỌI lỗi rồi logout() vô điều
+  // kiện, kể cả lỗi KHÔNG liên quan xác thực. Render free tier ngủ dậy rất hay trả 502/503
+  // (client.ts:80 đã ghi rõ) với thân không phải JSON — res.json() bên trong client.ts tự rơi về
+  // `{}`, ApiError vẫn dựng được với status=503 thật. Một phiên CÒN HẠN không được đăng xuất chỉ vì
+  // máy chủ vừa thức dậy — đúng lúc S1b (sống qua một lần tải lại) cần phát huy tác dụng nhất.
+  it('R2: /auth/me trả 503 (Render ngủ dậy) thì GIỮ phiên (token + sessionStorage còn nguyên), hiện lỗi kèm nút Thử lại — KHÔNG đăng xuất', async () => {
+    useSession.getState().login('tok-con-han', NGUOI_DUNG_GIA, DON_VI_GIA, ['report.view_own_unit'])
+    // Mô phỏng đúng trạng thái "vừa tải lại trang": bộ nhớ trong chỉ còn token.
+    useSession.setState({ user: null, orgUnit: null, permissions: new Set() })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 503, json: async () => ({}) }))
+    duong('/reports/12')
+    expect(await screen.findByText('Không nạp lại được phiên đăng nhập')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Thử lại' })).toBeTruthy()
+    expect(useSession.getState().token).toBe('tok-con-han')
+    expect(sessionStorage.getItem('hseq.token')).toBe('tok-con-han')
+    expect(screen.queryByText(/Trang đăng nhập giả/)).toBeNull()
+  })
+
+  // Khác ca 503 ở trên: lỗi MẠNG (fetch tự reject, không có response — không đi qua nhánh 401 của
+  // client.ts, vì không có `res.status` để so) cũng phải được xếp cùng nhóm "không phải xác thực".
+  // Trước R2, ca này (dưới tên cũ "lỗi mạng cũng đăng xuất") từng là hành vi ĐÚNG lúc đó — R2 đổi
+  // hẳn kỳ vọng: giữ phiên thay vì đăng xuất, không còn kẹt vô hạn ở "Đang tải…" (đã có lối thoát
+  // là nút Thử lại) mà cũng không mất phiên oan.
+  it('R2: /auth/me lỗi mạng (không phải response, không phải 401/403) cũng GIỮ phiên, hiện lỗi kèm nút Thử lại', async () => {
+    useSession.getState().login('tok-mat-mang', NGUOI_DUNG_GIA, DON_VI_GIA, ['report.view_own_unit'])
+    useSession.setState({ user: null, orgUnit: null, permissions: new Set() })
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')))
+    duong('/reports/12')
+    expect(await screen.findByText('Không nạp lại được phiên đăng nhập')).toBeTruthy()
+    expect(useSession.getState().token).toBe('tok-mat-mang')
+    expect(screen.queryByText(/Trang đăng nhập giả/)).toBeNull()
+  })
+
+  it('R2: bấm Thử lại sau lỗi gọi lại /auth/me', async () => {
+    useSession.getState().login('tok-con-han', NGUOI_DUNG_GIA, DON_VI_GIA, ['report.view_own_unit'])
+    useSession.setState({ user: null, orgUnit: null, permissions: new Set() })
+    const f = vi.fn().mockResolvedValue({ ok: false, status: 503, json: async () => ({}) })
+    vi.stubGlobal('fetch', f)
+    duong('/reports/12')
+    await screen.findByText('Không nạp lại được phiên đăng nhập')
+    const soLanTruoc = f.mock.calls.filter(([url]) => String(url).includes('/auth/me')).length
+    await userEvent.click(screen.getByRole('button', { name: 'Thử lại' }))
+    await waitFor(() => {
+      const soLanSau = f.mock.calls.filter(([url]) => String(url).includes('/auth/me')).length
+      expect(soLanSau).toBeGreaterThan(soLanTruoc)
+    })
+  })
+
+  // 403 KHÔNG nằm trong nhóm client.ts tự xử lý toàn cục (client.ts chỉ so `res.status === 401`) —
+  // nên đây là ca DUY NHẤT chứng minh nhánh "401 || 403" của RequireAuth còn sống thật (không phải
+  // mã chết): nếu bỏ hẳn nhánh này, ca 401 ở trên vẫn xanh (client.ts đã lo trước), nhưng ca 403
+  // này sẽ đỏ vì không còn ai đăng xuất nữa.
+  it('R2: /auth/me trả 403 thì vẫn đăng xuất (cùng nhóm xác thực với 401) — đường đi DUY NHẤT xử lý 403, client.ts không xử toàn cục', async () => {
+    useSession.getState().login('tok-403', NGUOI_DUNG_GIA, DON_VI_GIA, ['report.view_own_unit'])
+    useSession.setState({ user: null, orgUnit: null, permissions: new Set() })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ ok: false, status: 403, json: async () => ({ detail: 'Không đủ quyền' }) }),
+    )
     duong('/reports/12')
     expect(await screen.findByText(/Trang đăng nhập giả/)).toBeTruthy()
     expect(useSession.getState().token).toBeNull()
+    expect(sessionStorage.length).toBe(0)
   })
 
   // Chốt chặn vòng lặp tải lại (coordinator, task-20-fix-1.md): /auth/me 401 → client.ts tự

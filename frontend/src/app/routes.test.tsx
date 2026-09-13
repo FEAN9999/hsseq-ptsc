@@ -115,6 +115,40 @@ describe('bảng route', () => {
     expect(screen.queryByLabelText('Email')).toBeNull()
   })
 
+  // R5 (vòng sửa 2, task-20-fix-2.md; mục 2.5 task-20-rereview-1.md) — mã đúng (S1b từng mảnh đã
+  // có test riêng ở session.test.ts và router.test.tsx), nhưng KHÔNG ca nào trong repo đi qua CẢ
+  // CÂY THẬT (App → routeObjects → RequireAuth → AppShell → Reports) ở đúng trạng thái "vừa tải lại
+  // trang": sessionStorage còn token, bộ nhớ trong CHỈ có token (đúng như session.ts đọc lại lúc
+  // khởi tạo store) — hai lớp test kia cộng lại phủ được CƠ CHẾ, nhưng không gì khoá việc CẢ CHUỖI
+  // ghép lại còn dựng được trên đúng bảng route production dùng.
+  it('R5: vừa tải lại trang (sessionStorage còn token, store chỉ có token): tự nạp lại phiên rồi vào thẳng /reports', async () => {
+    sessionStorage.setItem('hseq.token', 'tok-reload')
+    useSession.setState({ token: 'tok-reload', user: null, orgUnit: null, permissions: new Set() })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string) => {
+        if (url.includes('/auth/me')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({
+              user: { id: 1, email: 'u01@ptsc.local', full_name: 'Người nhập U01', position: null },
+              permissions: ['report.view_own_unit'],
+              org_unit: { id: 2, code: 'U01', name: 'Đơn vị thành viên 01 (tên tạm)' },
+            }),
+          })
+        }
+        if (url.includes('/reports')) return Promise.resolve({ ok: true, status: 200, json: async () => [] })
+        return Promise.resolve({ ok: true, status: 200, json: async () => ({ status: 'ok' }) })
+      }),
+    )
+    duong('/reports')
+    expect(screen.getByText('Đang tải…')).toBeTruthy()
+    expect(await screen.findByText('Chưa có kỳ báo cáo nào đang mở')).toBeTruthy()
+    expect(screen.getByText('Đăng xuất')).toBeTruthy()
+    expect(screen.queryByText('Đăng nhập HSEQ')).toBeNull()
+  })
+
   it('Toast có mặt đúng MỘT lần ở cấp toàn cục', async () => {
     // Toast() tự render null khi chưa có thông điệp (components/ui/Toast.tsx) — không có cách nào
     // đếm "có mặt" qua DOM nếu không kích hoạt một thông điệp thật qua chính hook useToast().

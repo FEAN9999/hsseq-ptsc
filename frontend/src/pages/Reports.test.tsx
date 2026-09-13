@@ -186,6 +186,19 @@ describe('/reports — người nộp', () => {
     expect(screen.getByRole('link', { name: 'Xem' }).getAttribute('href')).toBe('/reports/11')
   })
 
+  // R1 (vòng sửa 2, task-20-fix-2.md) — ca href ở trên chỉ soi THUỘC TÍNH href, mà một `<a href>`
+  // thật (không phải `<Link>`) thoả CÙNG điều kiện đó (cùng role 'link', cùng href) nên đổi <Link>
+  // thành <a href> ở OHanhDong vẫn xanh — S1a (thứ từng làm cả ứng dụng không dùng được) không có
+  // gì giữ. Ca này BẤM vào "Mở" rồi khẳng định trang ĐÍCH đã render trong CÙNG một lượt điều hướng
+  // SPA (route bắt-hết dich-den có sẵn) — <a href> trong jsdom không điều hướng route (không có
+  // server thật đứng sau) nên ca này ĐỎ nếu <Link> bị đổi lại thành <a href>.
+  it('R1: bấm Mở điều hướng SPA thật tới /reports/:id (chốt <Link>, không phải <a href>)', async () => {
+    moiApi([{ id: 10, period_key: '2026-07', state: 'draft' }])
+    renderReports()
+    await userEvent.click(await screen.findByRole('link', { name: 'Mở' }))
+    expect((await screen.findByTestId('dich-den')).textContent).toBe('/reports/10')
+  })
+
   // g (task-20-review.md S4) — "Trả lại" còn sửa được (is_editable=True, backend seed STATES):
   // phải là nút "Mở" (cyan), không phải "Xem" (ghost) — điểm khởi đầu của vòng sửa-nộp lại.
   it('trạng thái Trả lại (returned) vẫn còn sửa được: nút Mở, không phải Xem', async () => {
@@ -421,13 +434,15 @@ describe('/reports — admin (report.approve) và viewer (report.view_all)', () 
 
   // S5 (task-20-fix-1.md) — report.view_all KHÔNG có report.create: kỳ mở chưa tạo phải hiện gạch
   // ngang, KHÔNG hiện nút "Tạo báo cáo" (BE đổi hình dạng theo phạm vi, FE không được suy vai
-  // ngược từ mã quyền).
-  it('S5: report.view_all (viewer) với state null KHÔNG thấy nút Tạo báo cáo', async () => {
+  // ngược từ mã quyền). R4 (vòng sửa 2, task-20-fix-2.md) — ca này trước chỉ khẳng định VẮNG nút,
+  // không khẳng định CÓ dấu "—"; thêm dòng cuối để chốt luôn nội dung nhánh isAdmin của OHanhDong.
+  it('S5: report.view_all (viewer) với state null KHÔNG thấy nút Tạo báo cáo, ô Hành động hiện gạch ngang', async () => {
     useSession.setState({ permissions: new Set(['report.view_all']) })
     moiApi([{ period_key: '2026-09', state: null }])
     renderReports()
     await screen.findByTestId('o-ky')
     expect(screen.queryByRole('button', { name: 'Tạo báo cáo' })).toBeNull()
+    expect(screen.getByTestId('o-hanh-dong-rong').textContent).toBe('—')
   })
 
   // Ruling 169/170 (progress.md): report.view_all (viewer) không có mockup riêng, và server trả

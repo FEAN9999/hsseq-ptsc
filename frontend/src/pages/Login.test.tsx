@@ -10,7 +10,7 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
+import { MemoryRouter, Route, Routes, RouterProvider, createMemoryRouter, useLocation } from 'react-router-dom'
 
 import { Login, duongDanNoiBo } from './Login'
 import { useSession } from '../app/session'
@@ -164,6 +164,32 @@ describe('/login — session ghi đúng hình dạng sau khi đăng nhập (C1)'
     expect(s.user).toEqual({ id: 1, email: 'u01@ptsc.local', full_name: 'Người dùng thử', position: null })
     expect(s.orgUnit).toEqual({ id: 2, code: 'U01', name: 'Đơn vị thành viên 01' })
     expect(s.permissions.has('report.edit')).toBe(true)
+  })
+})
+
+// R3 (vòng sửa 2, task-20-fix-2.md) — dieuHuongSauDangNhap() gọi navigate(…, { replace: true }) ở
+// CẢ HAI nhánh (next= hợp lệ, và mặc định theo vai trò) nhưng chưa ca nào khoá CỜ này, chỉ khoá
+// ĐÍCH đến. Thiếu { replace: true }: /login còn nằm trong lịch sử, bấm Back sau khi đăng nhập quay
+// lại đúng form đã nộp xong. `MemoryRouter` (renderLogin() ở trên) không lộ lịch sử ra để đọc lại —
+// phải tự dựng bằng createMemoryRouter()/RouterProvider để đọc router.state.historyAction sau khi
+// điều hướng xong ('REPLACE' nếu có cờ, 'PUSH' nếu không).
+describe('/login — điều hướng sau đăng nhập THAY THẾ lịch sử, không PUSH thêm (R3)', () => {
+  beforeEach(() => vi.unstubAllGlobals())
+
+  it('đăng nhập thành công: historyAction là REPLACE, không phải PUSH (Back không quay lại form đã nộp)', async () => {
+    vi.stubGlobal('fetch', fetchDangNhapThanhCong(['reporter']))
+    vi.stubGlobal('location', { search: '' } as never)
+    const router = createMemoryRouter(
+      [
+        { path: '/login', element: <Login /> },
+        { path: '*', element: <DichDen /> },
+      ],
+      { initialEntries: ['/login'] },
+    )
+    render(<RouterProvider router={router} />)
+    await dangNhapThu()
+    await waitFor(() => expect(router.state.location.pathname).toBe('/reports'))
+    expect(router.state.historyAction).toBe('REPLACE')
   })
 })
 
