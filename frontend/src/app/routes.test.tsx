@@ -12,6 +12,7 @@
 // RequireAuth ở routes.tsx phải làm ca này ĐỎ), có đăng nhập thấy đúng khung AppShell quanh trang.
 import { useEffect } from 'react'
 import { render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createMemoryRouter } from 'react-router-dom'
 
@@ -73,6 +74,45 @@ describe('bảng route', () => {
     duong('/reports')
     expect(await screen.findByText('Chưa có kỳ báo cáo nào đang mở')).toBeTruthy()
     expect(screen.getByText('Đăng xuất')).toBeTruthy()
+  })
+
+  // S1 + S1a (vòng sửa 1 Task 20, task-20-fix-1.md, "Test bắt buộc cho S1" #1): trước bản vá này,
+  // Login.tsx điều hướng bằng `location.assign` — tải lại TÀI LIỆU ĐẦY ĐỦ, xoá sạch store phiên
+  // thuần bộ nhớ, nên RequireAuth đá ngược người vừa đăng nhập xong về /login (đăng nhập lại cũng
+  // chỉ lặp đúng vòng đó). Ca này đăng nhập THẬT qua form, trên đúng `routeObjects`/`App` production
+  // dùng, và khẳng định trang ĐÍCH thật sự render — không phải form đăng nhập lần nữa.
+  it('đăng nhập thành công từ /login: vào thẳng /reports bằng điều hướng SPA, không phải form đăng nhập lần nữa (S1a)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string, init?: { method?: string }) => {
+        if (url.includes('/health')) {
+          return Promise.resolve({ ok: true, status: 200, json: async () => ({ status: 'ok' }) })
+        }
+        if (url.includes('/auth/login')) {
+          return Promise.resolve({ ok: true, status: 200, json: async () => ({ access_token: 'tok-e2e' }) })
+        }
+        if (url.includes('/auth/me')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({
+              user: { id: 1, email: 'u01@ptsc.local', full_name: 'Người nhập U01', position: null },
+              roles: ['reporter'],
+              permissions: ['report.view_own_unit'],
+              org_unit: { id: 2, code: 'U01', name: 'Đơn vị thành viên 01 (tên tạm)' },
+            }),
+          })
+        }
+        if (url.includes('/reports')) return Promise.resolve({ ok: true, status: 200, json: async () => [] })
+        throw new Error(`URL không lường trước: ${init?.method ?? 'GET'} ${url}`)
+      }),
+    )
+    duong('/login')
+    await userEvent.type(screen.getByLabelText('Email'), 'u01@ptsc.local')
+    await userEvent.type(screen.getByLabelText('Mật khẩu'), 'Demo@2026')
+    await userEvent.click(screen.getByRole('button', { name: 'Đăng nhập' }))
+    expect(await screen.findByText('Chưa có kỳ báo cáo nào đang mở')).toBeTruthy()
+    expect(screen.queryByLabelText('Email')).toBeNull()
   })
 
   it('Toast có mặt đúng MỘT lần ở cấp toàn cục', async () => {

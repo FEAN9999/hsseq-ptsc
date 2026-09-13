@@ -4,11 +4,16 @@
 // xem useReportList.ts) thấy hàng chờ duyệt (+ cột Đơn vị). AppShell/Sidebar KHÔNG render ở đây —
 // bọc ở tầng route (carry C3, app/routes.tsx), giống mọi trang sau RequireAuth khác.
 //
-// Không dùng hook/`<Link>` của react-router (giống Login.tsx, carry C4 task-19): "Mở"/"Xem" là
-// thẻ <a href> thường — điều hướng đầy đủ trang là chấp nhận được vì đích /reports/:id còn chưa
-// tồn tại (Task 22), và giữ component test được bằng render(<Reports/>) trần, không cần bọc
-// MemoryRouter. "Tạo báo cáo" điều hướng bằng location.assign sau khi POST xong, cùng quy ước.
+// S1a (vòng sửa 1, task-20-fix-1.md): điều hướng nội bộ ("Mở"/"Xem"/"Tạo báo cáo") dùng
+// `<Link>`/`useNavigate()` của react-router, KHÔNG dùng `location.*` — TRƯỚC ĐÂY (carry C4,
+// task-19) dùng `<a href>`/`location.assign` chỉ để giữ test render <Reports/> trần không bọc
+// router; đó là nguyên nhân khiến MỌI nút trên trang này thực chất là một lần đăng xuất
+// (location.assign tải lại tài liệu đầy đủ, xoá sạch store phiên thuần bộ nhớ — xem S1,
+// session.ts). Đích `/reports/:id` vẫn CHƯA tồn tại (Task 22 mới dựng) — bấm "Mở"/"Xem"/"Tạo báo
+// cáo" nay chuyển tới `<NotFound/>` bằng điều hướng SPA thay vì đăng xuất; đó là hành vi ĐÚNG cho
+// tới khi Task 22 xong, không thêm route giữ chỗ (mã đầu cơ, trái CLAUDE.md #2).
 import { useState } from 'react'
+import { useNavigate, Link } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { api, ApiError } from '../api/client'
 import { useSession } from '../app/session'
@@ -45,6 +50,7 @@ const BTN_GHOST = `${BTN_BASE} bg-transparent border-hair text-ink transition-co
 function NutTaoBaoCao({ periodKey }: { periodKey: string }) {
   const queryClient = useQueryClient()
   const hienToast = useToast()
+  const navigate = useNavigate()
   const [dangTao, setDangTao] = useState(false)
 
   async function xuLy() {
@@ -55,13 +61,18 @@ function NutTaoBaoCao({ periodKey }: { periodKey: string }) {
         period_key: periodKey,
       })
       invalidateReportQueries(queryClient, id)
-      location.assign(`/reports/${id}`)
+      // S6/S8 (vòng sửa 1): toast "Đã tạo báo cáo <kỳ>" theo bảng trạng thái thiết kế — trước đây
+      // không hiện được vì location.assign xoá cả trang ngay sau đó (S1); nay điều hướng SPA nên
+      // toast (store toàn cục, không unmount theo route) hiện được cùng lúc.
+      hienToast(`Đã tạo báo cáo ${formatPeriod(periodKey)}`)
+      navigate(`/reports/${id}`)
     } catch (err) {
       setDangTao(false)
       // 409 "đã tồn tại" kèm existing_id (client.ts) — đơn vị khác/tab khác vừa tạo trong lúc
-      // đang chờ: đi thẳng tới báo cáo đã có thay vì báo lỗi suông.
+      // đang chờ: đi thẳng tới báo cáo đã có thay vì báo lỗi suông. Không phải một lần TẠO thành
+      // công nên KHÔNG kèm toast "Đã tạo báo cáo".
       if (err instanceof ApiError && err.existing_id !== undefined) {
-        location.assign(`/reports/${err.existing_id}`)
+        navigate(`/reports/${err.existing_id}`)
         return
       }
       hienToast(err instanceof ApiError ? err.detail : 'Không tạo được báo cáo')
@@ -76,20 +87,39 @@ function NutTaoBaoCao({ periodKey }: { periodKey: string }) {
 }
 
 function OHanhDong({ row, isAdmin }: { row: ReportListItem; isAdmin: boolean }) {
-  if (row.state === null) return <NutTaoBaoCao periodKey={row.period_key} />
+  // S5 (vòng sửa 1, task-20-fix-1.md): dòng phòng thủ — FE suy `isAdmin` từ MÃ QUYỀN
+  // (report.approve|report.view_all), còn BE đổi HÌNH DẠNG dữ liệu theo PHẠM VI
+  // (pham_vi_bao_cao — deps.py). Hai thứ khớp nhau hôm nay (seed hiện có), nhưng nếu một ngày có
+  // người được cấp report.view_all kèm phạm vi hẹp, BE có thể vẫn trả dòng `state === null` cho
+  // một người không có report.create — kiểm `isAdmin` TRƯỚC khi rơi vào nhánh "Tạo báo cáo" để
+  // không hiện nhầm nút cho người không có quyền tạo.
+  if (row.state === null) return isAdmin ? <span className="text-sec">—</span> : <NutTaoBaoCao periodKey={row.period_key} />
   // Admin/viewer (report.approve|report.view_all): luôn "Mở" — vào để duyệt hoặc chỉ để xem, cả
   // hai đều là "mở báo cáo ra". Người nộp: chỉ trạng thái còn sửa được (draft/returned) mới "Mở",
   // còn lại (submitted/approved) chỉ "Xem" — is_editable theo backend/app/seed/__init__.py STATES.
   const laMo = isAdmin || row.state === 'draft' || row.state === 'returned'
   return (
-    <a href={`/reports/${row.id}`} className={laMo ? BTN_PRIMARY : BTN_GHOST}>
+    <Link to={`/reports/${row.id}`} className={laMo ? BTN_PRIMARY : BTN_GHOST}>
       {laMo ? 'Mở' : 'Xem'}
-    </a>
+    </Link>
   )
 }
 
+// S3 (vòng sửa 1, task-20-fix-1.md): dòng đã KHOÁ (submitted/approved — is_editable=False,
+// backend/app/seed/__init__.py STATES) không còn hành động nào để thúc — đếm ngược ("quá hạn N
+// ngày") lúc đó chỉ đưa tin sai (vd. một kỳ đã duyệt xong từ lâu vẫn hiện đỏ "quá hạn 39 ngày"
+// cạnh chip "Đã duyệt", ngay trên màn mở đầu của admin). Đổi sang NGÀY TUYỆT ĐỐI cho hai trạng
+// thái này; dòng còn mở (null/draft/returned) giữ formatDue (đếm ngược) như cũ.
+function hanNop(row: ReportListItem, now: Date): { text: string; title: string } {
+  if (row.state === 'submitted' || row.state === 'approved') {
+    const tuyetDoi = formatDateTime(row.due_at)
+    return { text: tuyetDoi, title: `Hạn nộp: ${tuyetDoi}` }
+  }
+  return formatDue(row.due_at, now)
+}
+
 function HangBaoCao({ row, isAdmin, now }: { row: ReportListItem; isAdmin: boolean; now: Date }) {
-  const han = formatDue(row.due_at, now)
+  const han = hanNop(row, now)
   return (
     <tr>
       {isAdmin && <td className="h-9 px-3 border-b border-hair text-table">{row.org_unit.name}</td>}
@@ -111,7 +141,7 @@ function HangBaoCao({ row, isAdmin, now }: { row: ReportListItem; isAdmin: boole
       >
         {han.text}
       </td>
-      <td className="h-9 px-3 border-b border-hair text-table">
+      <td className="h-9 px-3 border-b border-hair text-table" data-testid="o-cap-nhat">
         {row.updated_at ? formatDateTime(row.updated_at) : <span className="text-sec">—</span>}
       </td>
       <td className="h-9 px-3 border-b border-hair text-table">
@@ -121,18 +151,29 @@ function HangBaoCao({ row, isAdmin, now }: { row: ReportListItem; isAdmin: boole
   )
 }
 
+// S2 (vòng sửa 1, task-20-fix-1.md, gộp Ruling 198): tiêu đề phụ thuộc HAI thứ — `xemTatCa` VÀ
+// `coQuyenDuyet` (report.approve) — không phải `isAdmin` (report.approve HOẶC report.view_all,
+// đúng cho PHẦN DỮ LIỆU nhưng sai cho PHẦN CHỮ). "Chờ duyệt" hứa một HÀNH ĐỘNG (duyệt); viewer
+// (report.view_all, không có report.approve — vd. viewer@ptsc.local) không làm được hành động đó
+// nên KHÔNG được thấy chữ này, ở CẢ HAI chế độ lọc. Admin lọc "Tất cả" cũng vậy: n lúc đó là TỔNG
+// SỐ báo cáo đang hiện (bỏ lọc submitted, useReportList.ts), không phải số CHỜ duyệt — tiêu đề
+// phải đổi nghĩa theo, không chỉ đổi số. "số theo vi-VN" (ràng buộc toàn cục) áp dụng cho con số
+// đếm này — dùng formatNumber (Task 16), không nối chuỗi thô.
+function tieuDeHangDoi(opts: { coQuyenDuyet: boolean; xemTatCa: boolean; isLoading: boolean; soDong: number }): string {
+  const so = opts.isLoading ? '' : ` (${formatNumber(opts.soDong, 0)})`
+  if (opts.xemTatCa) return `Tất cả báo cáo${so}`
+  return opts.coQuyenDuyet ? `Chờ duyệt${so}` : `Báo cáo đã nộp${so}`
+}
+
 export function Reports() {
   const { items, isAdmin, xemTatCa, setXemTatCa, isLoading, isError, refetch } = useReportList()
   const orgUnit = useSession((s) => s.orgUnit)
+  const coQuyenDuyet = useSession((s) => s.permissions.has('report.approve'))
   const now = new Date()
 
-  // "số theo vi-VN" (ràng buộc toàn cục) áp dụng cả cho con số đếm này, không riêng số liệu báo
-  // cáo — dùng lại formatNumber (Task 16) thay vì nối chuỗi thô.
-  const tieuDe = isAdmin
-    ? isLoading
-      ? 'Chờ duyệt'
-      : `Chờ duyệt (${formatNumber(items.length, 0)})`
-    : `Báo cáo SKATMT · ${orgUnit?.name ?? ''}`
+  const tieuDe = !isAdmin
+    ? `Báo cáo SKATMT · ${orgUnit?.name ?? ''}`
+    : tieuDeHangDoi({ coQuyenDuyet, xemTatCa, isLoading, soDong: items.length })
 
   const rongThongBao = isAdmin ? 'Không có báo cáo chờ duyệt' : 'Chưa có kỳ báo cáo nào đang mở'
 

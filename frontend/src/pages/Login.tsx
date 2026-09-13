@@ -1,8 +1,15 @@
 // frontend/src/pages/Login.tsx
 //
-// C4 (task-19-carry.md): component này KHÔNG được dùng hook nào của react-router — cả 5 test
-// brief render <Login/> trần, không bọc <MemoryRouter>. Điều hướng bằng location.assign, đọc
-// query bằng new URLSearchParams(location.search).
+// S1a (vòng sửa 1, task-20-fix-1.md): điều hướng NỘI BỘ dùng `useNavigate()` — route đích đã
+// đăng ký trong app/routes.tsx nên hook dùng được ở đây (khác carry C4/task-19 cũ, dùng
+// `location.assign` chỉ để giữ test render <Login/> trần không bọc router). Đó chính là nguyên
+// nhân che giấu S1: `location.assign` là điều hướng TÀI LIỆU ĐẦY ĐỦ, tải lại toàn bộ trang xoá
+// sạch store phiên thuần bộ nhớ — đăng nhập xong bị RequireAuth đá ngược về /login. Test giờ bọc
+// lại <MemoryRouter> cho khớp cây thật thay vì bẻ mã sản phẩm cho vừa test.
+//
+// Đọc `next=` vẫn qua `location.search` THÔ (KHÔNG đổi sang `useLocation()`) — quy ước dùng
+// chung với client.ts (401) và router.tsx (RequireAuth), cả hai đọc trực tiếp
+// `location.pathname`/`location.search` của trình duyệt, không qua state của router.
 //
 // C2: cú gọi GET /health dùng fetch TRẦN, không qua `api` (frontend/src/api/client.ts) — hai lý
 // do: (1) cần AbortController timeout riêng (90s) mà `api` không có; (2) '/health' không nằm
@@ -15,6 +22,7 @@
 // khi gọi /auth/me (api.get đọc token từ store để gắn header Authorization).
 import { useEffect, useState, type FormEvent } from 'react'
 import { flushSync } from 'react-dom'
+import { useNavigate, type NavigateFunction } from 'react-router-dom'
 import { api, ApiError } from '../api/client'
 import { useSession, type SessionOrgUnit, type SessionUser } from '../app/session'
 import { Wordmark } from '../components/ui/Wordmark'
@@ -113,20 +121,26 @@ export function duongDanNoiBo(duongDan: string): string | null {
 }
 
 // Mã vai trò đúng là chuỗi 'reporter' (backend/app/seed/__init__.py). roles chỉ đọc tại chỗ để
-// quyết định landing, KHÔNG đưa vào store (session.ts cố ý không giữ roles).
-function dieuHuongSauDangNhap(roles: string[]): void {
+// quyết định landing, KHÔNG đưa vào store (session.ts cố ý không giữ roles). `navigate` truyền
+// vào từ component (useNavigate() là hook, không gọi được ở một hàm đứng ngoài) — { replace:
+// true }: trang đăng nhập không được nằm lại trong lịch sử, bấm Back sau khi vào app không được
+// quay lại form đăng nhập đã nộp xong (cùng hành vi trước đây location.assign vốn có, vì tài liệu
+// cũ /login cũng biến mất khỏi lịch sử duyệt sau một lần điều hướng tài liệu đầy đủ).
+function dieuHuongSauDangNhap(navigate: NavigateFunction, roles: string[]): void {
   const next = new URLSearchParams(location.search).get('next')
   const noiBo = next === null ? null : duongDanNoiBo(next)
   if (noiBo !== null) {
-    // Điều hướng tới chuỗi ĐÃ CHUẨN HOÁ (noiBo), không phải `next` thô — để không còn lần phân
-    // tích thứ hai nào (của chính location.assign) có thể hiểu khác đi so với lần đã kiểm ở trên.
-    location.assign(noiBo)
+    // Điều hướng tới chuỗi ĐÃ CHUẨN HOÁ (noiBo), không phải `next` thô — giữ đúng nguyên tắc cũ
+    // dù navigate() của react-router không tự phân tích lại thành URL tuyệt đối như
+    // location.assign: không tạo thêm một nguồn sự thật thứ hai cho "đích điều hướng an toàn".
+    navigate(noiBo, { replace: true })
     return
   }
-  location.assign(roles.includes('reporter') ? '/reports' : '/dashboard')
+  navigate(roles.includes('reporter') ? '/reports' : '/dashboard', { replace: true })
 }
 
 export function Login() {
+  const navigate = useNavigate()
   const [email, setEmail] = useState('')
   const [matKhau, setMatKhau] = useState('')
   const [dangGui, setDangGui] = useState(false)
@@ -181,7 +195,7 @@ export function Login() {
     setLoiDangNhap(null)
     try {
       const roles = await dangNhap(email, matKhau)
-      dieuHuongSauDangNhap(roles)
+      dieuHuongSauDangNhap(navigate, roles)
     } catch (err) {
       setDangGui(false)
       setLoiDangNhap(err instanceof ApiError ? err.detail : 'Không kết nối được máy chủ')

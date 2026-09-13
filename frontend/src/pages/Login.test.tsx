@@ -1,10 +1,35 @@
 // frontend/src/pages/Login.test.tsx
+//
+// S1a (vòng sửa 1, task-20-fix-1.md): Login.tsx giờ gọi useNavigate() (hook) nên MỌI render ở
+// đây phải bọc <MemoryRouter> — kể cả ca không đăng nhập thành công (hook không được gọi có điều
+// kiện). renderLogin() dựng đúng CÂY THẬT tối thiểu: route /login render <Login/>, mọi route khác
+// (đích điều hướng) render <DichDen/> hiện lại path+search hiện tại để khẳng định TRÊN CÂY THẬT,
+// không suy luận qua spy `location.assign` (đã bỏ hẳn — Login.tsx không còn gọi nó cho điều hướng
+// nội bộ). Đọc `next=` vẫn qua `location.search` THÔ (không qua router) nên vẫn stub `location`
+// toàn cục như cũ cho các ca cần kiểm next=.
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 
 import { Login, duongDanNoiBo } from './Login'
 import { useSession } from '../app/session'
+
+function DichDen() {
+  const { pathname, search } = useLocation()
+  return <div data-testid="dich-den">{pathname}{search}</div>
+}
+
+function renderLogin() {
+  return render(
+    <MemoryRouter initialEntries={['/login']}>
+      <Routes>
+        <Route path="/login" element={<Login />} />
+        <Route path="*" element={<DichDen />} />
+      </Routes>
+    </MemoryRouter>,
+  )
+}
 
 describe('/login', () => {
   beforeEach(() => vi.unstubAllGlobals())
@@ -12,14 +37,14 @@ describe('/login', () => {
   it('mở trang là gọi /health để đánh thức Render', async () => {
     const f = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ status: 'ok' }) })
     vi.stubGlobal('fetch', f)
-    render(<Login />)
+    renderLogin()
     await waitFor(() => expect(f.mock.calls[0][0]).toContain('/health'))
   })
 
   it('sau 3 giây chưa trả lời thì hiện câu đánh thức máy chủ', async () => {
     vi.useFakeTimers()
     vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})))
-    render(<Login />)
+    renderLogin()
     await vi.advanceTimersByTimeAsync(3100)
     expect(screen.getByText(/Đang đánh thức máy chủ/)).toBeTruthy()
     vi.useRealTimers()
@@ -45,7 +70,7 @@ describe('/login', () => {
       }),
     )
     try {
-      render(<Login />)
+      renderLogin()
       await vi.advanceTimersByTimeAsync(90_000)
       expect(soLanBiHuy[0]).toBeGreaterThanOrEqual(1)
     } finally {
@@ -53,30 +78,28 @@ describe('/login', () => {
     }
   })
 
-  it('401 hiện Sai email hoặc mật khẩu tại chỗ, KHÔNG reload', async () => {
+  it('401 hiện Sai email hoặc mật khẩu tại chỗ, KHÔNG điều hướng đi đâu', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: false, status: 401, json: async () => ({ detail: 'Sai email hoặc mật khẩu' }),
     }))
-    const nhay = vi.fn()
-    vi.stubGlobal('location', { pathname: '/login', assign: nhay, search: '' } as never)
-    render(<Login />)
+    renderLogin()
     await userEvent.type(screen.getByLabelText('Email'), 'u01@ptsc.local')
     await userEvent.type(screen.getByLabelText('Mật khẩu'), 'sai')
     await userEvent.click(screen.getByRole('button', { name: 'Đăng nhập' }))
     expect(await screen.findByText('Sai email hoặc mật khẩu')).toBeTruthy()
-    expect(nhay).not.toHaveBeenCalled()
+    expect(screen.queryByTestId('dich-den')).toBeNull()
   })
 
   it('không có link quên mật khẩu, không có đăng ký', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({}) }))
-    render(<Login />)
+    renderLogin()
     expect(screen.queryByText(/quên mật khẩu/i)).toBeNull()
     expect(screen.queryByText(/đăng ký/i)).toBeNull()
   })
 
   it('đang gửi thì nút khoá và đổi chữ', async () => {
     vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})))
-    render(<Login />)
+    renderLogin()
     await userEvent.type(screen.getByLabelText('Email'), 'a@b.c')
     await userEvent.type(screen.getByLabelText('Mật khẩu'), 'x')
     await userEvent.click(screen.getByRole('button', { name: 'Đăng nhập' }))
@@ -88,8 +111,8 @@ describe('/login', () => {
 // Dùng chung cho hai describe bên dưới: dựng đủ chuỗi HAI lời gọi thật của C1 (POST /auth/login
 // rồi GET /auth/me) bằng một fetch phân biệt theo URL — KHÔNG stub thẳng useSession.login() hay
 // dieuHuongSauDangNhap(), vì hai hàm đó không export: phải đi qua đúng luồng submit thật để chứng
-// minh dây nối từ URL/response tới location.assign()/session hoạt động, không phải một thế giới
-// giả tự khớp với chính nó.
+// minh dây nối từ URL/response tới navigate()/session hoạt động, không phải một thế giới giả tự
+// khớp với chính nó.
 function fetchDangNhapThanhCong(roles: string[]) {
   return vi.fn((url: string) => {
     if (url.includes('/health')) {
@@ -123,7 +146,7 @@ async function dangNhapThu() {
 
 // C1 (task-19-carry.md) — bổ sung lúc chuẩn bị bảng đột biến: bảng đột biến bắt buộc của Task 19
 // liệt "login() truyền thiếu org_unit", nhưng không ca next= nào bên dưới đọc lại session sau khi
-// đăng nhập (chỉ đọc đích location.assign) — thiếu org_unit vẫn xanh hết. Ca này đọc thẳng
+// đăng nhập (chỉ đọc đích điều hướng) — thiếu org_unit vẫn xanh hết. Ca này đọc thẳng
 // useSession.getState() sau khi submit để khoá đúng bốn tham số của login().
 describe('/login — session ghi đúng hình dạng sau khi đăng nhập (C1)', () => {
   beforeEach(() => {
@@ -133,8 +156,8 @@ describe('/login — session ghi đúng hình dạng sau khi đăng nhập (C1)'
 
   it('đăng nhập thành công ghi đúng token, user, orgUnit, permissions vào session', async () => {
     vi.stubGlobal('fetch', fetchDangNhapThanhCong(['reporter']))
-    vi.stubGlobal('location', { pathname: '/login', search: '', assign: vi.fn() } as never)
-    render(<Login />)
+    vi.stubGlobal('location', { search: '' } as never)
+    renderLogin()
     await dangNhapThu()
     await waitFor(() => expect(useSession.getState().token).toBe('tok-123'))
     const s = useSession.getState()
@@ -169,48 +192,46 @@ const HIEM = [
   'http://[',
 ]
 
+// S1a (vòng sửa 1, task-20-fix-1.md): trước đây ca này đọc lại đối số của SPY `location.assign`
+// và tự kiểm tính an toàn (re-parse origin) — giờ Login.tsx điều hướng bằng navigate() (SPA,
+// không phải location.assign thật), nên không còn "đối số gửi cho trình duyệt" để soi. Đổi sang
+// so khớp với chính duongDanNoiBo() (hàm đã được kiểm bất biến riêng ở F4 bên dưới, gọi trực
+// tiếp) làm "trọng tài": khẳng định dieuHuongSauDangNhap() vẫn LUÔN đi qua nó (không dùng next=
+// thô) — độ an toàn khỏi mọi giá trị next= cụ thể vẫn do F4 khoá, không lặp lại ở đây.
 describe('/login — lọc next= (chống open redirect, F1+F3)', () => {
   beforeEach(() => vi.unstubAllGlobals())
 
-  it.each(HIEM)('next=%s: giá trị đưa cho location.assign không thoát khỏi origin', async (gtNext) => {
+  it.each(HIEM)('next=%s: điều hướng cuối cùng vẫn qua duongDanNoiBo, không dùng next thô', async (gtNext) => {
     vi.stubGlobal('fetch', fetchDangNhapThanhCong(['reporter']))
-    const nhay = vi.fn()
-    vi.stubGlobal('location', {
-      pathname: '/login', search: `?next=${encodeURIComponent(gtNext)}`, assign: nhay,
-    } as never)
-    render(<Login />)
+    vi.stubGlobal('location', { search: `?next=${encodeURIComponent(gtNext)}` } as never)
+    renderLogin()
     await dangNhapThu()
-    await waitFor(() => expect(nhay).toHaveBeenCalled())
-    expect(new URL(nhay.mock.calls[0][0] as string, 'https://hseq.test').origin).toBe('https://hseq.test')
+    const kyVong = duongDanNoiBo(gtNext) ?? '/reports'
+    expect((await screen.findByTestId('dich-den')).textContent).toBe(kyVong)
   })
 
   it('next= là đường dẫn tương đối hợp lệ: nhảy đúng về đó, giữ cả query', async () => {
     vi.stubGlobal('fetch', fetchDangNhapThanhCong(['reporter']))
-    const nhay = vi.fn()
-    vi.stubGlobal('location', {
-      pathname: '/login', search: '?next=%2Fstatus%3Fperiod%3D2026-08', assign: nhay,
-    } as never)
-    render(<Login />)
+    vi.stubGlobal('location', { search: '?next=%2Fstatus%3Fperiod%3D2026-08' } as never)
+    renderLogin()
     await dangNhapThu()
-    await waitFor(() => expect(nhay).toHaveBeenCalledWith('/status?period=2026-08'))
+    expect((await screen.findByTestId('dich-den')).textContent).toBe('/status?period=2026-08')
   })
 
   it('không có next=, vai trò chứa reporter: về /reports', async () => {
     vi.stubGlobal('fetch', fetchDangNhapThanhCong(['reporter']))
-    const nhay = vi.fn()
-    vi.stubGlobal('location', { pathname: '/login', search: '', assign: nhay } as never)
-    render(<Login />)
+    vi.stubGlobal('location', { search: '' } as never)
+    renderLogin()
     await dangNhapThu()
-    await waitFor(() => expect(nhay).toHaveBeenCalledWith('/reports'))
+    expect((await screen.findByTestId('dich-den')).textContent).toBe('/reports')
   })
 
   it('không có next=, vai trò không chứa reporter: về /dashboard', async () => {
     vi.stubGlobal('fetch', fetchDangNhapThanhCong(['admin_atcl']))
-    const nhay = vi.fn()
-    vi.stubGlobal('location', { pathname: '/login', search: '', assign: nhay } as never)
-    render(<Login />)
+    vi.stubGlobal('location', { search: '' } as never)
+    renderLogin()
     await dangNhapThu()
-    await waitFor(() => expect(nhay).toHaveBeenCalledWith('/dashboard'))
+    expect((await screen.findByTestId('dich-den')).textContent).toBe('/dashboard')
   })
 })
 
@@ -218,7 +239,8 @@ describe('/login — lọc next= (chống open redirect, F1+F3)', () => {
 // nổi (đó là lý do lỗ '//x.invalid//evil.example' lọt hai vòng sửa). Ca này gọi thẳng
 // duongDanNoiBo() (không qua submit form) trên ~7.4 nghìn chuỗi sinh từ tổ hợp token, đòi MỌI
 // chuỗi không bị chặn (khác null) phải vẫn ở đúng origin khi phân tích lại — đây phải ĐỎ trên mã
-// TRƯỚC F3 (chỉ so `u.origin`, không so lại chuỗi trả ra) và XANH sau F3.
+// TRƯỚC F3 (chỉ so `u.origin`, không so lại chuỗi trả ra) và XANH sau F3. Không đụng bởi S1a: hàm
+// này không đổi, chỉ NƠI GỌI nó (dieuHuongSauDangNhap) đổi cách điều hướng.
 describe('/login — duongDanNoiBo là điểm bất động, không chỉ liệt ca (F4)', () => {
   it('bất kể next= là gì, chuỗi đem đi điều hướng không bao giờ thoát origin', () => {
     const TOKEN = ['/', '//', '\\', ':', '.', 'a', '\t', 'x.invalid', 'evil.example']
