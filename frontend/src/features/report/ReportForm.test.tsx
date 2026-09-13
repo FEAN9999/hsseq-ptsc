@@ -877,19 +877,40 @@ describe('bàn phím kiểu Excel', () => {
 
   // fix-2 F5 (R9): CapsLock bật (hoặc Ctrl+Shift+S) cho `e.key === 'S'`. Bỏ `toLowerCase()` là
   // phím tắt chết và trình duyệt mở hộp "Lưu trang" đúng lúc người dùng tưởng mình vừa lưu.
-  // Bắn KeyboardEvent trực tiếp chứ không qua `userEvent`: CapsLock cho `key === 'S'` mà KHÔNG
-  // có `shiftKey`, và `userEvent` không mô hình hoá CapsLock — `{Shift>}s` của nó vẫn ra `key`
-  // chữ thường ở đây, tức không dựng được đúng đầu vào cần đo. `dispatchEvent` trả `false` khi
-  // có `preventDefault`, nên cũng không cần probe.
-  it('Ctrl+S khi CapsLock bật (phím báo "S" hoa) vẫn gọi Lưu và vẫn chặn', () => {
+  it('Ctrl+S khi CapsLock bật (phím báo "S" hoa) vẫn gọi Lưu và vẫn chặn', async () => {
     const onLuu = vi.fn()
     ve({ state: 'draft', vai: 'reporter', onLuu })
+    const theoDoi = theoDoiChan('S')
     o('B-1.1', 'Tháng này').focus()
-    const khongBiChan = document.activeElement!.dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'S', ctrlKey: true, bubbles: true, cancelable: true }),
-    )
+    await userEvent.keyboard('{Control>}S{/Control}')
     expect(onLuu).toHaveBeenCalledTimes(1)
-    expect(khongBiChan).toBe(false)
+    expect(theoDoi.chan).toBe(true)
+  })
+
+  // fix-3 G7 (M27): `luuRef.current()` chứ không phải closure `onLuu` của lần render đầu. Hôm nay
+  // vô hại vì `onLuu` không mang dữ liệu, nhưng Task 23 sẽ cho nó gói giá trị form — lúc đó một
+  // closure cũ sinh ra lỗi "lưu bằng dữ liệu cũ" rất khó truy.
+  it('Ctrl+S gọi bản onLuu MỚI NHẤT, không phải closure của lần render đầu', async () => {
+    const cu = vi.fn()
+    const moi = vi.fn()
+    const mau = mauNho([chiTieu({ code: 'B-1.1' })])
+    const chiTiet = {
+      id: 12, version: 8, state: 'draft', source: 'live', is_late: false,
+      header: {
+        org_unit: { code: DON_VI.code, name: DON_VI.name }, template_code: 'FM01',
+        period_key: '2026-08', due_at: '2026-10-05T16:59:59Z', report_no: null, location: null,
+        report_date: null, reporter_name: null, reporter_position: null, submitted_at: null,
+        decided_at: null, decision_note: null,
+      },
+      missing_periods: [], values: [giaTri({ indicator_code: 'B-1.1' })], texts: { C1: null },
+    } as ChiTietBaoCao
+    useSession.getState().login('tok-test', NGUOI_DUNG, DON_VI, QUYEN_REPORTER)
+    const r = render(<ReportForm mau={mau} chiTiet={chiTiet} onLuu={cu} />)
+    r.rerender(<ReportForm mau={mau} chiTiet={chiTiet} onLuu={moi} />)
+
+    await userEvent.keyboard('{Control>}s{/Control}')
+    expect(moi).toHaveBeenCalledTimes(1)
+    expect(cu).not.toHaveBeenCalled()
   })
 
   // fix-2 F6 (R10): listener nằm ở `window` nên nó sống lâu hơn component nếu cleanup quên gỡ —
@@ -1137,6 +1158,117 @@ describe('dán một cột từ Excel', () => {
     )
     // fix-2 F12 (R5): câu báo phải là chữ CẢNH BÁO, không tụt xuống chữ phụ mờ lẫn vào thanh dưới.
     expect(resolveCascadeWinner(cau.className, 'color')).toBe('text-warning')
+  })
+
+  // fix-3 G2 (M23): mọi ca F1 đều dán vào cột "Tháng này". Cột Cộng dồn là cột NHẬP của 4 dòng
+  // `counter` bắt buộc thật của FM01 (B-1.5…B-1.8) — đếm tràn phải không phụ thuộc cột nào.
+  it('dán TRÀN vào cột Cộng dồn (cột nhập của dòng counter) cũng được đếm', async () => {
+    ve({
+      state: 'draft',
+      vai: 'reporter',
+      mau: mauNho([
+        chiTieu({ code: 'B-1.5', agg_type: 'counter' }),
+        chiTieu({ code: 'B-1.6', agg_type: 'counter' }),
+      ]),
+    })
+    await userEvent.click(o('B-1.5', 'Cộng dồn'))
+    await userEvent.paste('10\n20\n30\n40\n50')
+    expect(screen.getByText('Dán: 3 dòng vượt ngoài bảng')).toBeTruthy()
+    expect(chu(o('B-1.6', 'Cộng dồn'))).toBe('20')
+  })
+
+  // fix-3 G3 (M24): con số tràn mới chỉ được kiểm ở đúng giá trị 2. Đây là kịch bản hợp đồng nêu
+  // tên: danh mục FM01 THẬT, cột "Tháng này" có 52 ô nhập, B-8.1 là ô thứ 43 → còn 10 ô, dán 60
+  // dòng thì 50 dòng không đáp xuống đâu cả.
+  it('dán 60 dòng từ B-8.1 trên danh mục FM01 thật: báo đúng 50 dòng vượt ngoài bảng', async () => {
+    ve({ state: 'draft', vai: 'reporter' })
+    await userEvent.click(o('B-8.1', 'Tháng này'))
+    await userEvent.paste(Array.from({ length: 60 }, (_, i) => String(i + 1)).join('\n'))
+    expect(screen.getByText('Dán: 50 dòng vượt ngoài bảng')).toBeTruthy()
+  })
+
+  // fix-3 G4 (M1): ca biên n = 1. `tran > 0` chứ không phải `tran > 1` — dán lố đúng một dòng
+  // vẫn là một dòng số của người dùng biến mất.
+  it('dán lố ĐÚNG MỘT dòng vẫn phải báo ra', async () => {
+    ve({ state: 'draft', vai: 'reporter', mau: mauNho([chiTieu({ code: 'B-1.1' })]) })
+    await userEvent.click(o('B-1.1', 'Tháng này'))
+    await userEvent.paste('10\n20')
+    expect(screen.getByText('Dán: 1 dòng vượt ngoài bảng')).toBeTruthy()
+  })
+
+  // fix-3 G6 (M25): dòng TRẮNG trong phần tràn cũng phải đếm. `NumberCell` đã cắt sạch dòng trắng
+  // ở ĐUÔI trước khi tới `danCot` (fix-1 S5), nên một dòng trắng còn sót lại trong phần tràn nghĩa
+  // là sau nó vẫn còn dòng có dữ liệu — người dùng đã dán n dòng, m dòng không đáp xuống đâu cả,
+  // trắng hay không cũng vậy.
+  it('dòng TRẮNG nằm trong phần tràn vẫn được tính vào số dòng vượt ngoài bảng', async () => {
+    ve({ state: 'draft', vai: 'reporter', mau: mauNho([chiTieu({ code: 'B-1.1' })]) })
+    await userEvent.click(o('B-1.1', 'Tháng này'))
+    // 4 dòng: "10" vào B-1.1; ba dòng sau tràn, dòng giữa là dòng TRẮNG.
+    await userEvent.paste('10\n20\n\n40')
+    expect(screen.getByText('Dán: 3 dòng vượt ngoài bảng')).toBeTruthy()
+  })
+
+  // fix-3 G5 (M2): `tranKhiDan` phải THAY THẾ, không cộng dồn (R16 đã khoá điều đó cho
+  // `boQuaKhiDan`). Ca theo đúng hợp đồng: dán tràn rồi dán vừa khít.
+  it('dán tràn rồi dán lại vừa khít: cảnh báo cũ biến mất', async () => {
+    ve({
+      state: 'draft',
+      vai: 'reporter',
+      mau: mauNho([chiTieu({ code: 'B-1.1' }), chiTieu({ code: 'B-1.2' })]),
+    })
+    await userEvent.click(o('B-1.1', 'Tháng này'))
+    await userEvent.paste('10\n20\n30\n40')
+    expect(screen.getByText('Dán: 2 dòng vượt ngoài bảng')).toBeTruthy()
+
+    await userEvent.click(o('B-1.1', 'Tháng này'))
+    await userEvent.paste('10\n20')
+    expect(screen.queryByText(/^Dán:/)).toBeNull()
+  })
+
+  // …nhưng riêng ca trên KHÔNG đủ giết đột biến cộng dồn: lần dán thứ hai có ghi được ô, mà
+  // `nhap-o` cũng đặt `tranKhiDan` về 0 trước khi `dan-xong` chạy — cộng dồn hay thay thế đều ra
+  // 0. Đường duy nhất tách hai cơ chế: một lần dán KHÔNG ghi được ô nào (mọi dòng đều bị từ chối)
+  // mà vẫn có phần tràn.
+  it('hai lần dán liên tiếp đều hỏng-và-tràn: con số là của LẦN NÀY, không phải tổng hai lần', async () => {
+    ve({
+      state: 'draft',
+      vai: 'reporter',
+      mau: mauNho([chiTieu({ code: 'B-1.1' }), chiTieu({ code: 'B-1.2' })]),
+    })
+    // decimals = 0 nên cả "1,5" lẫn "2,5" bị từ chối (không dòng nào được ghi); "3" và "4" tràn.
+    const hong = '1,5\n2,5\n3\n4'
+    await userEvent.click(o('B-1.1', 'Tháng này'))
+    await userEvent.paste(hong)
+    const lan1 = screen.getByText(/^Dán: bỏ qua/).textContent
+    expect(lan1).toContain('bỏ qua 2 dòng không đọc được (B-1.1, B-1.2)')
+    expect(lan1).toContain('2 dòng vượt ngoài bảng')
+
+    await userEvent.click(o('B-1.1', 'Tháng này'))
+    await userEvent.paste(hong)
+    expect(screen.getByText(/^Dán: bỏ qua/).textContent).toBe(lan1)
+  })
+
+  // fix-3 G1 (M28): F2 mới khoá ưu tiên so với "Thiếu n ô bắt buộc". Trên FM01 thật chỉ cần MỘT
+  // dòng counter lệch chưa ghi chú là nhánh "bộ đếm lệch" giành chỗ và mọi câu báo dán biến mất —
+  // cùng một lỗi S1, chỉ đổi nhánh.
+  it('đang có bộ đếm lệch chưa ghi chú mà dán hỏng: câu báo dán vẫn thắng chỗ', async () => {
+    ve({
+      state: 'draft',
+      vai: 'reporter',
+      mau: mauNho([chiTieu({ code: 'B-1.5', agg_type: 'counter' }), chiTieu({ code: 'B-1.6', agg_type: 'counter' })]),
+      values: [
+        {
+          indicator_code: 'B-1.5',
+          counter_check: { status: 'lech', expected: 512.5, message: 'Lệch 12,5 so với công thức' },
+        },
+      ],
+    })
+    expect(screen.getByText(/1 bộ đếm lệch công thức chưa có ghi chú/)).toBeTruthy()
+
+    await userEvent.click(o('B-1.5', 'Cộng dồn'))
+    await userEvent.paste('1,5\n2,5')
+    expect(screen.getByText(/^Dán: bỏ qua 2 dòng không đọc được/)).toBeTruthy()
+    expect(screen.queryByText(/bộ đếm lệch công thức chưa có ghi chú/)).toBeNull()
   })
 
   // fix-2 F2 (R3): luồng phổ biến nhất của người nhập — bấm Nộp, thấy "Thiếu n ô bắt buộc", sang
