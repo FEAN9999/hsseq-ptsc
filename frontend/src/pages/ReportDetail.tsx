@@ -56,7 +56,15 @@ export function ReportDetail() {
     )
   }
   if (loi instanceof ApiError && loi.status === 404) return <KhungLoi>Không tìm thấy báo cáo</KhungLoi>
-  if (loi) {
+  // `&& chưa có dữ liệu` KHÔNG thừa (task-23-fix-1 F1): từ Task 23, trang này refetch sau mỗi lần
+  // lưu (`invalidateReportQueries`). TanStack Query giữ `error` khi một lượt refetch NỀN hỏng mà
+  // `data` cũ vẫn còn nguyên trong cache — kiểm `error` trước `data` sẽ thay cả form bằng
+  // `InlineError` vì một cú 502 của Render free, unmount `ReportForm` và xoá sạch reducer, hàng
+  // chờ lưu lẫn hẹn debounce. Người đang nhập dở mất hết. Cùng lớp lỗi với Task 20 (`/auth/me`
+  // trả 503 lúc Render ngủ dậy làm đăng xuất một phiên còn hợp lệ): LỖI NỀN KHÔNG ĐƯỢC PHÁ MÀN
+  // HÌNH ĐANG CÓ DỮ LIỆU. 403/404 ở trên vẫn thay cả trang — chúng là kết luận, không phải trục
+  // trặc tạm thời.
+  if (loi && (baoCao.data === undefined || mau.data === undefined)) {
     return (
       <InlineError
         message="Không tải được báo cáo"
@@ -81,7 +89,7 @@ export function ReportDetail() {
           {baoCao.data.header.org_unit.name} · {formatPeriod(baoCao.data.header.period_key)}
         </b>
       </div>
-      <ReportForm mau={mau.data} chiTiet={baoCao.data} />
+      <ReportForm mau={mau.data} chiTiet={baoCao.data} loiLamMoi={loi !== null} />
     </div>
   )
 }

@@ -36,7 +36,7 @@ import type { GiaTriBaoCao, LoiXungDot } from './ReportForm'
 
 /** `idle` chưa đụng gì · `dirty` có ô chờ · `saving` đang bay · `saved` server đã nhận ·
  * `error` lượt gửi vừa rồi hỏng (ô vẫn nằm trong hàng chờ, không mất). */
-export type TrangThaiLuu = 'idle' | 'saving' | 'saved' | 'dirty' | 'error'
+type TrangThaiLuu = 'idle' | 'saving' | 'saved' | 'dirty' | 'error'
 
 /** Ô đã đổi của MỘT chỉ tiêu. Ba khoá này là đúng ba trường ghi được của `ValueIn`
  * (app/schemas/report.py) — không có `accPrev`: không agg_type nào cho nhập cột đó. */
@@ -170,13 +170,12 @@ export function useSaveValues(reportId: number, phienBanDau: number): KetQuaLuu 
       setStatus('error')
       if (loi instanceof ApiError) {
         // Cả hai loại 409 đều mang `version` mới: nhận lấy để lần gửi sau không đụng lại chính
-        // cái xung đột vừa rồi.
-        const phienBanLoi = typeof loi.version === 'number' ? loi.version : null
-        if (phienBanLoi !== null) phienBan.current = phienBanLoi
-        // Vẽ lại bảng CHỈ KHI thân lỗi thật sự mang đủ `values` + `version`. Thiếu một trong hai
-        // thì không có gì để vẽ — rơi về nhánh "hiện detail nguyên văn", không bịa ra một bản vá.
-        if (loi.status === 409 && Array.isArray(loi.values) && phienBanLoi !== null) {
-          setXungDot({ detail: loi.detail, version: phienBanLoi, values: loi.values as GiaTriBaoCao[] })
+        // cái xung đột vừa rồi. Canh `typeof` là vì 400/403 KHÔNG mang `version` — với 409 thì
+        // hợp đồng (hop-dong-loi-backend.md, quét AST) bảo đảm luôn có, nên nhánh xung đột dưới
+        // đây đọc thẳng `phienBan.current` chứ không canh thêm lần nữa cho một ca không tồn tại.
+        if (typeof loi.version === 'number') phienBan.current = loi.version
+        if (loi.status === 409 && Array.isArray(loi.values)) {
+          setXungDot({ detail: loi.detail, version: phienBan.current, values: loi.values as GiaTriBaoCao[] })
         } else {
           setLoiLuu(loi.detail)
         }

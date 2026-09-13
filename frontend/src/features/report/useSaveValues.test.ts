@@ -67,10 +67,12 @@ async function tick(ms: number) {
 /** Promise treo để đo trạng thái GIỮA CHỪNG một request (status 'saving', beforeunload lúc đang bay). */
 function treo<T>() {
   let xong!: (v: T) => void
-  const p = new Promise<T>((r) => {
+  let hong!: (e: unknown) => void
+  const p = new Promise<T>((r, j) => {
     xong = r
+    hong = j
   })
-  return { p, xong }
+  return { p, xong, hong }
 }
 
 function giaTri(p: Partial<GiaTriBaoCao> & { indicator_code: string }): GiaTriBaoCao {
@@ -99,7 +101,7 @@ afterEach(() => {
 })
 
 describe('useSaveValues — gửi gì, khi nào', () => {
-  it('chỉ gửi ô đã đổi từ lần lưu trước, không gửi cả 55 ô', async () => {
+  it('gửi đúng ô đã đánh dấu, tới đúng URL của báo cáo, kèm version', async () => {
     const h = ren()
     act(() => {
       h.current.markDirty('B-2.1', { thisPeriod: 3 })
@@ -158,13 +160,36 @@ describe('useSaveValues — gửi gì, khi nào', () => {
     expect(putSpy).toHaveBeenCalledTimes(1)
   })
 
+  // N6 của người soát: `datHen` không đặt lại hẹn (cửa sổ CỐ ĐỊNH từ lần gõ ĐẦU thay vì trượt
+  // theo lần gõ CUỐI) vẫn xanh ở mọi ca khác — cả hai ca debounce trên đều gõ liên tiếp trong
+  // cùng một cửa sổ. Ca này gõ ô thứ hai ở giây 1,0: cửa sổ cố định bắn ở 1,5 giây, cửa sổ trượt
+  // dời mốc tới 2,5 giây.
+  it('mốc 1,5 giây TRƯỢT theo lần gõ cuối: gõ tiếp ở giây 1,0 thì dời mốc, không bắn ở 1,5', async () => {
+    const h = ren()
+    act(() => {
+      h.current.markDirty('B-2.1', { thisPeriod: 1 })
+    })
+    await tick(1000)
+    act(() => {
+      h.current.markDirty('B-2.2', { thisPeriod: 2 })
+    })
+    await tick(600) // 1,6 s tính từ ô ĐẦU — cửa sổ cố định đã bắn ở đây
+    expect(putSpy).not.toHaveBeenCalled()
+    await tick(1000) // 1,6 s tính từ ô CUỐI
+    expect(putSpy).toHaveBeenCalledTimes(1)
+    expect(than(0).values).toEqual([
+      { indicator_code: 'B-2.1', this_period: 1 },
+      { indicator_code: 'B-2.2', this_period: 2 },
+    ])
+  })
+
   it('không autosave theo đồng hồ khi không có ô nào đổi', async () => {
     ren()
     await tick(30_000)
     expect(putSpy).not.toHaveBeenCalled()
   })
 
-  it('Ctrl+S lưu ngay, không chờ debounce', async () => {
+  it('saveNow gửi ngay, không chờ debounce', async () => {
     const h = ren()
     act(() => {
       h.current.markDirty('B-2.1', { thisPeriod: 5 })
@@ -178,8 +203,9 @@ describe('useSaveValues — gửi gì, khi nào', () => {
     expect(putSpy).toHaveBeenCalledTimes(1)
   })
 
-  // Mỗi lần đánh dấu là một mốc debounce MỚI, kể cả khi vừa có một lượt Ctrl+S xen vào giữa.
-  it('sau Ctrl+S, ô gõ tiếp vẫn được chờ đủ 1,5 giây', async () => {
+  // Mỗi lần đánh dấu là một mốc debounce MỚI, kể cả khi vừa có một lượt saveNow xen vào giữa.
+  // (Phím Ctrl+S thật đo ở ReportForm.test.tsx — ở đây không có bàn phím nào.)
+  it('sau saveNow, ô gõ tiếp vẫn được chờ đủ 1,5 giây', async () => {
     const h = ren()
     act(() => {
       h.current.markDirty('B-2.1', { thisPeriod: 1 })
@@ -250,6 +276,21 @@ describe('useSaveValues — gửi gì, khi nào', () => {
     expect(than(0).values).toEqual([{ indicator_code: 'B-2.1', this_period: null }])
   })
 
+  // N13 của người soát: `demO` không đếm `note` vẫn xanh. Sửa mỗi ghi chú rồi chưa lưu → dải đầu
+  // nói "Đã lưu 14:02" trong khi câu giải thích bộ đếm lệch (D25) còn nằm trong hàng chờ.
+  it('ghi chú cũng là một ô chưa lưu: dirtyCount đếm cả note', async () => {
+    const h = ren()
+    act(() => {
+      h.current.markDirty('B-8.1', { note: 'Bộ đếm lệch do chuyển ca' })
+    })
+    expect(h.current.dirtyCount).toBe(1)
+    // Cùng một dòng, thêm một cột số: 2 ô chưa lưu chứ không phải 1 dòng.
+    act(() => {
+      h.current.markDirty('B-8.1', { accTotal: 9 })
+    })
+    expect(h.current.dirtyCount).toBe(2)
+  })
+
   it('rời màn hình (unmount) thì huỷ hẹn, không gửi request nữa', async () => {
     const h = ren()
     act(() => {
@@ -286,9 +327,14 @@ describe('useSaveValues — version (khoá lạc quan)', () => {
     await tick(1600)
     expect(putSpy).toHaveBeenCalledTimes(1)
 
-    // Gõ tiếp trong lúc request đầu còn treo: KHÔNG được gửi lượt hai với version cũ (chắc chắn 409).
+    // Gõ tiếp HAI lần trong lúc request đầu còn treo: KHÔNG được gửi lượt hai với version cũ
+    // (chắc chắn 409), và cả hai ô phải cùng đi trong MỘT thân của lượt sau.
     act(() => {
       h.current.markDirty('B-2.2', { thisPeriod: 2 })
+    })
+    await tick(1600)
+    act(() => {
+      h.current.markDirty('B-2.3', { thisPeriod: 3 })
     })
     await tick(1600)
     expect(putSpy).toHaveBeenCalledTimes(1)
@@ -298,7 +344,41 @@ describe('useSaveValues — version (khoá lạc quan)', () => {
     })
     await tick(1600)
     expect(putSpy).toHaveBeenCalledTimes(2)
-    expect(than(1)).toEqual({ version: 31, values: [{ indicator_code: 'B-2.2', this_period: 2 }] })
+    expect(than(1)).toEqual({
+      version: 31,
+      values: [
+        { indicator_code: 'B-2.2', this_period: 2 },
+        { indicator_code: 'B-2.3', this_period: 3 },
+      ],
+    })
+  })
+
+  // N15 của người soát: đảo thứ tự trong `saveNow` (kiểm hàng chờ rỗng TRƯỚC khi chờ lượt đang
+  // bay) vẫn xanh ở mọi ca khác, vì ô ĐÃ được nhấc khỏi hàng chờ lúc request cất cánh. Hệ quả
+  // thật: bấm "Nộp" đúng lúc một PUT còn bay thì `saveNow` trả lời NGAY, form chuyển trạng thái
+  // trong khi chưa biết lượt lưu đó thành hay bại.
+  it('saveNow lúc một lượt PUT còn bay thì CHỜ lượt đó xong mới trả lời, không trả lời ngay vì hàng chờ rỗng', async () => {
+    const cho = treo<{ version: number; values: GiaTriBaoCao[] }>()
+    putSpy.mockReturnValueOnce(cho.p)
+    const h = ren()
+    act(() => {
+      h.current.markDirty('B-2.1', { thisPeriod: 1 })
+    })
+    await tick(1600)
+    expect(putSpy).toHaveBeenCalledTimes(1)
+    expect(h.current.dirtyCount).toBe(0) // ô đã rời hàng chờ: hàng chờ rỗng TRONG LÚC request bay
+
+    const thuTu: string[] = []
+    await act(async () => {
+      const dang = h.current.saveNow().then(() => thuTu.push('saveNow xong'))
+      await Promise.resolve()
+      await Promise.resolve()
+      expect(thuTu).toEqual([]) // chưa được trả lời: lượt kia chưa biết thành hay bại
+      thuTu.push('PUT xong')
+      cho.xong({ version: 9, values: [] })
+      await dang
+    })
+    expect(thuTu).toEqual(['PUT xong', 'saveNow xong'])
   })
 })
 
@@ -371,7 +451,13 @@ describe('useSaveValues — phản hồi PUT ghi ngược lại form (C9)', () =
   // Task 22 cố ý KHÔNG chép `evaluate_computed` sang TypeScript, nên hook này là con đường DUY
   // NHẤT để dòng "Tổng giờ công" (B-1.4 = B-1.1 + B-1.2 + B-1.3) đổi số trên màn hình.
   it('đẩy values của phản hồi lên nơi gọi, không chỉ lấy version', async () => {
-    const values = [giaTri({ indicator_code: 'B-1.4', this_period: 402_100, acc_total_computed: 800_000 })]
+    // NHIỀU dòng, không phải một: phản hồi thật của `ghi_gia_tri` mang TRỌN danh sách đã tính lại
+    // (55 dòng). Fixture một dòng để `values.slice(0, 1)` sống — đúng đột biến N3/N20 của người soát.
+    const values = [
+      giaTri({ indicator_code: 'B-1.4', this_period: 402_100, acc_total_computed: 800_000 }),
+      giaTri({ indicator_code: 'B-2.1', this_period: 12, acc_total_computed: 30 }),
+      giaTri({ indicator_code: 'B-8.1', acc_total_entered: 365, counter_check: { status: 'lech', expected: 360, message: 'Lệch 5' } }),
+    ]
     putSpy.mockResolvedValueOnce({ version: 9, values })
     const h = ren()
     act(() => {
@@ -487,7 +573,11 @@ describe('useSaveValues — đường lỗi', () => {
         detail: 'Người khác vừa sửa báo cáo này',
         state: 'draft',
         version: 11,
-        values: [giaTri({ indicator_code: 'B-1.4', this_period: 7 })],
+        values: [
+          giaTri({ indicator_code: 'B-1.4', this_period: 7 }),
+          giaTri({ indicator_code: 'B-2.1', this_period: 8 }),
+          giaTri({ indicator_code: 'B-8.1', acc_total_entered: 9 }),
+        ],
       }),
     )
     const h = ren()
@@ -498,7 +588,12 @@ describe('useSaveValues — đường lỗi', () => {
 
     expect(h.current.xungDot?.detail).toBe('Người khác vừa sửa báo cáo này')
     expect(h.current.xungDot?.version).toBe(11)
-    expect(h.current.xungDot?.values).toEqual([giaTri({ indicator_code: 'B-1.4', this_period: 7 })])
+    // CẢ danh sách, không phải dòng đầu: thân 409 cũng mang trọn bảng hiện tại của server.
+    expect(h.current.xungDot?.values).toEqual([
+      giaTri({ indicator_code: 'B-1.4', this_period: 7 }),
+      giaTri({ indicator_code: 'B-2.1', this_period: 8 }),
+      giaTri({ indicator_code: 'B-8.1', acc_total_entered: 9 }),
+    ])
     // Ô người dùng đang gõ KHÔNG bị vứt: vẫn nằm trong hàng chờ và gửi lại được.
     expect(h.current.dirtyCount).toBe(1)
     expect(putSpy).toHaveBeenCalledTimes(1)
@@ -636,6 +731,23 @@ describe('useSaveValues — beforeunload', () => {
     const chan = vi.spyOn(e, 'preventDefault')
     window.dispatchEvent(e)
     expect(chan).toHaveBeenCalled()
+  })
+
+  // N5 của người soát: bỏ `e.returnValue = ''` (giữ nguyên `preventDefault`) vẫn xanh ở ca trên.
+  // Trình duyệt cũ (Safari đời trước, WebView) chỉ nhìn `returnValue` — thiếu nó là thả tab đi
+  // không hỏi, mất trọn ô chưa lưu. Đo bằng SETTER của chính event: `Event.returnValue` theo chuẩn
+  // DOM là cờ boolean (gán chuỗi rỗng = falsy = huỷ sự kiện), nên đọc lại giá trị không chứng minh
+  // được gì — phải bắt đúng lượt gán.
+  it('còn gán returnValue cho trình duyệt cũ, không chỉ gọi preventDefault', () => {
+    const h = ren()
+    act(() => {
+      h.current.markDirty('B-2.1', { thisPeriod: 1 })
+    })
+    const e = new Event('beforeunload', { cancelable: true })
+    const gan = vi.fn()
+    Object.defineProperty(e, 'returnValue', { configurable: true, get: () => '', set: gan })
+    window.dispatchEvent(e)
+    expect(gan).toHaveBeenCalledWith('')
   })
 
   it('chưa đổi ô nào thì beforeunload KHÔNG chặn', () => {

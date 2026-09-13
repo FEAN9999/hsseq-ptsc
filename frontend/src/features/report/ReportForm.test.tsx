@@ -108,6 +108,9 @@ function giaTri(p: Partial<GiaTriBaoCao> & { indicator_code: string }): GiaTriBa
 }
 
 interface VeOpts {
+  /** Mặc định 12. Có ca đặt khác 12 để mã báo cáo viết cứng trong URL của `PUT` không sống được
+   * (đột biến N18 của người soát — cùng lớp lỗi M43 "hardcode FM01" của Task 22). */
+  id?: number
   state?: string
   vai?: 'admin' | 'reporter' | 'viewer'
   source?: string
@@ -144,7 +147,7 @@ function ve(opts: VeOpts = {}) {
 
   const deGhiDe = new Map((opts.values ?? []).map((v) => [v.indicator_code, v]))
   const chiTiet: ChiTietBaoCao = {
-    id: 12,
+    id: opts.id ?? 12,
     version: opts.version ?? 8,
     state: opts.state ?? 'draft',
     source: opts.source ?? 'live',
@@ -177,6 +180,9 @@ function ve(opts: VeOpts = {}) {
      * lưu" cuối file). Prop vẫn là đường hợp lệ cho nơi gọi nào cầm sẵn một lỗi 409 của lượt khác,
      * và các ca dưới đây đo phần hiển thị 409 mà không phải dựng cả một lượt lưu hỏng. */
     batLoi409: (loi: LoiXungDot) => r.rerender(<ReportForm {...props} xungDot={loi} />),
+    /** Bật cờ "lượt làm mới nền vừa hỏng" — trong app thật cờ này tới từ `pages/ReportDetail.tsx`
+     * (fix-1 F1); đường đi thật đo ở ReportDetail.test.tsx, ở đây chỉ đo phần hiển thị. */
+    batLoiLamMoi: () => r.rerender(<ReportForm {...props} loiLamMoi />),
   }
 }
 
@@ -1746,7 +1752,9 @@ describe('lưu khi rời ô', () => {
     expect(putSpy).not.toHaveBeenCalled()
   })
 
-  it('ô gõ sai (không đọc được số) thì KHÔNG gửi lên, không xoá số cũ trên server', async () => {
+  // Không gửi request nào CHÍNH LÀ cách số cũ trên server sống sót — nhưng ca này chỉ khẳng định
+  // được vế thứ nhất, nên tên chỉ nói vế thứ nhất.
+  it('ô gõ sai (không đọc được số) thì KHÔNG gửi request nào', async () => {
     const u = nguoiDung()
     ve({ state: 'draft', vai: 'reporter', mau: MAU_HAI_DONG(), values: [{ indicator_code: 'B-1.1', this_period: 5 }] })
     await u.click(o('B-1.1', 'Tháng này'))
@@ -1815,6 +1823,69 @@ describe('lưu khi rời ô', () => {
     ])
   })
 
+  // N18 của người soát: `useSaveValues(12, …)` viết cứng vẫn xanh 437/437, vì `ve()` của file này
+  // lẫn `ren()` của useSaveValues.test.ts đều cố định id 12. Mọi báo cáo khác #12 sẽ ghi đè lên #12.
+  it('gửi tới URL của ĐÚNG báo cáo đang mở, không phải mã viết cứng', async () => {
+    const u = nguoiDung()
+    ve({ state: 'draft', vai: 'reporter', id: 77, mau: MAU_HAI_DONG() })
+    await u.click(o('B-1.1', 'Tháng này'))
+    await u.keyboard('5')
+    await u.tab()
+    await choDebounce()
+    expect(putSpy.mock.calls[0][0]).toBe('/reports/77/values')
+  })
+
+  // N16 của người soát: gửi `0` thay `null` vẫn xanh, vì khoá duy nhất cho hành vi này nằm ở mức
+  // hook (gọi thẳng `markDirty`, không đi qua `parseViNumber` lẫn `roiO`). Backend BỎ QUA `null`
+  // nhưng GHI THẬT số 0 — ô trống hoá thành 0 rồi chui vào mọi dòng tổng.
+  it('xoá trắng một ô có sẵn số thì gửi this_period null, KHÔNG gửi 0 và không bỏ khoá', async () => {
+    const u = nguoiDung()
+    ve({
+      state: 'draft',
+      vai: 'reporter',
+      mau: MAU_HAI_DONG(),
+      values: [{ indicator_code: 'B-1.1', this_period: 5 }],
+    })
+    await u.clear(o('B-1.1', 'Tháng này'))
+    await u.tab()
+    await choDebounce()
+    expect(thanPut(0).values).toEqual([{ indicator_code: 'B-1.1', this_period: null }])
+  })
+
+  // N14 của người soát: đánh dấu CẢ dòng bị bỏ qua vẫn xanh — mọi ca dán hiện có đều dán toàn dòng
+  // đọc được. Dòng rác bị đánh dấu là nó đi kèm `this_period: null`, tức xoá trắng số cũ vì một ô
+  // rác trong vùng copy (đúng lớp lỗi fix-1 S5 của Task 22 đã diệt một lần ở tầng hiển thị).
+  it('dán cột có dòng RÁC: dòng đó không vào thân request, hai dòng đọc được vẫn đi', async () => {
+    const u = nguoiDung()
+    ve({
+      state: 'draft',
+      vai: 'reporter',
+      mau: mauNho([chiTieu({ code: 'B-1.1' }), chiTieu({ code: 'B-1.2' }), chiTieu({ code: 'B-1.3' })]),
+      values: [{ indicator_code: 'B-1.2', this_period: 5 }],
+    })
+    await u.click(o('B-1.1', 'Tháng này'))
+    await u.paste('10\n???\n30')
+    await choDebounce()
+    expect(thanPut(0).values).toEqual([
+      { indicator_code: 'B-1.1', this_period: 10 },
+      { indicator_code: 'B-1.3', this_period: 30 },
+    ])
+    // Ô đích của dòng rác giữ nguyên số cũ trên màn hình, đúng như câu báo dưới thanh nói.
+    expect(chu(o('B-1.2', 'Tháng này'))).toBe('5')
+  })
+
+  // N19 của người soát: `ghiChu.trim()` vẫn xanh. Ghi chú là câu người nhập viết, không phải mã —
+  // form không có quyền sửa chữ của họ trước khi gửi.
+  it('ghi chú gửi NGUYÊN VĂN, không tự cắt khoảng trắng hai đầu', async () => {
+    const u = nguoiDung()
+    ve({ state: 'draft', vai: 'reporter', mau: MAU_HAI_DONG() })
+    await u.click(screen.getByLabelText(/^B-1\.1 .+, Ghi chú$/))
+    await u.keyboard('  Nghỉ lễ 02/09  ')
+    await u.tab()
+    await choDebounce()
+    expect(thanPut(0).values).toEqual([{ indicator_code: 'B-1.1', note: '  Nghỉ lễ 02/09  ' }])
+  })
+
   it('Ctrl+S (không có onLuu) gửi NGAY và huỷ luôn lượt hẹn đang chờ', async () => {
     const u = nguoiDung()
     ve({ state: 'draft', vai: 'reporter', mau: MAU_HAI_DONG() })
@@ -1864,6 +1935,9 @@ describe('dải đầu — trạng thái lưu', () => {
     await goVao(u, 'B-1.3', '3')
     const dong = screen.getByText('Chưa lưu (3 ô)')
     expect(resolveCascadeWinner(dong.className, 'color')).toBe('text-warning')
+    // Đột biến N9 của người soát (bỏ `role="status"`) sống ở vòng soát: người đọc màn hình không
+    // bao giờ nghe "Đang lưu…"/"Đã lưu 14:02" — mà chính chú thích tại chỗ khai đó là lý do đặt role.
+    expect(screen.getByRole('status').textContent).toBe('Chưa lưu (3 ô)')
   })
 
   it('đang gửi thì hiện "Đang lưu…"', async () => {
@@ -1886,6 +1960,48 @@ describe('dải đầu — trạng thái lưu', () => {
     expect(screen.queryByText(/Chưa lưu/)).toBeNull()
   })
 
+  // N17 của người soát: thu hẹp nhánh `Đang lưu…` về `savedAt === null` vẫn xanh, vì ca trên chỉ
+  // đo lần lưu ĐẦU. Từ lần thứ hai trở đi dải đầu sẽ đứng ở "Đã lưu 14:02" cũ suốt lúc đang gửi.
+  it('lần lưu THỨ HAI cũng hiện "Đang lưu…", không đứng ở "Đã lưu" cũ', async () => {
+    const u = nguoiDung()
+    ve({ state: 'draft', vai: 'reporter', mau: MAU_BA_DONG() })
+    await goVao(u, 'B-1.1', '1')
+    await choDebounce()
+    expect(screen.getByText(/^Đã lưu /)).toBeTruthy()
+
+    putSpy.mockReturnValueOnce(new Promise(() => {})) // lượt hai treo
+    await goVao(u, 'B-1.2', '2')
+    await choDebounce()
+    expect(screen.getByText('Đang lưu…')).toBeTruthy()
+    expect(screen.queryByText(/Đã lưu/)).toBeNull()
+  })
+
+  // F1 của vòng sửa 1: lượt `GET /reports/{id}` sau mỗi lần lưu hỏng thì KHÔNG được phá màn hình —
+  // trang nói ra ở đúng dải này. Đường đi thật (trang tự bắt lỗi refetch) đo ở ReportDetail.test.tsx.
+  it('lượt làm mới nền hỏng thì dải đầu nói ra, và câu đó thắng "Đã lưu 14:02"', async () => {
+    const u = nguoiDung()
+    const r = ve({ state: 'draft', vai: 'reporter', mau: MAU_BA_DONG() })
+    await goVao(u, 'B-1.1', '1')
+    await choDebounce()
+    expect(screen.getByText(/^Đã lưu /)).toBeTruthy()
+
+    r.batLoiLamMoi()
+    const dong = screen.getByText('Không làm mới được số liệu')
+    expect(resolveCascadeWinner(dong.className, 'color')).toBe('text-warning')
+    expect(screen.queryByText(/Đã lưu/)).toBeNull()
+  })
+
+  // …nhưng KHÔNG được thắng "Chưa lưu (n ô)": ô chưa lên tới server là nguy cơ mất số, còn lượt
+  // làm mới hỏng thì không mất gì của người dùng.
+  it('còn ô chưa lưu thì "Chưa lưu" vẫn thắng câu làm mới hỏng', async () => {
+    const u = nguoiDung()
+    const r = ve({ state: 'draft', vai: 'reporter', mau: MAU_BA_DONG() })
+    r.batLoiLamMoi()
+    await goVao(u, 'B-1.1', '1')
+    expect(screen.getByText('Chưa lưu (1 ô)')).toBeTruthy()
+    expect(screen.queryByText('Không làm mới được số liệu')).toBeNull()
+  })
+
   it('gõ tiếp sau khi đã lưu thì quay lại "Chưa lưu", không giữ "Đã lưu"', async () => {
     const u = nguoiDung()
     ve({ state: 'draft', vai: 'reporter', mau: MAU_BA_DONG() })
@@ -1905,14 +2021,22 @@ describe('phản hồi PUT vẽ lại cột chỉ đọc (C9)', () => {
     const mau = mauNho([
       chiTieu({ code: 'B-1.1', name_vi: 'Giờ công nhân viên', decimals: 0 }),
       chiTieu({ code: 'B-1.4', name_vi: 'Tổng giờ công', agg_type: 'computed', formula: 'B-1.1,B-1.2,B-1.3', decimals: 0 }),
+      chiTieu({ code: 'B-1.5', name_vi: 'Giờ công nhà thầu phụ', agg_type: 'computed', formula: 'B-1.1', decimals: 0 }),
     ])
+    // NHIỀU dòng, không phải một: `ghi_gia_tri` trả TRỌN danh sách đã tính lại (55 dòng ở FM01
+    // thật). Fixture một dòng để `h.values.slice(0, 1)` sống — đúng đột biến N3 của người soát, và
+    // khi đó mọi dòng `computed`/lũy kế/`Lệch` trừ dòng đầu đứng số cũ ngay cạnh chữ "Đã lưu".
     putSpy.mockResolvedValueOnce({
       version: 9,
-      values: [giaTri({ indicator_code: 'B-1.4', this_period: 402_100, acc_total_computed: 402_100 })],
+      values: [
+        giaTri({ indicator_code: 'B-1.4', this_period: 402_100, acc_total_computed: 402_100 }),
+        giaTri({ indicator_code: 'B-1.5', this_period: 12, acc_total_computed: 30 }),
+      ],
     })
     ve({ state: 'draft', vai: 'reporter', mau })
     // Trước khi lưu: không có bản sao `evaluate_computed` nào ở TypeScript nên dòng tổng còn trống.
     expect(o('B-1.4', 'Tháng này').textContent).toBe('—')
+    expect(o('B-1.5', 'Tháng này').textContent).toBe('—')
 
     await u.click(o('B-1.1', 'Tháng này'))
     await u.keyboard('402100')
@@ -1920,8 +2044,38 @@ describe('phản hồi PUT vẽ lại cột chỉ đọc (C9)', () => {
     await choDebounce()
     expect(o('B-1.4', 'Tháng này').textContent).toBe('402.100')
     expect(o('B-1.4', 'Cộng dồn').textContent).toBe('402.100')
+    // Dòng CUỐI của phản hồi cũng phải được vá, không riêng dòng đầu.
+    expect(o('B-1.5', 'Tháng này').textContent).toBe('12')
+    expect(o('B-1.5', 'Cộng dồn').textContent).toBe('30')
     // Ô người dùng đang gõ KHÔNG bị phản hồi đè lên (phản hồi không hề nhắc tới B-1.1).
     expect(chu(o('B-1.1', 'Tháng này'))).toBe('402.100')
+  })
+
+  // N4 của người soát: bỏ `version` khỏi nhánh `gia-tri-server` vẫn xanh, vì không ca nào đọc
+  // `version` SAU một lần lưu thành công. Hệ quả: banner 409 về sau đọc sai mốc phiên bản.
+  it('version của phản hồi vào luôn state: banner 409 sau đó đọc mốc MỚI, không phải mốc lúc mở form', async () => {
+    const u = nguoiDung()
+    const mau = mauNho([chiTieu({ code: 'B-1.1' }), chiTieu({ code: 'B-1.2' })])
+    ve({ state: 'draft', vai: 'reporter', version: 8, mau })
+
+    await u.click(o('B-1.1', 'Tháng này'))
+    await u.keyboard('1')
+    await u.tab()
+    await choDebounce() // phản hồi mặc định: version 9
+
+    putSpy.mockRejectedValueOnce(
+      new ApiError(409, {
+        detail: 'Người khác vừa sửa báo cáo này',
+        state: 'draft',
+        version: 11,
+        values: [giaTri({ indicator_code: 'B-1.2' })],
+      }),
+    )
+    await u.click(o('B-1.2', 'Tháng này'))
+    await u.keyboard('2')
+    await u.tab()
+    await choDebounce()
+    expect((await screen.findByRole('alert')).textContent).toContain('phiên bản 9 → 11')
   })
 })
 
@@ -1972,21 +2126,29 @@ describe('đường lỗi của lớp lưu', () => {
         detail: 'Người khác vừa sửa báo cáo này',
         state: 'draft',
         version: 11,
-        values: [giaTri({ indicator_code: 'B-1.4', this_period: 777 })],
+        values: [
+          giaTri({ indicator_code: 'B-1.4', this_period: 777 }),
+          giaTri({ indicator_code: 'B-2.1', this_period: 888 }),
+        ],
       }),
     )
     const u = nguoiDung()
     const mau = mauNho([
       chiTieu({ code: 'B-1.1' }),
       chiTieu({ code: 'B-1.4', name_vi: 'Tổng giờ công', agg_type: 'computed', formula: 'B-1.1', decimals: 0 }),
+      chiTieu({ code: 'B-2.1', name_vi: 'Giờ công nhà thầu', agg_type: 'computed', formula: 'B-1.1', decimals: 0 }),
     ])
     ve({ state: 'draft', vai: 'reporter', version: 8, mau })
     await goRoiCho(u)
 
     const bao = await screen.findByRole('alert')
+    // "Vàng" phải đo trên CSS đã build như mọi khẳng định màu khác của file này, không đọc tên lớp.
+    expect(resolveCascadeWinner(bao.closest('div')!.className, 'background-color')).toBe('bg-warningBg')
     expect(bao.textContent).toContain('Người khác vừa sửa báo cáo này')
     expect(bao.textContent).toContain('phiên bản 8 → 11')
     expect(o('B-1.4', 'Tháng này').textContent).toBe('777')
+    // Thân 409 thật mang TRỌN bảng: dòng cuối cũng phải được vá, không riêng dòng đầu (N20).
+    expect(o('B-2.1', 'Tháng này').textContent).toBe('888')
     expect(chu(o('B-1.1', 'Tháng này'))).toBe('12')
     // Ô vẫn nằm trong hàng chờ: bấm Lưu lần nữa là gửi lại với version mới.
     expect(screen.getByText('Chưa lưu (1 ô)')).toBeTruthy()
@@ -2014,6 +2176,40 @@ describe('Nộp luôn lưu trước rồi mới chuyển trạng thái', () => {
     expect(thanPut(0).values).toEqual([{ indicator_code: 'B-1.1', this_period: 12 }])
     expect(onChuyenTrangThai).toHaveBeenCalledTimes(1)
     expect(putSpy.mock.invocationCallOrder[0]).toBeLessThan(onChuyenTrangThai.mock.invocationCallOrder[0])
+  })
+
+  // N8 của người soát: thu hẹp "lưu trước" về riêng `submit` vẫn xanh. Danh sách chuyển trạng thái
+  // đến từ `GET /templates/{code}` — mẫu thứ hai có thể đặt tên và mã hành động khác hẳn, nên form
+  // KHÔNG được rẽ nhánh theo `action_code`. Bộ chuyển dưới đây cố tình không phải bộ seed.
+  const MAU_DUYET_TU_NHAP = () => ({
+    ...mauNho([chiTieu({ code: 'B-1.1' })]),
+    transitions: [
+      { action_code: 'approve', from_state: 'draft', to_state: 'approved', name_vi: 'Duyệt', required_permission: 'report.approve', requires_note: false },
+    ],
+  })
+
+  it('chuyển trạng thái KHÁC "Nộp" cũng lưu trước rồi mới transition', async () => {
+    const u = nguoiDung()
+    const onChuyenTrangThai = vi.fn()
+    ve({ state: 'draft', vai: 'admin', mau: MAU_DUYET_TU_NHAP(), onChuyenTrangThai })
+    await u.click(o('B-1.1', 'Tháng này'))
+    await u.keyboard('12')
+    await u.click(screen.getByRole('button', { name: 'Duyệt' }))
+
+    expect(thanPut(0).values).toEqual([{ indicator_code: 'B-1.1', this_period: 12 }])
+    expect(putSpy.mock.invocationCallOrder[0]).toBeLessThan(onChuyenTrangThai.mock.invocationCallOrder[0])
+  })
+
+  it('chuyển trạng thái KHÁC "Nộp" mà lưu hỏng thì cũng dừng', async () => {
+    putSpy.mockRejectedValueOnce(new TypeError('Failed to fetch'))
+    const u = nguoiDung()
+    const onChuyenTrangThai = vi.fn()
+    ve({ state: 'draft', vai: 'admin', mau: MAU_DUYET_TU_NHAP(), onChuyenTrangThai })
+    await u.click(o('B-1.1', 'Tháng này'))
+    await u.keyboard('12')
+    await u.click(screen.getByRole('button', { name: 'Duyệt' }))
+    expect(putSpy).toHaveBeenCalledTimes(1)
+    expect(onChuyenTrangThai).not.toHaveBeenCalled()
   })
 
   it('lưu hỏng thì KHÔNG chuyển trạng thái — nộp bằng số chưa lên server là nộp thiếu', async () => {

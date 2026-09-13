@@ -8,8 +8,9 @@
 //
 // Mẫu dùng ở đây cố tình là FM02: nếu ReportDetail viết cứng "FM01" thì test đòi /templates/FM02
 // đỏ ngay, còn đòi /templates/FM01 thì đúng cả khi mã sai (đó chính là lý do M43 sống ở vòng đầu).
-import { render, screen } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { act, render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 
@@ -22,6 +23,10 @@ const QUYEN_NGUOI_DUYET = [...QUYEN_NGUOI_NOP, 'report.view_all', 'report.approv
 beforeEach(() => {
   vi.unstubAllGlobals()
   useSession.getState().logout()
+})
+
+afterEach(() => {
+  vi.useRealTimers()
 })
 
 const CHI_TIET = {
@@ -83,11 +88,19 @@ const MAU = {
 }
 
 /** Trả lời mọi URL bằng `ok`, trừ những path có trong `loi` (đưa về status + thân lỗi phẳng của
- * backend). Ghi lại danh sách URL đã gọi để khẳng định ĐÃ gọi đúng endpoint nào. */
+ * backend). `loi` được đọc lại ở MỖI lượt gọi, nên ca test bật hỏng giữa chừng được — đó là cách
+ * duy nhất dựng cảnh "tải xong rồi mới có một lượt làm mới nền hỏng".
+ *
+ * `PUT` trả lời riêng: lớp lưu của Task 23 nằm trong form, và chính lượt `PUT` thành công là thứ
+ * kéo theo lượt `GET` làm mới (`invalidateReportQueries`). Ghi lại danh sách URL đã gọi để khẳng
+ * định ĐÃ gọi đúng endpoint nào. */
 function moiApi(loi: Record<string, number> = {}) {
   const daGoi: string[] = []
-  const f = vi.fn(async (url: string) => {
+  const f = vi.fn(async (url: string, init?: { method?: string }) => {
     daGoi.push(url)
+    if (init?.method === 'PUT') {
+      return { ok: true, status: 200, json: async () => ({ version: 2, values: CHI_TIET.values }) }
+    }
     for (const [phan, status] of Object.entries(loi)) {
       if (url.includes(phan)) return { ok: false, status, json: async () => ({ detail: 'x' }) }
     }
@@ -167,5 +180,44 @@ describe('ReportDetail', () => {
     moiApi({ '/templates/': 404 })
     ve()
     expect(await screen.findByText('Không tìm thấy báo cáo')).toBeTruthy()
+  })
+
+  // Nhánh "chưa có dữ liệu" phải kiểm CẢ HAI lượt tải: báo cáo về rồi mà danh mục hỏng thì vẫn
+  // chưa dựng được form — chỉ kiểm `baoCao.data` là kẹt ở skeleton mãi mãi, không câu nào nói gì.
+  it('danh mục trả 500 (báo cáo thì OK): hiện InlineError, không kẹt ở skeleton', async () => {
+    moiApi({ '/templates/': 500 })
+    ve()
+    expect(await screen.findByText('Không tải được báo cáo')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Thử lại' })).toBeTruthy()
+  })
+
+  // fix-1 F1 — LỖI NỀN KHÔNG ĐƯỢC PHÁ MÀN HÌNH ĐANG CÓ DỮ LIỆU.
+  //
+  // Task 23 là thứ đầu tiên khiến trang này gọi lại `GET /reports/{id}` sau mỗi 1,5 giây gõ
+  // (`invalidateReportQueries` sau mỗi lần lưu). TanStack Query GIỮ NGUYÊN `data` cũ khi một lượt
+  // refetch NỀN hỏng và chỉ dựng thêm `error`; kiểm `error` TRƯỚC `data` sẽ thay cả form bằng
+  // `InlineError` vì một cú 502 của Render free — `ReportForm` unmount, reducer (mọi số đang gõ),
+  // hàng chờ lưu và cái hẹn debounce mất sạch. Đúng lớp lỗi Task 20 (`/auth/me` trả 503 lúc Render
+  // ngủ dậy làm đăng xuất một phiên còn hợp lệ).
+  it('lượt làm mới nền trả 502: form VẪN còn, ô đang gõ còn nguyên, chỉ nói ở dải trạng thái', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    const u = userEvent.setup({ advanceTimers: (ms) => vi.advanceTimersByTime(ms) })
+    const loi: Record<string, number> = {}
+    moiApi(loi)
+    ve()
+
+    await u.click(await screen.findByLabelText(/^B-1\.1 .+, Tháng này$/))
+    await u.keyboard('7')
+    await u.tab()
+
+    loi['/reports/12'] = 502 // lượt GET làm mới ngay sau khi lưu sẽ hỏng
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1600)
+    })
+
+    expect(await screen.findByText('Không làm mới được số liệu')).toBeTruthy()
+    expect(screen.queryByText('Không tải được báo cáo')).toBeNull()
+    const oNhap = screen.getByLabelText(/^B-1\.1 .+, Tháng này$/) as HTMLInputElement
+    expect(oNhap.value).toBe('7')
   })
 })

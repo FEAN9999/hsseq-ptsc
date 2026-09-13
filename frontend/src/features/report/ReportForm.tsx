@@ -292,12 +292,17 @@ function oDoi(cot: Cell, value: number | null): ODoi {
 /** Dòng trạng thái lưu ở dải đầu (thiết kế dòng 681). `null` = chưa có gì để nói (chưa đụng vào
  * form) — không hiện một khe trống.
  *
- * Thứ tự ba nhánh là thứ tự ĐỘ KHẨN, không phải thứ tự của `status`: còn ô chưa lưu thì câu đó
+ * Thứ tự các nhánh là thứ tự ĐỘ KHẨN, không phải thứ tự của `status`: còn ô chưa lưu thì câu đó
  * thắng "Đã lưu 14:02" cũ, và `error` cũng hiện "Chưa lưu (n ô)" chứ không hiện một câu lỗi
- * riêng — thiết kế nói "lưu thất bại mạng → giữ 'Chưa lưu' + banner offline", lỗi nói ở banner. */
-function dongTrangThaiLuu(l: KetQuaLuu): { chu: string; canhBao: boolean } | null {
+ * riêng — thiết kế nói "lưu thất bại mạng → giữ 'Chưa lưu' + banner offline", lỗi nói ở banner.
+ *
+ * `loiLamMoi` (fix-1 F1) xếp SAU hai câu nói về nguy cơ mất số và TRƯỚC "Đã lưu": lượt làm mới
+ * nền hỏng không mất gì của người dùng, nhưng nó là tin mới hơn lần lưu vừa xong, và để yên
+ * "Đã lưu 14:02" một mình là giấu mất chuyện màn hình có thể đang cũ. */
+function dongTrangThaiLuu(l: KetQuaLuu, loiLamMoi: boolean): { chu: string; canhBao: boolean } | null {
   if (l.status === 'saving') return { chu: 'Đang lưu…', canhBao: false }
   if (l.dirtyCount > 0) return { chu: `Chưa lưu (${l.dirtyCount} ô)`, canhBao: true }
+  if (loiLamMoi) return { chu: 'Không làm mới được số liệu', canhBao: true }
   if (l.savedAt !== null) return { chu: `Đã lưu ${l.savedAt}`, canhBao: false }
   return null
 }
@@ -377,11 +382,15 @@ export interface ReportFormProps {
   /** Tín hiệu 409 từ Task 23 (`useSaveValues`). Mỗi lần xung đột là một object MỚI — effect dưới
    * đây theo dõi bằng danh tính object, không so nội dung. */
   xungDot?: LoiXungDot | null
+  /** Một lượt làm mới NỀN của trang (`GET /reports/{id}` sau mỗi lần lưu) vừa hỏng. Không phá màn
+   * hình: số trên bảng vẫn là số đọc được lần cuối, đã vá bằng phản hồi PUT (C9) — chỉ nói ra ở
+   * dải đầu để người nhập biết màn hình có thể đang cũ (fix-1 F1). */
+  loiLamMoi?: boolean
   onLuu?: () => void
   onChuyenTrangThai?: (chuyen: ChuyenTrangThai) => void
 }
 
-export function ReportForm({ mau, chiTiet, xungDot, onLuu, onChuyenTrangThai }: ReportFormProps) {
+export function ReportForm({ mau, chiTiet, xungDot, loiLamMoi = false, onLuu, onChuyenTrangThai }: ReportFormProps) {
   const [s, dispatch] = useReducer(rutGon, chiTiet, khoiTao)
   const quyen = useSession((st) => st.permissions)
   const formRef = useRef<HTMLDivElement>(null)
@@ -500,7 +509,7 @@ export function ReportForm({ mau, chiTiet, xungDot, onLuu, onChuyenTrangThai }: 
         isLate={chiTiet.is_late}
         kyThieu={chiTiet.missing_periods}
         now={new Date()}
-        trangThaiLuu={dongTrangThaiLuu(luuGiaTri)}
+        trangThaiLuu={dongTrangThaiLuu(luuGiaTri, loiLamMoi)}
       />
 
       {/* Điều kiện `state === 'returned'` KHÔNG thừa: `workflow.py:247` chỉ ghi `decision_note` ở
