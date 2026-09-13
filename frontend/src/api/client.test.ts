@@ -23,6 +23,22 @@ describe('api client', () => {
     expect(nhay).toHaveBeenCalledWith('/login?next=%2Freports%2F12')
   })
 
+  // Bổ sung ngoài 4 ca của brief: "đã gọi logout" và "đã gọi assign" (test trên) đều xanh dù
+  // đảo thứ tự hai lệnh đó — mutation-test đã xác nhận (task-17-report.md). Ca này đo THỨ TỰ
+  // thật bằng cách để chính `location.assign` đọc lại session NGAY lúc nó chạy: điều hướng
+  // (production: chuyển trang thật) không được phép xảy ra trong lúc token cũ vẫn còn sống.
+  it('xoá token TRƯỚC KHI điều hướng, không phải sau', async () => {
+    useSession.setState({ token: 'cu' })
+    vi.stubGlobal('fetch', tra(401, { detail: 'Phiên đã hết hạn' }))
+    let tokenLucDieuHuong: string | null | undefined
+    vi.stubGlobal('location', {
+      pathname: '/reports/12',
+      assign: () => { tokenLucDieuHuong = useSession.getState().token },
+    } as never)
+    await expect(api.get('/reports/12')).rejects.toBeInstanceOf(ApiError)
+    expect(tokenLucDieuHuong).toBeNull()
+  })
+
   it('401 ở CHÍNH /auth/login thì KHÔNG redirect, để form hiện lỗi tại chỗ', async () => {
     vi.stubGlobal('fetch', tra(401, { detail: 'Sai email hoặc mật khẩu' }))
     const nhay = vi.fn()
