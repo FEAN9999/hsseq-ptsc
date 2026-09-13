@@ -38,6 +38,7 @@ export function FormModeBar({
   chuyenDuoc,
   suaDuoc,
   thieuBatBuoc,
+  boQuaKhiDan,
   soDemLech,
   onLuu,
   onChuyenTrangThai,
@@ -47,6 +48,10 @@ export function FormModeBar({
   /** Mã các chỉ tiêu còn thiếu ô bắt buộc — rỗng khi chưa bấm Nộp lần nào (D16: chỉ đỏ sau lần
    * bấm Nộp đầu tiên), nên component này không cần biết `daBamNop`. */
   thieuBatBuoc: string[]
+  /** Mã các dòng bị bỏ qua ở lần dán cột gần nhất (fix-1 S1). Đứng TRƯỚC hai thông điệp kia trong
+   * thứ tự ưu tiên vì nó là thứ vừa xảy ra dưới tay người dùng; "thiếu ô bắt buộc" và "bộ đếm
+   * lệch" đã nằm đó sẵn từ trước cú dán. */
+  boQuaKhiDan: string[]
   soDemLech: number
   onLuu: () => void
   onChuyenTrangThai: (chuyen: ChuyenTrangThai) => void
@@ -55,7 +60,13 @@ export function FormModeBar({
   return (
     <div className="sticky bottom-0 -mx-6 -mb-6 mt-3 flex items-center justify-between gap-4 bg-surface border-t border-hair px-5 py-3 text-table">
       <div>
-        {thieuBatBuoc.length > 0 ? (
+        {boQuaKhiDan.length > 0 ? (
+          <span className="text-warning">
+            Dán: bỏ qua {boQuaKhiDan.length} dòng không đọc được ({boQuaKhiDan.slice(0, MA_HIEN_TOI_DA).join(', ')}
+            {boQuaKhiDan.length > MA_HIEN_TOI_DA ? `, +${boQuaKhiDan.length - MA_HIEN_TOI_DA}` : ''}) · ô đích giữ
+            nguyên số cũ
+          </span>
+        ) : thieuBatBuoc.length > 0 ? (
           <span className="text-danger">
             Thiếu {thieuBatBuoc.length} ô bắt buộc:{' '}
             {hienThi.map((ma) => (

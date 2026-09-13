@@ -100,7 +100,13 @@ export function FormHeader({
             đơn vị gõ — người đọc cần biết trước khi tin vào nó. */}
         {source === 'seed' && <span className="text-xs text-sec">nạp từ file tổng hợp</span>}
       </div>
-      <div className="col-span-2 grid grid-cols-5 gap-x-7 gap-y-1 text-table border-t border-hair pt-2.5 mt-1">
+      {/* `id="A"`: nhóm A của danh mục ("THÔNG TIN CHUNG") không có chỉ tiêu nào nên không sinh
+          hàng nào trong bảng — 5 ô phần đầu này CHÍNH LÀ nhóm A, và là đích nhảy `#A` của mục lục
+          (fix-1 S6). `scroll-mt-20` = `scroll-margin-top:80px` như mọi đích nhảy khác. */}
+      <div
+        id="A"
+        className="col-span-2 grid grid-cols-5 gap-x-7 gap-y-1 text-table border-t border-hair pt-2.5 mt-1 scroll-mt-20"
+      >
         <OPhanDau nhan="Số báo cáo" giaTri={dau.report_no} />
         <OPhanDau nhan="Địa điểm" giaTri={dau.location} />
         <OPhanDau nhan="Ngày báo cáo" giaTri={dau.report_date ? ngayVN(dau.report_date) : null} />

@@ -24,7 +24,7 @@ import { useEffect, useMemo, useReducer, useRef } from 'react'
 import { Banner } from '../../components/ui/Banner'
 import { useSession } from '../../app/session'
 import { parseViNumber } from '../../lib/parseViNumber'
-import { formatPeriod } from '../../lib/format'
+import { formatDateTime, formatPeriod } from '../../lib/format'
 import { cellPolicy, type AggType, type Cell, type Mode } from './cellPolicy'
 import { NumberCell, dinhDangSoBang } from './NumberCell'
 import { FormHeader } from './FormHeader'
@@ -147,11 +147,16 @@ interface TrangThaiForm {
    * DUY NHẤT mà 409 được phép vá. */
   server: Record<string, GiaTriBaoCao>
   daBamNop: boolean
+  /** Mã các dòng bị BỎ QUA ở lần dán cột gần nhất (fix-1 S1). Dán im lặng nuốt dòng là cách
+   * chắc chắn nhất để người nhập tưởng hệ thống hỏng: họ dán một cột Excel bản en-US
+   * ("402100.00") và KHÔNG có gì xảy ra. */
+  boQuaKhiDan: string[]
   xungDot: { detail: string; tuPhienBan: number; denPhienBan: number } | null
 }
 
 type HanhDongForm =
   | { type: 'nhap-o'; ma: string; cot: Cell; value: number | null }
+  | { type: 'dan-xong'; boQua: string[] }
   | { type: 'ghi-chu'; ma: string; noiDung: string }
   | { type: 'chu'; ma: string; noiDung: string }
   | { type: 'bam-nop' }
@@ -168,7 +173,7 @@ function khoiTao(chiTiet: ChiTietBaoCao): TrangThaiForm {
   }
   const chu: Record<string, string> = {}
   for (const [ma, noiDung] of Object.entries(chiTiet.texts)) chu[ma] = noiDung ?? ''
-  return { version: chiTiet.version, nhap, ghiChu, chu, server, daBamNop: false, xungDot: null }
+  return { version: chiTiet.version, nhap, ghiChu, chu, server, daBamNop: false, boQuaKhiDan: [], xungDot: null }
 }
 
 function rutGon(s: TrangThaiForm, h: HanhDongForm): TrangThaiForm {
@@ -177,8 +182,13 @@ function rutGon(s: TrangThaiForm, h: HanhDongForm): TrangThaiForm {
       // `accPrev` không bao giờ tới đây: không agg_type nào cho nhập cột đó, nên nó không có ô
       // nhập nào để bắn hành động này ra.
       const cu = s.nhap[h.ma] ?? { thisPeriod: null, accTotal: null }
-      return { ...s, nhap: { ...s.nhap, [h.ma]: { ...cu, [h.cot]: h.value } } }
+      // `boQuaKhiDan: []`: gõ tay là thao tác MỚI, kết quả lần dán trước thôi là chuyện đang xảy
+      // ra. `danCot` bắn hết `nhap-o` RỒI mới bắn `dan-xong`, nên dòng này không xoá mất thông
+      // điệp của chính lần dán đó.
+      return { ...s, boQuaKhiDan: [], nhap: { ...s.nhap, [h.ma]: { ...cu, [h.cot]: h.value } } }
     }
+    case 'dan-xong':
+      return { ...s, boQuaKhiDan: h.boQua }
     case 'ghi-chu':
       return { ...s, ghiChu: { ...s.ghiChu, [h.ma]: h.noiDung } }
     case 'chu':
@@ -243,10 +253,12 @@ function giaTriDong(ct: ChiTieuMau, sv: GiaTriBaoCao, nhap: ONhap) {
   return { cs, accPrev, thisPeriod, accTotal }
 }
 
-/** Ô mà `cellPolicy` chấm là bắt buộc luôn nằm trong hai cột nhập được — `accPrev` không bao giờ
- * là `requiredCell` (cellPolicy.ts), nhưng kiểu `Cell` vẫn cho phép nên phải trả lời cả nhánh đó. */
+/** Giá trị của ô mà `cellPolicy` chấm là bắt buộc. `requiredCell` chỉ có thể là một trong HAI cột
+ * nhập được (cellPolicy.ts: `sum`→thisPeriod, `counter`/`snapshot`→accTotal); kiểu `Cell` rộng hơn
+ * thực tế nên không viết nhánh thứ ba cho `accPrev` — nhánh đó không bao giờ chạy được, và mã cho
+ * tình huống không thể xảy ra là thứ CLAUDE.md #2 cấm (fix-1 S9). */
 function giaTriBatBuoc(o: ONhap, cot: Cell): number | null {
-  return cot === 'thisPeriod' ? o.thisPeriod : cot === 'accTotal' ? o.accTotal : null
+  return cot === 'thisPeriod' ? o.thisPeriod : o.accTotal
 }
 
 // ---------------------------------------------------------------- ô của bảng
@@ -284,8 +296,10 @@ function OGiaTri({
   decimals: number
   cot: Cell
   loiNgoai: string | null
-  onChange: (value: number | null) => void
-  onPasteColumn: (dong: string[]) => void
+  /** Không bắt buộc: cột "Lũy kế tháng trước" không agg_type nào cho nhập, nên nó gọi component
+   * này mà không có dây nào cả (fix-1 S9). */
+  onChange?: (value: number | null) => void
+  onPasteColumn?: (dong: string[]) => void
 }) {
   // C9: `empty` khác `derived`. Ô này KHÔNG tồn tại với loại chỉ tiêu đang xét, nên không nhãn,
   // không "—", không gì cả — mọi dấu vết đều đọc thành "có ô, chưa điền".
@@ -302,7 +316,7 @@ function OGiaTri({
         decimals={decimals}
         ariaLabel={nhan}
         loiNgoai={loiNgoai}
-        onChange={(kq) => onChange(kq.value)}
+        onChange={(kq) => onChange?.(kq.value)}
         onPasteColumn={onPasteColumn}
       />
     </td>
@@ -373,6 +387,7 @@ export function ReportForm({ mau, chiTiet, xungDot, onLuu, onChuyenTrangThai }: 
   function danCot(maBatDau: string, cot: Cell, dong: string[]) {
     const dsNhap = mau.indicators.filter((ct) => cellPolicy(ct.agg_type as AggType)[cot] === 'input')
     const bd = dsNhap.findIndex((ct) => ct.code === maBatDau)
+    const boQua: string[] = []
     dong.forEach((chuoi, i) => {
       const ct = dsNhap[bd + i]
       if (ct === undefined) return // dán dài hơn số dòng còn lại: bỏ phần thừa
@@ -381,7 +396,10 @@ export function ReportForm({ mau, chiTiet, xungDot, onLuu, onChuyenTrangThai }: 
       // ô rác trong vùng copy — dòng TRỐNG thì khác, `parseViNumber('')` trả null không lỗi và
       // đúng nghĩa "ô này để trống" (NumberCell fix-1 S5).
       if (error === null) dispatch({ type: 'nhap-o', ma: ct.code, cot, value })
+      else boQua.push(ct.code)
     })
+    // Bắn CẢ KHI không bỏ qua dòng nào: đó là cách xoá thông điệp của lần dán trước.
+    dispatch({ type: 'dan-xong', boQua })
   }
 
   function bamChuyenTrangThai(c: ChuyenTrangThai) {
@@ -413,10 +431,18 @@ export function ReportForm({ mau, chiTiet, xungDot, onLuu, onChuyenTrangThai }: 
         now={new Date()}
       />
 
+      {/* Điều kiện `state === 'returned'` KHÔNG thừa: `workflow.py:247` chỉ ghi `decision_note` ở
+          approve/return/reopen — `submit` KHÔNG xoá nó, nên một báo cáo đã nộp lại vẫn mang nguyên
+          ghi chú của lượt trả lại trước (fix-1 S4).
+          `role="status"` chứ không phải `alert`: banner này có mặt ngay lúc tải trang, không phải
+          một sự kiện — `alert` sẽ cắt ngang trình đọc màn hình trước cả tiêu đề trang (fix-1 S12). */}
       {chiTiet.state === 'returned' && chiTiet.header.decision_note && (
         <Banner kind="danger">
-          <span role="alert">
-            <b className="font-medium">Ban ATCL trả lại:</b> {chiTiet.header.decision_note}
+          <span role="status">
+            <b className="font-medium">
+              Ban ATCL trả lại{chiTiet.header.decided_at ? ` ${formatDateTime(chiTiet.header.decided_at)}` : ''}:
+            </b>{' '}
+            {chiTiet.header.decision_note}
           </span>
         </Banner>
       )}
@@ -429,9 +455,11 @@ export function ReportForm({ mau, chiTiet, xungDot, onLuu, onChuyenTrangThai }: 
         </Banner>
       )}
 
+      {/* `role="status"` cùng lý do với banner trả lại (fix-1 S12) — banner 409 ở trên mới là
+          sự kiện thật, nó giữ `role="alert"`. */}
       {chiTiet.missing_periods.length > 0 && (
         <Banner kind="gray">
-          <span role="alert">
+          <span role="status">
             Lũy kế chưa tính kỳ {chiTiet.missing_periods.map(formatPeriod).join(', ')} (chưa duyệt). Cột "Lũy kế
             tháng trước" sẽ đổi khi kỳ đó được duyệt.
           </span>
@@ -493,8 +521,12 @@ export function ReportForm({ mau, chiTiet, xungDot, onLuu, onChuyenTrangThai }: 
           </table>
         </div>
 
+        {/* Mục lục liệt ĐỦ `mau.sections`, kể cả A (5 ô phần đầu) và C (3 ô văn bản dưới bảng) —
+            hai nhóm đó không sinh hàng nào trong bảng nhưng vẫn là hai đích nhảy mà approve.html
+            vẽ rõ; nhóm C nằm dưới 53 dòng nên mất mục lục là mất đúng cú nhảy một phát (fix-1 S6).
+            Lọc `nhomCoDong` chỉ đúng cho HÀNG TIÊU ĐỀ trong bảng, không đúng cho điều hướng trang. */}
         <nav className="sticky top-4 bg-surface border border-hair rounded-tile py-2.5 text-xs">
-          {nhomCoDong.map(({ nhom }) => (
+          {mau.sections.map((nhom) => (
             <a key={nhom.code} href={`#${nhom.code}`} className="block px-3 py-1.5 text-soot no-underline hover:bg-mutedbg">
               {nhom.code}. {nhom.name_vi}
             </a>
@@ -502,7 +534,7 @@ export function ReportForm({ mau, chiTiet, xungDot, onLuu, onChuyenTrangThai }: 
         </nav>
       </div>
 
-      <div className="mt-4 grid gap-3">
+      <div id="C" className="mt-4 grid gap-3 scroll-mt-20">
         {mau.text_fields.map((tf) => (
           <OChu
             key={tf.code}
@@ -519,6 +551,7 @@ export function ReportForm({ mau, chiTiet, xungDot, onLuu, onChuyenTrangThai }: 
         chuyenDuoc={chuyenDuoc}
         suaDuoc={suaDuoc}
         thieuBatBuoc={thieuBatBuoc}
+        boQuaKhiDan={s.boQuaKhiDan}
         soDemLech={soDemLech}
         onLuu={luu}
         onChuyenTrangThai={bamChuyenTrangThai}
@@ -619,9 +652,7 @@ function Dong({
         value={accPrev}
         decimals={ct.decimals}
         cot="accPrev"
-        loiNgoai={loiNgoai('accPrev')}
-        onChange={(value) => dispatch({ type: 'nhap-o', ma: ct.code, cot: 'accPrev', value })}
-        onPasteColumn={(dong) => danCot(ct.code, 'accPrev', dong)}
+        loiNgoai={null}
       />
       <OGiaTri
         mode={cs.thisPeriod}

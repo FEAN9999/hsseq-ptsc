@@ -109,6 +109,7 @@ interface VeOpts {
   vai?: 'admin' | 'reporter' | 'viewer'
   source?: string
   version?: number
+  is_late?: boolean
   decision_note?: string | null
   missing_periods?: string[]
   values?: (Partial<GiaTriBaoCao> & { indicator_code: string })[]
@@ -130,7 +131,7 @@ function ve(opts: VeOpts = {}) {
     version: opts.version ?? 8,
     state: opts.state ?? 'draft',
     source: opts.source ?? 'live',
-    is_late: false,
+    is_late: opts.is_late ?? false,
     header: {
       org_unit: { code: DON_VI.code, name: DON_VI.name },
       template_code: 'FM01',
@@ -173,10 +174,14 @@ function chu(e: HTMLElement): string {
 }
 
 /** Ghi lại `defaultPrevented` của phím đầu tiên khớp `key` — cách duy nhất đo "Enter KHÔNG submit"
- * và "Ctrl+S không mở hộp thoại lưu trang" mà không phải dựng một `<form>` giả. */
+ * và "Ctrl+S không mở hộp thoại lưu trang" mà không phải dựng một `<form>` giả.
+ *
+ * Nghe ở `window`, KHÔNG ở `document`: đường bọt kết thúc ở window, nên đây là điểm duy nhất thấy
+ * được `preventDefault` của MỌI tầng phía dưới — kể cả tầng window mà `useKeyboardNav` gắn Ctrl+S
+ * lên (fix-1 S2). Probe đăng ký SAU hook nên luôn chạy sau nó trên cùng một target. */
 function theoDoiChan(key: string) {
   const ket = { chan: false, thay: false }
-  document.addEventListener(
+  window.addEventListener(
     'keydown',
     (e) => {
       if (e.key === key && !ket.thay) {
@@ -203,13 +208,25 @@ describe('chế độ form theo trạng thái × quyền', () => {
     expect(screen.getByRole('button', { name: 'Lưu' })).toBeTruthy()
   })
 
-  it('chế độ 2 — trả lại: banner đỏ nguyên văn ghi chú của admin, nút Nộp lại', () => {
+  // `getByRole('status')`, KHÔNG phải `alert`: banner này nằm sẵn trên trang lúc tải (fix-1 S12).
+  it('chế độ 2 — trả lại: banner đỏ nguyên văn ghi chú của admin KÈM mốc trả lại, nút Nộp lại', () => {
     ve({ state: 'returned', vai: 'reporter', decision_note: 'Thiếu số B-8.1' })
-    const b = screen.getByRole('alert')
+    const b = screen.getByRole('status')
     expect(b.textContent).toContain('Thiếu số B-8.1')
+    // states.html: "Ban ATCL trả lại 04/09/2026 15:20:" — `decided_at` của fixture là
+    // 2026-09-04T08:20:00Z = 15:20 giờ VN.
+    expect(b.textContent).toContain('Ban ATCL trả lại 04/09/2026 15:20:')
     expect(resolveCascadeWinner(b.closest('div')!.className, 'background-color')).toBe('bg-dangerBg')
     expect(screen.getByRole('button', { name: 'Nộp lại' })).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Nộp báo cáo' })).toBeNull()
+  })
+
+  // fix-1 S4: `workflow.py:247` KHÔNG xoá `decision_note` khi submit, nên một báo cáo đã nộp lại
+  // vẫn mang nguyên ghi chú của lượt trả lại trước. Bỏ điều kiện `state === 'returned'` thì người
+  // duyệt mở báo cáo vừa nộp sẽ thấy banner đỏ của lượt trước.
+  it('đã nộp lại nhưng decision_note cũ còn nguyên: KHÔNG hiện banner trả lại nữa', () => {
+    ve({ state: 'submitted', vai: 'admin', decision_note: 'Thiếu số B-8.1' })
+    expect(screen.queryByText(/Ban ATCL trả lại/)).toBeNull()
   })
 
   it('chế độ 3 — đã nộp / admin: không ô nhập, có Duyệt và Trả lại…', () => {
@@ -260,6 +277,19 @@ describe('chế độ form theo trạng thái × quyền', () => {
     expect(container.querySelectorAll('textarea')).toHaveLength(0)
     expect(screen.queryByRole('button', { name: 'Lưu' })).toBeNull()
     expect(o('B-1.1', 'Tháng này').tagName).toBe('TD')
+    // fix-1 S7: người xem CÓ report.view_all nhưng KHÔNG có report.approve — vai duy nhất tách
+    // được hai quyền đó. Đổi điều kiện cột Lệch sang view_all sẽ đỏ đúng ở đây.
+    expect(screen.queryByRole('columnheader', { name: 'Lệch' })).toBeNull()
+  })
+
+  // fix-1 S7: `is_editable ?? false` — nhánh `??` chỉ chạy khi `state` của báo cáo KHÔNG nằm
+  // trong `mau.states` (mẫu đổi mà báo cáo cũ còn trạng thái cũ). Đổi thành `?? true` mở khoá cả
+  // form cho một trạng thái không ai biết luật.
+  it('trạng thái không có trong danh mục mẫu: form khoá cứng, không ô nhập, không nút nào', () => {
+    const { container } = ve({ state: 'trang-thai-la', vai: 'admin' })
+    expect(container.querySelectorAll('input')).toHaveLength(0)
+    expect(container.querySelectorAll('textarea')).toHaveLength(0)
+    expect(screen.queryAllByRole('button')).toHaveLength(0)
   })
 
   it('cột Lệch chỉ hiện cho người có quyền duyệt', () => {
@@ -297,6 +327,20 @@ describe('ba chế độ ô của cellPolicy', () => {
 
     // đối chứng: cùng vị trí đó ở dòng derived thì CÓ nhãn và CÓ dấu —
     expect(o('B-1.3', 'Lũy kế tháng trước').textContent).toBe('—')
+    expect(o('B-1.3', 'Tháng này').textContent).toBe('—')
+  })
+
+  // fix-1 S3: ca trên chỉ chạy ở chế độ SỬA ĐƯỢC, nên đảo thứ tự hai nhánh `empty` / `!suaDuoc`
+  // trong `OGiaTri` không làm ca nào đỏ — mà đảo xong thì MỌI form đã khoá hiện "—" ở ô snapshot,
+  // tức nói dối rằng ô đó có tồn tại. FM01 chưa có dòng snapshot nên đây là bẫy cho mẫu thứ hai.
+  it('C9 vẫn đúng khi form ĐÃ KHOÁ: ô snapshot trắng, không mượn dấu — của nhánh chỉ đọc', () => {
+    const { container } = ve({ state: 'approved', vai: 'admin', mau: MAU_BA_LOAI })
+    expect(timO('B-1.2', 'Lũy kế tháng trước')).toBeNull()
+    expect(timO('B-1.2', 'Tháng này')).toBeNull()
+    const oSnapshot = container.querySelectorAll('tr#B-1-2 td')
+    expect(oSnapshot[2].textContent).toBe('')
+    expect(oSnapshot[3].textContent).toBe('')
+    // cùng lúc đó dòng derived ở form khoá VẪN hiện "—"
     expect(o('B-1.3', 'Tháng này').textContent).toBe('—')
   })
 
@@ -423,6 +467,63 @@ describe('nộp và ô bắt buộc', () => {
     expect(screen.queryByRole('link', { name: 'B-8.2' })).toBeNull()
     // Neo phải tồn tại thật trong bảng, nếu không link là một lời hứa suông.
     expect(document.getElementById('B-8-1')).toBeTruthy()
+  })
+
+  // fix-1 S5: 4 dòng counter thật (B-1.5…B-1.8) có CẢ HAI cột là ô nhập. Bỏ `...cu` trong reducer
+  // thì gõ một cột sẽ xoá cột kia, và vòng 1 không có ca nào đỏ vì mọi ca chỉ gõ một cột.
+  it('dòng counter: gõ "Tháng này" KHÔNG xoá "Cộng dồn" đã có, và ngược lại', async () => {
+    ve({
+      state: 'draft',
+      vai: 'reporter',
+      mau: mauNho([chiTieu({ code: 'B-1.5', agg_type: 'counter' })]),
+      values: [{ indicator_code: 'B-1.5', this_period: 11, acc_total_entered: 500 }],
+    })
+    await userEvent.type(o('B-1.5', 'Tháng này'), '2')
+    expect(chu(o('B-1.5', 'Tháng này'))).toBe('112')
+    expect(chu(o('B-1.5', 'Cộng dồn'))).toBe('500')
+
+    await userEvent.type(o('B-1.5', 'Cộng dồn'), '7')
+    expect(chu(o('B-1.5', 'Cộng dồn'))).toBe('5007')
+    expect(chu(o('B-1.5', 'Tháng này'))).toBe('112')
+  })
+
+  // Đột biến N22 của reviewer: bỏ `ct.required` khỏi bộ lọc.
+  it('chỉ tiêu KHÔNG bắt buộc để trống thì không bị tính là thiếu, dù cellPolicy có chấm ô cho nó', async () => {
+    ve({
+      state: 'draft',
+      vai: 'reporter',
+      mau: mauNho([chiTieu({ code: 'B-8.1' }), chiTieu({ code: 'B-8.2', required: false })]),
+    })
+    await userEvent.click(screen.getByRole('button', { name: 'Nộp báo cáo' }))
+    expect(screen.getByText(/Thiếu 1 ô bắt buộc/)).toBeTruthy()
+    expect(screen.queryByRole('link', { name: 'B-8.2' })).toBeNull()
+  })
+
+  // Đột biến N23: đảo `error ?? loiNgoai` thành `loiNgoai ?? error` trong NumberCell. Lỗi VỪA GÕ
+  // phải thắng lời nhắc "Bắt buộc" đang treo sẵn — nếu không, người dùng gõ chữ vào ô đỏ sẽ
+  // không bao giờ biết vì sao số của họ không vào.
+  it('ô đang treo "Bắt buộc" mà gõ chữ: hiện lỗi vừa gõ, không giữ nguyên "Bắt buộc"', async () => {
+    ve({ state: 'draft', vai: 'reporter', mau: mauNho([chiTieu({ code: 'B-8.1' })]) })
+    await userEvent.click(screen.getByRole('button', { name: 'Nộp báo cáo' }))
+    const oB = o('B-8.1', 'Tháng này')
+    expect(screen.getAllByText('Bắt buộc').length).toBeGreaterThan(0)
+    await userEvent.type(oB, 'abc')
+    await userEvent.tab() // NumberCell chốt lỗi lúc RỜI ô, không phải theo từng phím
+    expect(screen.getByText('Chỉ nhập số')).toBeTruthy()
+    expect(screen.queryByText('Bắt buộc')).toBeNull()
+  })
+
+  // Đột biến N4: `MA_HIEN_TOI_DA` 8 → 100. Form FM01 trống thiếu 52 ô; liệt hết sẽ đẩy thanh dính
+  // cao gần nửa màn hình.
+  it('thiếu quá nhiều ô: thanh dưới liệt tối đa 8 mã rồi rút gọn thành "+n"', async () => {
+    ve({ state: 'draft', vai: 'reporter' })
+    await userEvent.click(screen.getByRole('button', { name: 'Nộp báo cáo' }))
+    const cauBao = screen.getByText(/Thiếu \d+ ô bắt buộc/).parentElement!
+    const soThieu = Number(cauBao.textContent!.match(/Thiếu (\d+) ô/)![1])
+    expect(soThieu).toBeGreaterThan(8)
+    const maTrongCau = Array.from(cauBao.querySelectorAll('a'))
+    expect(maTrongCau).toHaveLength(8)
+    expect(cauBao.textContent).toContain(`+${soThieu - 8}`)
   })
 
   it('điền nốt ô thiếu thì thanh dưới tự hết, không phải bấm Nộp lại mới cập nhật', async () => {
@@ -656,14 +757,37 @@ describe('bàn phím kiểu Excel', () => {
     expect(oB.getAttribute('aria-invalid')).not.toBe('true')
   })
 
-  it('Ctrl+S gọi Lưu và chặn hộp thoại lưu trang của trình duyệt', async () => {
+  it('Ctrl+S khi đang đứng trong ô nhập: gọi Lưu ĐÚNG MỘT lần và chặn hộp thoại lưu trang', async () => {
     const onLuu = vi.fn()
     ve({ state: 'draft', vai: 'reporter', onLuu })
     const theoDoi = theoDoiChan('s')
     o('B-1.1', 'Tháng này').focus()
     await userEvent.keyboard('{Control>}s{/Control}')
+    // Đúng MỘT lần: listener nằm ở window, phím gõ trong ô bọt lên tới đó — nếu ai gắn thêm một
+    // bản ở cấp lưới nữa thì con số này thành 2.
     expect(onLuu).toHaveBeenCalledTimes(1)
     expect(theoDoi.chan).toBe(true)
+  })
+
+  // fix-1 S2: ngay sau khi tải trang, và sau mỗi lần bấm vào vùng trống, focus nằm ở <body>.
+  // Listener cấp lưới không nghe được phím ở đó → Ctrl+S rơi vào trình duyệt, mở hộp "Lưu trang".
+  it('Ctrl+S khi focus đang ở <body> (chưa bấm vào ô nào): vẫn gọi Lưu và vẫn chặn', async () => {
+    const onLuu = vi.fn()
+    ve({ state: 'draft', vai: 'reporter', onLuu })
+    const theoDoi = theoDoiChan('s')
+    ;(document.activeElement as HTMLElement | null)?.blur()
+    expect(document.activeElement).toBe(document.body)
+    await userEvent.keyboard('{Control>}s{/Control}')
+    expect(onLuu).toHaveBeenCalledTimes(1)
+    expect(theoDoi.chan).toBe(true)
+  })
+
+  it('Ctrl+S khi đang gõ trong textarea nhóm C cũng gọi Lưu', async () => {
+    const onLuu = vi.fn()
+    ve({ state: 'draft', vai: 'reporter', onLuu })
+    screen.getByLabelText('C1. Hoạt động nổi bật trong tháng').focus()
+    await userEvent.keyboard('{Control>}s{/Control}')
+    expect(onLuu).toHaveBeenCalledTimes(1)
   })
 
   it('nút Lưu gọi đúng cùng một hành động với Ctrl+S', async () => {
@@ -695,6 +819,20 @@ describe('nhãn ô', () => {
     for (const e of oSo) {
       expect(e.getAttribute('aria-label')).toMatch(/^[AB]-[\d.]+ .+, (Tháng này|Cộng dồn)$/)
     }
+  })
+
+  // fix-1 S10: mọi ca vòng 1 đều GÕ ghi chú rồi đọc lại, không ca nào mở một báo cáo ĐÃ CÓ ghi
+  // chú — nên `ghiChu[...] = v.note ?? ''` đổi thành `''` cũng không ai đỏ. Người nộp mở lại bản
+  // nháp sẽ thấy ghi chú của mình biến mất.
+  it('ghi chú đã lưu của từng dòng nạp sẵn từ server, cả lúc sửa được lẫn lúc form khoá', () => {
+    const GC = 'Ngã cao 2 m tại xưởng 3, 12/08'
+    const { unmount } = ve({ state: 'draft', vai: 'reporter', values: [{ indicator_code: 'B-2.1', note: GC }] })
+    expect(chu(o('B-2.1', 'Ghi chú'))).toBe(GC)
+    expect(chu(o('B-2.2', 'Ghi chú'))).toBe('')
+    unmount()
+
+    ve({ state: 'approved', vai: 'admin', values: [{ indicator_code: 'B-2.1', note: GC }] })
+    expect(screen.getByText(GC)).toBeTruthy()
   })
 
   it('ô Ghi chú có nhãn riêng mang tên dòng, không để trống', () => {
@@ -741,6 +879,78 @@ describe('dán một cột từ Excel', () => {
     expect(chu(o('B-1.1', 'Tháng này'))).toBe('10')
     expect(chu(o('B-1.2', 'Tháng này'))).toBe('—')
     expect(chu(o('B-1.3', 'Tháng này'))).toBe('30')
+  })
+
+  // fix-1 S1. Vòng 1 nuốt dòng không đọc được trong im lặng: người nhập dán một cột copy từ Excel
+  // bản en-US ("402100.00") và KHÔNG có gì xảy ra — không ô nào đổi, không chữ nào báo. Họ sẽ dán
+  // lại rồi tưởng hệ thống hỏng. Đây là đường nhập liệu chính của 15 phút ngồi điền.
+  it('dán có dòng không đọc được: thanh dưới nói rõ bỏ qua mấy dòng và mã nào', async () => {
+    ve({ state: 'draft', vai: 'reporter', values: [{ indicator_code: 'B-1.7', this_period: 9 }] })
+    await userEvent.click(o('B-1.1', 'Tháng này'))
+    await userEvent.paste('1,5\n2,5\n3,5\n4,5\n5,5\n6,5')
+    // B-1.7 (decimals = 0) từ chối "6,5" — và giờ nói ra.
+    expect(screen.getByText(/Dán: bỏ qua 1 dòng không đọc được \(B-1\.7\)/)).toBeTruthy()
+    expect(chu(o('B-1.7', 'Tháng này'))).toBe('9') // vẫn KHÔNG đè lên số cũ
+  })
+
+  it('dán một cột Excel bản en-US: TOÀN BỘ bị từ chối, thanh dưới nói đủ 3 mã', async () => {
+    ve({
+      state: 'draft',
+      vai: 'reporter',
+      mau: mauNho([
+        chiTieu({ code: 'B-1.1', decimals: 2 }),
+        chiTieu({ code: 'B-1.2', decimals: 2 }),
+        chiTieu({ code: 'B-1.3', decimals: 2 }),
+      ]),
+    })
+    await userEvent.click(o('B-1.1', 'Tháng này'))
+    await userEvent.paste('402100.00\n118900.00\n96400.00')
+    expect(screen.getByText(/Dán: bỏ qua 3 dòng không đọc được \(B-1\.1, B-1\.2, B-1\.3\)/)).toBeTruthy()
+    expect(chu(o('B-1.2', 'Tháng này'))).toBe('—')
+    expect(chu(o('B-1.3', 'Tháng này'))).toBe('—')
+  })
+
+  it('dán sạch (không dòng nào bị từ chối) thì KHÔNG có câu báo nào', async () => {
+    ve({ state: 'draft', vai: 'reporter' })
+    await userEvent.click(o('B-1.1', 'Tháng này'))
+    await userEvent.paste('1,5\n2,5')
+    expect(screen.queryByText(/Dán: bỏ qua/)).toBeNull()
+  })
+
+  // Vòng đột biến P4: bỏ `dan-xong` khi không có dòng nào bị từ chối. Ca "dán sạch không có câu
+  // báo" ở trên không bắt được vì lúc đó chưa từng có câu báo nào — phải dán HỎNG trước.
+  it('dán lại đúng đắn sau một cú dán hỏng: câu báo cũ biến mất', async () => {
+    ve({ state: 'draft', vai: 'reporter', values: [{ indicator_code: 'B-1.7', this_period: 9 }] })
+    await userEvent.click(o('B-1.1', 'Tháng này'))
+    await userEvent.paste('1,5\n2,5\n3,5\n4,5\n5,5\n6,5')
+    expect(screen.getByText(/Dán: bỏ qua 1 dòng/)).toBeTruthy()
+
+    await userEvent.click(o('B-1.1', 'Tháng này'))
+    await userEvent.paste('1,5\n2,5')
+    expect(screen.queryByText(/Dán: bỏ qua/)).toBeNull()
+  })
+
+  // Ca trên vẫn còn một lối thoát: lần dán thứ hai GHI được ô, mà `nhap-o` cũng xoá câu báo. Chỉ
+  // vùng copy RỖNG (người dùng bôi một cột trắng trong Excel rồi dán — chuỗi chỉ toàn xuống dòng)
+  // mới tách được hai đường xoá đó ra: không ô nào được ghi, không dòng nào bị từ chối.
+  it('dán một vùng Excel RỖNG sau cú dán hỏng: câu báo vẫn phải biến mất', async () => {
+    ve({ state: 'draft', vai: 'reporter', values: [{ indicator_code: 'B-1.7', this_period: 9 }] })
+    await userEvent.click(o('B-1.1', 'Tháng này'))
+    await userEvent.paste('1,5\n2,5\n3,5\n4,5\n5,5\n6,5')
+    expect(screen.getByText(/Dán: bỏ qua 1 dòng/)).toBeTruthy()
+
+    await userEvent.click(o('B-1.1', 'Tháng này'))
+    await userEvent.paste('\n\n')
+    expect(screen.queryByText(/Dán: bỏ qua/)).toBeNull()
+  })
+
+  it('gõ tay sau cú dán hỏng thì câu báo biến mất — nó nói về lần dán, không phải trạng thái form', async () => {
+    ve({ state: 'draft', vai: 'reporter', values: [{ indicator_code: 'B-1.7', this_period: 9 }] })
+    await userEvent.click(o('B-1.1', 'Tháng này'))
+    await userEvent.paste('1,5\n2,5\n3,5\n4,5\n5,5\n6,5')
+    expect(screen.getByText(/Dán: bỏ qua 1 dòng/)).toBeTruthy()
+    await userEvent.type(o('B-1.2', 'Tháng này'), '7')
+    expect(screen.queryByText(/Dán: bỏ qua/)).toBeNull()
   })
 
   it('dán dài hơn số dòng còn lại thì bỏ phần thừa, không nổ', async () => {
@@ -817,6 +1027,43 @@ describe('nhóm C, mục lục và dải đầu', () => {
 
     ve({ state: 'draft', vai: 'reporter', missing_periods: ['2026-07'] })
     expect(screen.getByText(/Lũy kế đã tính tới 06\/2026/)).toBeTruthy()
+  })
+
+  // fix-1 S8: chỉ có ca MỘT kỳ thiếu thì "lấy kỳ thiếu ĐẦU TIÊN" không được khoá — `kyThieu[0]` và
+  // `kyThieu[cuối]` cho cùng kết quả. Với [05, 07] đáp án đúng là 04/2026 (lũy kế dừng NGAY TRƯỚC
+  // kỳ thiếu đầu tiên); lấy kỳ cuối sẽ cho 06/2026, tức khai khống hai kỳ chưa duyệt.
+  it('thiếu NHIỀU kỳ: lũy kế dừng trước kỳ thiếu ĐẦU TIÊN, không phải kỳ thiếu gần nhất', () => {
+    ve({ state: 'draft', vai: 'reporter', missing_periods: ['2026-05', '2026-07'] })
+    expect(screen.getByText(/Lũy kế đã tính tới 04\/2026/)).toBeTruthy()
+    expect(screen.queryByText(/Lũy kế đã tính tới 06\/2026/)).toBeNull()
+  })
+
+  // Đột biến N9: nhánh `returned` của `mocThoiGian` trả 'Nháp'.
+  it('mốc thời gian của dòng meta đi theo ĐÚNG trạng thái đang đứng', () => {
+    const { unmount } = ve({ state: 'returned', vai: 'reporter', decision_note: 'x' })
+    expect(screen.getByText(/^Trả lại 04\/09\/2026 15:20$/)).toBeTruthy()
+    unmount()
+
+    const r2 = ve({ state: 'approved', vai: 'admin' })
+    expect(screen.getByText(/^Đã duyệt 04\/09\/2026 15:20$/)).toBeTruthy()
+    r2.unmount()
+
+    ve({ state: 'draft', vai: 'reporter' })
+    // "Nháp" xuất hiện hai chỗ ở trạng thái này: chip bên phải và mốc thời gian bên trái — đúng
+    // như thiết kế, nên đếm chứ không `getByText`.
+    expect(screen.getAllByText('Nháp')).toHaveLength(2)
+  })
+
+  // Đột biến N5: chip bỏ `is_late`. "Đã nộp" và "Đã nộp (muộn)" là hai câu chuyện khác nhau với
+  // người duyệt, và `is_late` là thứ backend tính bằng giờ VN (task 12).
+  it('báo cáo nộp muộn: chip nói "Đã nộp (muộn)", không phải "Đã nộp"', () => {
+    const { unmount } = ve({ state: 'submitted', vai: 'admin', is_late: true })
+    expect(screen.getByText('Đã nộp (muộn)')).toBeTruthy()
+    unmount()
+
+    ve({ state: 'submitted', vai: 'admin', is_late: false })
+    expect(screen.getByText('Đã nộp')).toBeTruthy()
+    expect(screen.queryByText('Đã nộp (muộn)')).toBeNull()
   })
 
   it('kỳ tháng 1 thì lũy kế tính tới tháng 12 NĂM TRƯỚC', () => {
@@ -929,13 +1176,93 @@ describe('bản vẽ: cột lũy kế của counter, màu số, lớp dính', ()
     expect(resolveCascadeWinner(nhom.className, 'top')).toBe('top-9')
   })
 
-  it('mục lục chỉ liệt nhóm CÓ dòng — nhóm A/C của danh mục không sinh hàng tiêu đề rỗng', () => {
+  // fix-1 S11: bốn hằng số hình học brief nói thẳng nhưng vòng 1 không ai đo. Dùng
+  // `resolveCascadeWinner` (đọc CSS ĐÃ BUILD) chứ không `className.toContain`: mọi utility
+  // Tailwind ở đây cùng độ đặc hiệu, lớp đứng sau trong CSS mới thắng — `toContain` trả lời một
+  // câu hỏi khác hẳn câu đang hỏi.
+  it('khung bảng là hộp cuộn CÓ TRẦN chiều cao — sticky top-0 không dính được trong hộp cao vô hạn', () => {
+    const { container } = ve({ state: 'draft', vai: 'reporter' })
+    const hop = container.querySelector('table')!.parentElement!
+    expect(resolveCascadeWinner(hop.className, 'overflow')).toBe('overflow-auto')
+    expect(resolveCascadeWinner(hop.className, 'max-height')).toBe('max-h-[calc(100vh-13rem)]')
+  })
+
+  it('thanh chế độ dính đáy màn hình (bản vẽ .bar)', () => {
     ve({ state: 'draft', vai: 'reporter' })
-    // Danh mục FM01 khai 11 nhóm nhưng chỉ B-1…B-9 có chỉ tiêu (A là 5 ô phần đầu, C là ô văn bản).
-    expect(screen.getAllByRole('link')).toHaveLength(9)
-    expect(screen.queryByRole('link', { name: /^A\./ })).toBeNull()
-    expect(document.getElementById('A')).toBeNull()
-    expect(document.getElementById('C')).toBeNull()
+    const thanh = screen.getByRole('button', { name: 'Lưu' }).parentElement!.parentElement!
+    expect(resolveCascadeWinner(thanh.className, 'position')).toBe('sticky')
+    expect(resolveCascadeWinner(thanh.className, 'bottom')).toBe('bottom-0')
+  })
+
+  it('mọi đích nhảy có scroll-margin-top 80px để không nấp dưới header cột dính', () => {
+    ve({ state: 'draft', vai: 'reporter' })
+    for (const id of ['A', 'B-1', 'B-1-1', 'C']) {
+      const dich = document.getElementById(id)!
+      expect(resolveCascadeWinner(dich.className, 'scroll-margin-top')).toBe('scroll-mt-20')
+    }
+  })
+
+  // Đột biến N6: `soCot` lệch 1 → hàng tiêu đề nhóm không phủ hết chiều ngang bảng.
+  it('hàng tiêu đề nhóm phủ ĐÚNG số cột của bảng, kể cả khi có thêm cột Lệch của người duyệt', () => {
+    const { unmount } = ve({ state: 'draft', vai: 'reporter' })
+    expect(document.getElementById('B-1')!.querySelector('td')!.getAttribute('colspan')).toBe(
+      String(screen.getAllByRole('columnheader').length),
+    )
+    unmount()
+
+    ve({ state: 'submitted', vai: 'admin' })
+    expect(document.getElementById('B-1')!.querySelector('td')!.getAttribute('colspan')).toBe(
+      String(screen.getAllByRole('columnheader').length),
+    )
+  })
+
+  // Đột biến N7: bỏ hai dòng chỉnh chiều cao trong `onChange` của textarea. jsdom không có layout
+  // nên `scrollHeight` luôn 0 — đo được là "trình xử lý CÓ chạy và CÓ ghi style.height", tức mã
+  // tự giãn còn sống; brief đòi thẳng "textarea tự giãn, không thanh cuộn trong ô".
+  it('textarea nhóm C tự chỉnh chiều cao theo nội dung khi gõ', async () => {
+    ve({ state: 'draft', vai: 'reporter' })
+    const ta = screen.getByLabelText('C1. Hoạt động nổi bật trong tháng') as HTMLTextAreaElement
+    expect(ta.style.height).toBe('')
+    await userEvent.type(ta, 'a')
+    expect(ta.style.height).not.toBe('')
+  })
+
+  // Đột biến N14: gộp hai trường bằng `acc_prev_entered ?? acc_prev_computed`. Cột này phải chọn
+  // theo LOẠI chỉ tiêu, không theo trường nào tình cờ có số — hợp đồng backend hôm nay để trống
+  // `acc_prev_entered` ở dòng `sum`, nhưng luật hiển thị không được phụ thuộc vào sự trống đó
+  // (mẫu đổi `agg_type` của một chỉ tiêu là đủ để dữ liệu cũ còn số ở cả hai trường).
+  it('dòng sum lấy "Lũy kế tháng trước" từ acc_prev_computed kể cả khi acc_prev_entered có số', () => {
+    ve({
+      state: 'draft',
+      vai: 'reporter',
+      mau: mauNho([chiTieu({ code: 'B-1.1', agg_type: 'sum' })]),
+      values: [{ indicator_code: 'B-1.1', acc_prev_entered: 777, acc_prev_computed: 402100 }],
+    })
+    expect(o('B-1.1', 'Lũy kế tháng trước').textContent).toBe('402.100')
+  })
+
+  // fix-1 S6: approve.html liệt CẢ "A. Thông tin chung" lẫn "C. Nhận xét, kiến nghị" trong mục
+  // lục. Vòng 1 lọc nhóm rỗng nên mất hai mục đó — và `toHaveLength(9)` khoá đúng con số sai.
+  it('mục lục liệt ĐỦ 11 nhóm của danh mục, kể cả A và C, và mỗi link có đích thật trong DOM', () => {
+    ve({ state: 'draft', vai: 'reporter' })
+    expect(screen.getAllByRole('link')).toHaveLength(11)
+    for (const ma of ['A', 'B-1', 'B-9', 'C']) {
+      const link = screen.getByRole('link', { name: new RegExp(`^${ma.replace('-', '-')}\\.`) })
+      expect(link.getAttribute('href')).toBe(`#${ma}`)
+      expect(document.getElementById(ma)).toBeTruthy()
+    }
+  })
+
+  // A và C là đích nhảy của TRANG, không phải hàng của bảng: chúng không được sinh hàng tiêu đề
+  // rỗng nào trong bảng 53 dòng.
+  it('nhóm A và C KHÔNG sinh hàng tiêu đề rỗng trong bảng', () => {
+    const { container } = ve({ state: 'draft', vai: 'reporter' })
+    const maHangNhom = Array.from(container.querySelectorAll('tbody tr td[colspan]')).map(
+      (td) => td.textContent?.split('.')[0],
+    )
+    expect(maHangNhom).not.toContain('A')
+    expect(maHangNhom).not.toContain('C')
+    expect(maHangNhom).toHaveLength(9)
   })
 })
 

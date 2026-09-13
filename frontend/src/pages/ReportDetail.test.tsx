@@ -16,6 +16,9 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { ReportDetail } from './ReportDetail'
 import { useSession } from '../app/session'
 
+const QUYEN_NGUOI_NOP = ['report.view_own_unit', 'report.edit', 'report.submit']
+const QUYEN_NGUOI_DUYET = [...QUYEN_NGUOI_NOP, 'report.view_all', 'report.approve', 'report.return']
+
 beforeEach(() => {
   vi.unstubAllGlobals()
   useSession.getState().logout()
@@ -96,7 +99,10 @@ function moiApi(loi: Record<string, number> = {}) {
   return daGoi
 }
 
-function ve() {
+function ve(quyen: string[] = QUYEN_NGUOI_NOP) {
+  useSession
+    .getState()
+    .login('tok-1', { id: 1, email: 'u@ptsc.local', full_name: 'Người dùng', position: null }, { id: 2, code: 'U01', name: 'PTSC Miền Trung' }, quyen)
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={qc}>
@@ -116,6 +122,22 @@ describe('ReportDetail', () => {
     expect(await screen.findByRole('heading', { name: 'PTSC Miền Trung · FM02 · 08/2026' })).toBeTruthy()
     expect(daGoi.some((u) => u.endsWith('/templates/FM02'))).toBe(true)
     expect(daGoi.some((u) => u.includes('/templates/FM01'))).toBe(false)
+  })
+
+  // Đột biến N10 của reviewer: bỏ nhánh `report.approve` của breadcrumb. Người duyệt tới màn này
+  // từ hàng đợi "Chờ duyệt", người nộp tới từ "Báo cáo của đơn vị" — breadcrumb phải trỏ về đúng
+  // chỗ họ vừa rời đi, và quyền là thứ duy nhất phân biệt (carry C1: không đọc chuỗi vai trò).
+  it('breadcrumb đi theo QUYỀN: người duyệt thấy "Chờ duyệt", người nộp thấy "Báo cáo của đơn vị"', async () => {
+    moiApi()
+    const r = ve(QUYEN_NGUOI_DUYET)
+    expect(await screen.findByText('Chờ duyệt')).toBeTruthy()
+    expect(screen.queryByText('Báo cáo của đơn vị')).toBeNull()
+    r.unmount()
+
+    moiApi()
+    ve(QUYEN_NGUOI_NOP)
+    expect(await screen.findByText('Báo cáo của đơn vị')).toBeTruthy()
+    expect(screen.queryByText('Chờ duyệt')).toBeNull()
   })
 
   it('báo cáo trả 403: hiện "không có quyền" + lối về /reports, KHÔNG dựng bảng chỉ tiêu', async () => {

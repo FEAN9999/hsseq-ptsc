@@ -78,15 +78,18 @@ export function useKeyboardNav(luoiRef: RefObject<HTMLElement | null>, onLuu: ()
       })
     }
 
-    function xuLyPhim(e: KeyboardEvent) {
-      // Ctrl/Cmd+S bắt ở MỌI phần tử trong form, kể cả textarea nhóm C — người dùng vừa gõ xong
-      // phần nhận xét là lúc họ bấm lưu nhiều nhất.
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
-        e.preventDefault() // nếu không, trình duyệt mở hộp thoại "Lưu trang"
-        luuRef.current()
-        return
-      }
+    // Ctrl/Cmd+S gắn ở WINDOW, không ở lưới (fix-1 S2). Listener cấp lưới chỉ nghe được phím gõ
+    // BÊN TRONG form; ngay sau khi tải trang, và sau mỗi lần bấm vào vùng trống, focus nằm ở
+    // `<body>` nên keydown không bao giờ bọt tới — Ctrl+S lúc đó rơi vào trình duyệt và mở hộp
+    // thoại "Lưu trang", đúng thứ dòng `preventDefault` dưới đây sinh ra để tránh. Bản vẽ
+    // states.html in sẵn lời hứa "Ctrl+S để lưu" ở dải đầu, tức lời hứa ở cấp TRANG.
+    function xuLyLuu(e: KeyboardEvent) {
+      if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 's') return
+      e.preventDefault() // nếu không, trình duyệt mở hộp thoại "Lưu trang"
+      luuRef.current()
+    }
 
+    function xuLyPhim(e: KeyboardEvent) {
       const o = e.target
       // Enter/↑/↓/Esc CHỈ áp cho ô số. Trong textarea nhóm C, Enter phải giữ mặc định (xuống
       // dòng) — thiết kế nói thẳng điều này.
@@ -108,9 +111,11 @@ export function useKeyboardNav(luoiRef: RefObject<HTMLElement | null>, onLuu: ()
 
     luoi.addEventListener('focusin', ghiNhoChuLucFocus)
     luoi.addEventListener('keydown', xuLyPhim)
+    window.addEventListener('keydown', xuLyLuu)
     return () => {
       luoi.removeEventListener('focusin', ghiNhoChuLucFocus)
       luoi.removeEventListener('keydown', xuLyPhim)
+      window.removeEventListener('keydown', xuLyLuu)
     }
   }, [luoiRef])
 }
