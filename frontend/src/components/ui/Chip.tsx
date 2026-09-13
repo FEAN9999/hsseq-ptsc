@@ -10,18 +10,31 @@ const LABEL: Record<ChipKind, string> = {
   missing: 'Chưa nộp',
 }
 
-// Màu nền/chữ theo tokens.css: .c-ok/.c-sub/.c-ret/.c-draft/.c-none — "late" dùng chung màu với
-// "submitted" (đúng mockup status.html). KHÔNG chứa border-* ở đây — xem KIND_BORDER bên dưới:
-// utility border-color trong Tailwind cùng độ đặc hiệu, đứng sau trong CSS build ra là thắng bất
-// kể thứ tự viết trong JSX (fix S1) — nên mỗi chip chỉ được phép có ĐÚNG MỘT utility border-<màu>,
-// tách hẳn khỏi bg/text để không bao giờ có hai utility border-color cùng lúc trong className.
-const KIND_CLASS: Record<ChipKind, string> = {
-  approved: 'bg-successBg text-success',
-  submitted: 'bg-warningBg text-warning',
-  late: 'bg-warningBg text-warning',
-  returned: 'bg-dangerBg text-danger',
-  draft: 'bg-mutedbg text-draft',
-  missing: 'bg-transparent text-sec',
+// Chữ theo tokens.css: .c-ok/.c-sub/.c-ret/.c-draft/.c-none — "late" dùng chung màu với
+// "submitted" (đúng mockup status.html). Nền tách riêng ở KIND_BG bên dưới — xem lý do ở đó.
+const KIND_TEXT: Record<ChipKind, string> = {
+  approved: 'text-success',
+  submitted: 'text-warning',
+  late: 'text-warning',
+  returned: 'text-danger',
+  draft: 'text-draft',
+  missing: 'text-sec',
+}
+
+// Nền riêng theo kind — cùng lý do tách KIND_BORDER (fix S1, vòng sửa 1): utility background-color
+// trong Tailwind cùng độ đặc hiệu, đứng sau trong CSS build ra là thắng bất kể thứ tự viết trong
+// JSX. Vòng sửa 3 — P1: trước đây outline CỘNG THÊM 'bg-transparent' cạnh bg-* của kind thay vì
+// THAY THẾ, nên kind nào có nền đứng SAU 'bg-transparent' trong CSS thật (submitted/late:
+// bg-warningBg) vẫn thắng, chip outline hiện nền vàng thay vì trong suốt — đúng lỗi S1, chỉ khác
+// background-color thay vì border-color. Sửa triệt để như S1: tách bg-* khỏi KIND_TEXT, để mỗi
+// chip chỉ được phép có ĐÚNG MỘT utility background-color (xem hàm Chip bên dưới).
+const KIND_BG: Record<ChipKind, string> = {
+  approved: 'bg-successBg',
+  submitted: 'bg-warningBg',
+  late: 'bg-warningBg',
+  returned: 'bg-dangerBg',
+  draft: 'bg-mutedbg',
+  missing: 'bg-transparent',
 }
 
 // Viền riêng theo kind — kind nào mockup không có viền thì cấp border-transparent ngay tại đây
@@ -36,15 +49,17 @@ const KIND_BORDER: Record<ChipKind, string> = {
 }
 
 export function Chip({ kind, outline }: { kind: ChipKind; outline?: boolean }) {
-  // outline (D6: nạp từ file tổng hợp) THAY THẾ viền của kind bằng border-current, không cộng
-  // thêm — nếu cộng thêm sẽ tái tạo đúng lỗi cascade đã sửa (hai utility border-color cùng lúc).
+  // outline (D6: nạp từ file tổng hợp) THAY THẾ viền lẫn nền của kind bằng border-current /
+  // bg-transparent, không cộng thêm — nếu cộng thêm sẽ tái tạo đúng lỗi cascade đã sửa (hai
+  // utility cùng thuộc tính cùng lúc), như P1 đã chứng minh xảy ra thật với background-color.
   const borderClass = outline ? 'border-current' : KIND_BORDER[kind]
+  const bgClass = outline ? 'bg-transparent' : KIND_BG[kind]
 
   const classes = [
     'inline-block h-6 leading-[22px] px-2.5 rounded-full border text-xs font-medium whitespace-nowrap',
-    KIND_CLASS[kind],
+    bgClass,
+    KIND_TEXT[kind],
     borderClass,
-    outline && 'bg-transparent',
   ]
     .filter(Boolean)
     .join(' ')

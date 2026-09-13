@@ -43,6 +43,22 @@ describe('Chip', () => {
     expect(resolveCascadeWinner(cls, 'background-color')).toBe(bgClass)
   })
 
+  // Vòng sửa 3 — P1: LỖI SẢN PHẨM THẬT sống qua cả vòng 1 lẫn vòng 2 — đúng lỗi S1, chỉ khác
+  // background-color thay vì border-color. outline CỘNG THÊM bg-transparent cạnh bg-* của kind
+  // thay vì THAY THẾ, nên kind nào có nền đứng SAU bg-transparent trong CSS thật (submitted/late:
+  // bg-warningBg) vẫn thắng cascade — chip outline hiện nền vàng thay vì trong suốt. Test
+  // "source=seed" phía trên chỉ dựng kind="approved" — đúng ca DUY NHẤT tình cờ không lỗi (nền
+  // approved đứng TRƯỚC bg-transparent trong CSS) nên không bắt được submitted/late. Test này phủ
+  // đủ cả 6 kind để không còn ca nào "may mắn" che lỗi.
+  it.each(['approved', 'submitted', 'late', 'returned', 'draft', 'missing'] as const)(
+    'outline=true kind=%s → nền PHẢI trong suốt cho mọi kind, không riêng approved (P1)',
+    (kind) => {
+      const { container } = render(<Chip kind={kind} outline />)
+      const cls = container.firstElementChild?.className ?? ''
+      expect(resolveCascadeWinner(cls, 'background-color')).toBe('bg-transparent')
+    },
+  )
+
   // Vòng sửa 1 — S1: utility border-color cùng độ đặc hiệu, cái đứng SAU trong CSS build ra thắng
   // bất kể thứ tự viết trong JSX. Chuỗi className "chứa" border-hair/border-current vẫn ĐÚNG dù
   // border-transparent đứng sau đã đè mất viền trên màn hình — test theo substring không bắt được.
@@ -70,6 +86,55 @@ describe('Chip', () => {
     const { container } = render(<Chip kind={kind as never} outline={outline as boolean} />)
     const cls = container.firstElementChild?.className ?? ''
     expect(resolveCascadeWinner(cls, 'border-color')).toBe(expectedBorder)
+  })
+
+  // Vòng sửa 3 — P2: vòng 2 bỏ hẳn assert ĐẾM SỐ LƯỢNG của vòng 1 để thay bằng assert KẾT QUẢ qua
+  // resolver ở trên. Hai câu hỏi này BỔ SUNG cho nhau, không thay thế được nhau: "kết quả" xác
+  // nhận cascade thắng đúng cho những gì ĐANG có; "đếm" xác nhận không có gì THỪA cùng thuộc tính
+  // để tạo cuộc đua từ đầu. Tự thêm một utility border-color dư (vd. border-current dư cạnh
+  // border-hair của kind=missing) có thể vẫn ra "kết quả" đúng may rủi nếu utility dư tình cờ
+  // thua cascade — nhưng SỐ LƯỢNG luôn lộ ra ngay. Regex ở đây phải MỞ (border-<bất kỳ>), không
+  // liệt kê sẵn ba tên màu như vòng 1 — danh sách đóng chính là lỗ hổng đã bị bắt ở vòng 2 (mutation
+  // thêm màu thứ tư không có trong danh sách đóng vẫn đếm ra 1, sai).
+  it.each([
+    ['approved', false],
+    ['submitted', false],
+    ['late', false],
+    ['returned', false],
+    ['draft', false],
+    ['missing', false],
+    ['approved', true],
+    ['submitted', true],
+    ['late', true],
+    ['returned', true],
+    ['draft', true],
+    ['missing', true],
+  ])('kind=%s outline=%s → đúng MỘT utility border-<màu>, không utility nào dư (đếm mở, P2)', (kind, outline) => {
+    const { container } = render(<Chip kind={kind as never} outline={outline as boolean} />)
+    const cls = container.firstElementChild?.className ?? ''
+    expect(cls.match(/\bborder-\S+/g)?.length ?? 0).toBe(1)
+  })
+
+  // Vòng sửa 3 — P2 (mở rộng sang background-color): đây chính xác là chỗ P1 đã lọt lưới — vòng 2
+  // không có assert đếm nào cho background-color nên chip outline cộng dồn 2 utility bg-* (kind
+  // của chip + bg-transparent) không bị bắt cho tới khi reviewer tự đo CSS.
+  it.each([
+    ['approved', false],
+    ['submitted', false],
+    ['late', false],
+    ['returned', false],
+    ['draft', false],
+    ['missing', false],
+    ['approved', true],
+    ['submitted', true],
+    ['late', true],
+    ['returned', true],
+    ['draft', true],
+    ['missing', true],
+  ])('kind=%s outline=%s → đúng MỘT utility bg-<màu>, không utility nào dư (đếm mở, P2)', (kind, outline) => {
+    const { container } = render(<Chip kind={kind as never} outline={outline as boolean} />)
+    const cls = container.firstElementChild?.className ?? ''
+    expect(cls.match(/\bbg-\S+/g)?.length ?? 0).toBe(1)
   })
 
   it('missing (Chưa nộp) có viền hairline thật #e8e6e5, không phải transparent bị cascade đè', () => {
