@@ -15,8 +15,17 @@ export function parseViNumber(raw: string, decimals: number): { value: number | 
   const khongKhoangTrang = raw.replace(/\s/g, '')
   if (khongKhoangTrang === '') return { value: null, error: null }
 
-  // '.' luôn là dấu ngăn hàng nghìn (bỏ hẳn), ',' luôn là dấu thập phân (đổi thành '.' cho Number)
-  // — đúng quy ước vi-VN, không đoán theo ngữ cảnh.
+  // fix-1 S1: '.' chỉ được bỏ khi nó THẬT SỰ là dấu ngăn hàng nghìn hợp lệ (mỗi nhóm sau dấu
+  // chấm đủ 3 chữ số) — trước đây bỏ MỌI dấu chấm vô điều kiện nên '1284500.00' (dấu chấm thập
+  // phân kiểu en-US/Excel) âm thầm hoá thành 128450000 (nhân 100), '0.5' thành 5, và '.' đơn độc
+  // thành 0 — sai số hợp lệ mọi mặt khác (< 10^16, đúng số thập phân) nên lọt cả zod lẫn backend,
+  // chỉ lộ ra khi có người đối chiếu Excel. Không khớp nhóm hàng nghìn thì báo lỗi, không đoán.
+  if (khongKhoangTrang.includes('.') && !/^-?\d{1,3}(\.\d{3})+(,\d+)?$/.test(khongKhoangTrang)) {
+    return { value: null, error: 'Chỉ nhập số' }
+  }
+
+  // '.' luôn là dấu ngăn hàng nghìn (bỏ hẳn, đã kiểm hợp lệ ở trên), ',' luôn là dấu thập phân
+  // (đổi thành '.' cho Number) — đúng quy ước vi-VN, không đoán theo ngữ cảnh.
   const khongChamNgan = khongKhoangTrang.replace(/\./g, '')
   const so = Number(khongChamNgan.replace(',', '.'))
 

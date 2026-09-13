@@ -75,4 +75,188 @@ describe('NumberCell', () => {
     rerender(<NumberCell value={200} decimals={0} ariaLabel="x" />)
     expect(o.value).toBe('200')
   })
+
+  // ============ Vòng sửa 1 (task-21-fix-1.md) ============
+
+  // S2: đúng luồng dán cột của C4 — Task 22 sẽ nạp `value` mới cho hàng loạt ô sau một cú dán.
+  // Trước đây `error`/`aria-invalid` treo lại trên một ô vừa được ghi đè giá trị hợp lệ.
+  it('lỗi cũ bị gỡ khi value đổi từ ngoài — dán cột đè lên ô đang lỗi thì hết đỏ (fix-1 S2)', async () => {
+    const { rerender } = render(<NumberCell value={null} decimals={0} ariaLabel="x" />)
+    const o = screen.getByLabelText('x') as HTMLInputElement
+    await userEvent.type(o, 'abc')
+    await userEvent.tab()
+    expect(o.getAttribute('aria-invalid')).toBe('true')
+    rerender(<NumberCell value={777} decimals={0} ariaLabel="x" />)
+    expect(o.getAttribute('aria-invalid')).toBeNull()
+    expect(screen.queryByText('Chỉ nhập số')).toBeNull()
+    expect(o.value).toBe('777')
+  })
+
+  // S3: focus lại một ô đang lỗi KHÔNG được âm thầm thay chữ sai bằng `value` cũ — nếu không,
+  // câu lỗi/aria-invalid vẫn treo trên màn hình trong khi chữ đã đổi, và gõ tiếp sẽ nối đuôi vào
+  // một số cũ không ai còn thấy (repro gốc: value=42, gõ 'abc', blur, focus lại → hiện '42' dù lỗi
+  // vẫn còn; gõ '7' → '427').
+  it('focus lại ô đang lỗi thì giữ nguyên chữ đã gõ, không bị nuốt về giá trị cũ (fix-1 S3)', async () => {
+    render(<NumberCell value={42} decimals={0} ariaLabel="x" />)
+    const o = screen.getByLabelText('x') as HTMLInputElement
+    await userEvent.click(o)
+    await userEvent.clear(o)
+    await userEvent.type(o, 'abc')
+    await userEvent.tab()
+    expect(o.value).toBe('abc')
+    await userEvent.click(o)
+    expect(o.value).toBe('abc')
+  })
+
+  // S4 (5 khẳng định vá 5 mutation N2–N7 của review — bullet 1 gộp N3+N4):
+
+  // N3 + đúng lúc: onCommit trước đây có ĐỘ PHỦ BẰNG 0 — xoá hẳn dòng gọi vẫn 15/15 xanh.
+  it('onCommit bắn đúng payload khi giá trị thật sự đổi (fix-1 S4/N3)', async () => {
+    const onCommit = vi.fn()
+    render(<NumberCell value={null} decimals={0} ariaLabel="x" onCommit={onCommit} />)
+    const o = screen.getByLabelText('x')
+    await userEvent.type(o, '500')
+    await userEvent.tab()
+    expect(onCommit).toHaveBeenCalledTimes(1)
+    expect(onCommit).toHaveBeenCalledWith({ value: 500, error: null })
+  })
+
+  // N4 + đúng lúc: onChange cũng có ĐỘ PHỦ BẰNG 0 trước đó.
+  it('onChange bắn mỗi lần gõ, với kết quả phân tích dở dang của lần gõ đó (fix-1 S4/N4)', async () => {
+    const onChange = vi.fn()
+    render(<NumberCell value={null} decimals={0} ariaLabel="x" onChange={onChange} />)
+    const o = screen.getByLabelText('x')
+    await userEvent.type(o, '5')
+    expect(onChange).toHaveBeenCalledWith({ value: 5, error: null })
+  })
+
+  // N5: `formatNumber(value, decimals)` → `formatNumber(value ?? 0, decimals)` phá thẳng ràng
+  // buộc toàn cục "null hiện —, không bao giờ hiện 0".
+  it('value=null hiện — lúc nghỉ và rỗng lúc focus, không bao giờ hiện 0 (fix-1 S4/N5)', async () => {
+    render(<NumberCell value={null} decimals={0} ariaLabel="x" />)
+    const o = screen.getByLabelText('x') as HTMLInputElement
+    expect(o.value).toBe('—')
+    await userEvent.click(o)
+    expect(o.value).toBe('')
+  })
+
+  // N6: `aria-describedby={loiId}` không điều kiện — không bao giờ gỡ dù đã hết lỗi.
+  it('sửa xong lỗi rồi blur thì gỡ hẳn aria-invalid và aria-describedby (fix-1 S4/N6)', async () => {
+    render(<NumberCell value={null} decimals={0} ariaLabel="x" />)
+    const o = screen.getByLabelText('x')
+    await userEvent.type(o, 'abc')
+    await userEvent.tab()
+    expect(o.getAttribute('aria-invalid')).toBe('true')
+    await userEvent.click(o) // S3: focus giữ nguyên 'abc' vì đang lỗi
+    await userEvent.clear(o)
+    await userEvent.type(o, '5')
+    await userEvent.tab()
+    expect(o.getAttribute('aria-invalid')).toBeNull()
+    expect(o.getAttribute('aria-describedby')).toBeNull()
+  })
+
+  // N7: `soThoDeSua` → `String(value)` làm mất dấu phẩy thập phân lúc focus — vòng focus→blur
+  // của một ô decimals=2 (đúng các dòng "Giờ công" B-1.x của FM01) chưa từng chạy trọn trong test
+  // nào trước vòng sửa này (ca focus/blur duy nhất của round 1 dùng decimals=0).
+  it('vòng focus→blur ở ô decimals=2 giữ đúng dấu phẩy thập phân (fix-1 S4/N7)', async () => {
+    render(<NumberCell value={12.35} decimals={2} ariaLabel="x" />)
+    const o = screen.getByLabelText('x') as HTMLInputElement
+    expect(o.value).toBe('12,35')
+    await userEvent.click(o)
+    expect(o.value).toBe('12,35')
+    await userEvent.tab()
+    expect(o.value).toBe('12,35')
+  })
+
+  // N2: bỏ `.trim()` khi tách dòng dán — khoảng trắng hai đầu mỗi dòng (C4 đòi cắt) lọt nguyên ra
+  // ngoài, mà chính `.trim()` cũng là thứ cứu `\r` thừa của Excel Windows.
+  it('.trim() khi tách dòng dán loại bỏ khoảng trắng hai đầu mỗi dòng (fix-1 S4/N2)', async () => {
+    const onPasteColumn = vi.fn()
+    render(<NumberCell value={null} decimals={0} ariaLabel="x" onPasteColumn={onPasteColumn} />)
+    const o = screen.getByLabelText('x')
+    await userEvent.click(o)
+    await userEvent.paste(' 10 \n 20 ')
+    expect(onPasteColumn).toHaveBeenCalledWith(['10', '20'])
+  })
+
+  // S6 (nhánh KHÔNG bắn — bổ sung cho ca "bắn đúng payload" ở trên): Tab ngang qua không sửa gì
+  // KHÔNG được tạo một lần "commit" giả — Task 23 (lưu-khi-rời-ô) sẽ đẻ một PUT rác cho mỗi ô đi
+  // qua nếu không có chốt này.
+  it('onCommit KHÔNG bắn khi blur mà không sửa gì (chỉ Tab ngang qua) (fix-1 S6)', async () => {
+    const onCommit = vi.fn()
+    render(<NumberCell value={5} decimals={0} ariaLabel="x" onCommit={onCommit} />)
+    const o = screen.getByLabelText('x')
+    await userEvent.click(o)
+    await userEvent.tab()
+    expect(onCommit).not.toHaveBeenCalled()
+  })
+
+  // S6 (biến thể nặng hơn từ review): ô có nhiều chữ số thập phân hơn `decimals` — đi ngang qua
+  // (không sửa) trước đây vẫn bắn `onCommit` với giá trị ĐÃ BỊ LÀM TRÒN theo hiển thị.
+  it('onCommit KHÔNG bắn khi đi ngang một ô có nhiều thập phân hơn decimals mà không sửa (fix-1 S6)', async () => {
+    const onCommit = vi.fn()
+    render(<NumberCell value={12.345} decimals={2} ariaLabel="x" onCommit={onCommit} />)
+    const o = screen.getByLabelText('x')
+    await userEvent.click(o)
+    await userEvent.tab()
+    expect(onCommit).not.toHaveBeenCalled()
+  })
+
+  // S7: trước đây chỉ dò '\n' nên chuỗi dán phân cách bằng '\r' đơn (không kèm '\n') dính ba số
+  // thành một, im lặng.
+  it('dán cột phân cách bằng \\r đơn (không kèm \\n) vẫn được nhận là dán cột (fix-1 S7)', async () => {
+    const onPasteColumn = vi.fn()
+    render(<NumberCell value={null} decimals={0} ariaLabel="x" onPasteColumn={onPasteColumn} />)
+    const o = screen.getByLabelText('x')
+    await userEvent.click(o)
+    await userEvent.paste('10\r20\r30')
+    expect(onPasteColumn).toHaveBeenCalledWith(['10', '20', '30'])
+  })
+
+  // S5a: dòng trắng THỪA Ở CUỐI (Excel luôn kết thúc vùng copy bằng xuống dòng) phải bị cắt —
+  // trước đây lọt ra thành '""', Task 22 sẽ phân tích thành null và xoá trắng dòng đích kế tiếp
+  // dù người dùng không hề chạm tới.
+  it('dòng trắng THỪA Ở CUỐI chuỗi dán bị cắt bỏ, không lọt ra thành "" (fix-1 S5)', async () => {
+    const onPasteColumn = vi.fn()
+    render(<NumberCell value={null} decimals={0} ariaLabel="x" onPasteColumn={onPasteColumn} />)
+    const o = screen.getByLabelText('x')
+    await userEvent.click(o)
+    await userEvent.paste('10\r\n20\r\n30\r\n')
+    expect(onPasteColumn).toHaveBeenCalledWith(['10', '20', '30'])
+  })
+
+  // S5b: dòng trắng Ở GIỮA có nghĩa khác hẳn đuôi thừa của phép tách ("ô này để trống") — PHẢI
+  // giữ nguyên, không được cắt theo cùng luật với S5a.
+  it('dòng trắng Ở GIỮA chuỗi dán vẫn giữ nguyên — khác đuôi thừa của phép tách (fix-1 S5)', async () => {
+    const onPasteColumn = vi.fn()
+    render(<NumberCell value={null} decimals={0} ariaLabel="x" onPasteColumn={onPasteColumn} />)
+    const o = screen.getByLabelText('x')
+    await userEvent.click(o)
+    await userEvent.paste('10\n\n20')
+    expect(onPasteColumn).toHaveBeenCalledWith(['10', '', '20'])
+  })
+
+  // S10: KHÔNG truyền onPasteColumn (chính hai test của brief render không có prop này) mà vẫn
+  // preventDefault() thì cú dán nhiều dòng bị nuốt im lặng, ô không nhận được gì và không có lời
+  // giải thích nào cho người dùng.
+  it('dán nhiều dòng khi KHÔNG có onPasteColumn thì không nuốt im lặng (fix-1 S10)', async () => {
+    render(<NumberCell value={null} decimals={0} ariaLabel="x" />)
+    const o = screen.getByLabelText('x') as HTMLInputElement
+    await userEvent.click(o)
+    await userEvent.paste('10\n20')
+    expect(o.value).not.toBe('')
+  })
+
+  // N1: bỏ guard `if (!dangFocus.current)` trong effect đồng bộ khiến nó ghi đè chữ người dùng
+  // ĐANG GÕ DỞ ngay khi `value` đổi từ ngoài trong lúc còn đang focus — ca "value đổi từ ngoài"
+  // hiện có không lộ ra vì nó không hề focus ô trước khi rerender.
+  it('đang gõ dở mà value đổi từ ngoài (còn focus) thì KHÔNG bị đè chữ đang gõ (fix-1 N1)', async () => {
+    const { rerender } = render(<NumberCell value={100} decimals={0} ariaLabel="x" />)
+    const o = screen.getByLabelText('x') as HTMLInputElement
+    await userEvent.click(o)
+    await userEvent.clear(o)
+    await userEvent.type(o, '55')
+    rerender(<NumberCell value={999} decimals={0} ariaLabel="x" />)
+    expect(o.value).toBe('55')
+  })
 })

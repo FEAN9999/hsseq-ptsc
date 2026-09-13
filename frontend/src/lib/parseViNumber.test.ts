@@ -47,4 +47,50 @@ describe('parseViNumber', () => {
     expect(r.value).toBeNull()
     expect(r.error).toBe('Số quá lớn, tối đa 16 chữ số phần nguyên')
   })
+
+  // task-21-fix-1.md S1 — LỖI NẶNG NHẤT của vòng nộp trước: bỏ MỌI dấu chấm vô điều kiện nên
+  // dấu chấm THẬP PHÂN kiểu en-US/Excel (không phải dấu ngăn hàng nghìn) bị nuốt luôn, nhân số
+  // lên âm thầm ×10/×100, và '.' đơn độc hoá thành 0 (phá thẳng ràng buộc "không bao giờ hiện
+  // 0"). Bốn giá trị này là "Test bắt buộc" nêu đích danh trong fix-1.md.
+  it.each([
+    ['1284500.00', 2],
+    ['0.5', 2],
+    ['1.23', 2],
+    ['.', 0],
+  ])('10. "%s" không khớp nhóm hàng nghìn vi-VN hợp lệ → lỗi, KHÔNG âm thầm nhân 10/100 (fix-1 S1)', (raw, decimals) => {
+    const r = parseViNumber(raw, decimals)
+    expect(r.value).toBeNull()
+    expect(r.error).toBe('Chỉ nhập số')
+  })
+
+  // Không thuộc "Test bắt buộc" của S1 nhưng cùng lỗ hổng: dấu chấm đứng riêng không có chữ số
+  // đứng trước ('.5') cũng phải lỗi, không được hiểu ngầm là "0.5".
+  it('10b. ".5" (chấm đứng đầu, không có chữ số phần nguyên) cũng báo lỗi (fix-1 S1)', () => {
+    const r = parseViNumber('.5', 1)
+    expect(r.value).toBeNull()
+    expect(r.error).toBe('Chỉ nhập số')
+  })
+
+  // Số ÂM viết bằng nhóm hàng nghìn hợp lệ vẫn phải báo ĐÚNG lỗi "âm" (không lệch sang "Chỉ nhập
+  // số") — S1 thêm dấu `-?` tuỳ chọn vào đầu mẫu so với nguyên văn regex nêu trong fix-1.md (chỉ
+  // `/^\d{1,3}(\.\d{3})+(,\d+)?$/`, không có dấu trừ) để tránh việc chặn nhầm số âm hợp lệ về mặt
+  // ngữ pháp thành đúng lỗi mà brief test 6 đã khẳng định phải là 'Số không được âm'. Ghi rõ trong
+  // report mục 4 (Vòng sửa 1) — đây là chỗ tôi tự nới thêm so với văn bản gốc.
+  it('10c. số âm viết bằng nhóm hàng nghìn hợp lệ báo ĐÚNG lỗi "âm", không lẫn sang "Chỉ nhập số" (quyết định tự đưa ra khi vá S1)', () => {
+    const r = parseViNumber('-1.284.500', 0)
+    expect(r.value).toBeNull()
+    expect(r.error).toBe('Số không được âm')
+  })
+
+  // task-21-review.md N8 — reviewer đo mutation ".replace(',', '.')" → ".replace(/,/g, '.')"
+  // "sống" vì không ca nào có ≥2 dấu phẩy. Thêm ca này cho HÀNH VI thật (nhiều dấu phẩy phải lỗi,
+  // không được âm thầm ghép nhầm số) — nhưng đã CHỨNG MINH bằng thực nghiệm (xem task-21-report.md
+  // mục "Vòng sửa 1"): với ≥2 dấu phẩy, "chỉ đổi dấu đầu" và "đổi mọi dấu" luôn cho CÙNG kết quả
+  // (dấu phẩy thừa sót lại hoặc ≥2 dấu chấm đều làm Number() ra NaN như nhau) — nên ca này không
+  // thể phân biệt hai cách viết đó; N8 là một dead mutant thật, không phải lỗ hổng bị bỏ sót.
+  it('11. nhiều hơn một dấu phẩy trong chuỗi báo lỗi, không âm thầm ghép nhầm số (task-21-review.md N8)', () => {
+    const r = parseViNumber('12,34,56', 2)
+    expect(r.value).toBeNull()
+    expect(r.error).toBe('Chỉ nhập số')
+  })
 })
