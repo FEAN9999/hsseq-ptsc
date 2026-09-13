@@ -93,6 +93,11 @@ export function useKeyboardNav(luoiRef: RefObject<HTMLElement | null>, onLuu: ()
       const o = e.target
       // Enter/↑/↓/Esc CHỈ áp cho ô số. Trong textarea nhóm C, Enter phải giữ mặc định (xuống
       // dòng) — thiết kế nói thẳng điều này.
+      // `cotCuaO(o) === null` KHÔNG thừa dù hôm nay không đầu vào nào phân biệt được (đo: 109/109
+      // ô đều nằm trong `td[data-cot]`, 3 ô nhóm C là `<textarea>` đã bị canh `instanceof` chặn).
+      // `luoiRef` gắn ở div bọc CẢ form, nên `<dialog>` nhập lý do trả lại của Task 24 render bên
+      // trong sẽ có `<input>` ngoài lưới — không có canh này thì Esc trong ô đó bị nhánh Esc dưới
+      // đây nuốt mất `preventDefault` và dialog không đóng được.
       if (!(o instanceof HTMLInputElement) || cotCuaO(o) === null) return
 
       if (e.key === 'Enter' || e.key === 'ArrowDown' || e.key === 'ArrowUp') {

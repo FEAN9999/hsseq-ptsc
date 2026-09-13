@@ -34,11 +34,30 @@ export function maNeo(ma: string): string {
   return ma.replace(/\./g, '-')
 }
 
+/** Câu báo kết quả lần dán cột gần nhất; `null` khi lần dán vừa rồi trọn vẹn (hoặc chưa dán lần
+ * nào). Hai nguyên nhân được nói RIÊNG (fix-2 F1): dòng không đọc được thì nêu tên được mã và ô
+ * đích còn giữ số cũ; dòng tràn khỏi cuối lưới thì không có ô đích nào cả, chỉ đếm được. */
+function cauBaoDan(boQua: string[], tran: number): string | null {
+  if (boQua.length === 0 && tran === 0) return null
+  const ve: string[] = []
+  if (boQua.length > 0) {
+    const con = boQua.length - MA_HIEN_TOI_DA
+    const ds = boQua.slice(0, MA_HIEN_TOI_DA).join(', ') + (con > 0 ? `, +${con}` : '')
+    // `boQua.length` là TỔNG THẬT, không phải độ dài danh sách đã cắt — hai con số chọi nhau
+    // ("bỏ qua 8 dòng … +12") còn tệ hơn không báo.
+    ve.push(`bỏ qua ${boQua.length} dòng không đọc được (${ds})`)
+  }
+  if (tran > 0) ve.push(`${tran} dòng vượt ngoài bảng`)
+  if (boQua.length > 0) ve.push('ô đích giữ nguyên số cũ')
+  return `Dán: ${ve.join(' · ')}`
+}
+
 export function FormModeBar({
   chuyenDuoc,
   suaDuoc,
   thieuBatBuoc,
   boQuaKhiDan,
+  tranKhiDan,
   soDemLech,
   onLuu,
   onChuyenTrangThai,
@@ -52,20 +71,19 @@ export function FormModeBar({
    * thứ tự ưu tiên vì nó là thứ vừa xảy ra dưới tay người dùng; "thiếu ô bắt buộc" và "bộ đếm
    * lệch" đã nằm đó sẵn từ trước cú dán. */
   boQuaKhiDan: string[]
+  /** Số dòng tràn khỏi cuối lưới ở lần dán gần nhất (fix-2 F1). */
+  tranKhiDan: number
   soDemLech: number
   onLuu: () => void
   onChuyenTrangThai: (chuyen: ChuyenTrangThai) => void
 }) {
   const hienThi = thieuBatBuoc.slice(0, MA_HIEN_TOI_DA)
+  const cauDan = cauBaoDan(boQuaKhiDan, tranKhiDan)
   return (
     <div className="sticky bottom-0 -mx-6 -mb-6 mt-3 flex items-center justify-between gap-4 bg-surface border-t border-hair px-5 py-3 text-table">
       <div>
-        {boQuaKhiDan.length > 0 ? (
-          <span className="text-warning">
-            Dán: bỏ qua {boQuaKhiDan.length} dòng không đọc được ({boQuaKhiDan.slice(0, MA_HIEN_TOI_DA).join(', ')}
-            {boQuaKhiDan.length > MA_HIEN_TOI_DA ? `, +${boQuaKhiDan.length - MA_HIEN_TOI_DA}` : ''}) · ô đích giữ
-            nguyên số cũ
-          </span>
+        {cauDan !== null ? (
+          <span className="text-warning">{cauDan}</span>
         ) : thieuBatBuoc.length > 0 ? (
           <span className="text-danger">
             Thiếu {thieuBatBuoc.length} ô bắt buộc:{' '}

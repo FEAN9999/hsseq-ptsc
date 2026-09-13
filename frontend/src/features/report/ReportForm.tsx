@@ -151,12 +151,17 @@ interface TrangThaiForm {
    * chắc chắn nhất để người nhập tưởng hệ thống hỏng: họ dán một cột Excel bản en-US
    * ("402100.00") và KHÔNG có gì xảy ra. */
   boQuaKhiDan: string[]
+  /** Số dòng của lần dán gần nhất TRÀN khỏi cuối lưới (fix-2 F1). Đếm riêng, KHÔNG gộp vào
+   * `boQuaKhiDan`: hai nguyên nhân khác hẳn nhau, và dòng tràn không có mã chỉ tiêu nào để nêu
+   * tên — chỉ đếm được. Dán 60 dòng bắt đầu từ B-8.1 thì phần thừa cũng bị nuốt im lặng y như
+   * dòng không đọc được, đúng lớp lỗi S1 sinh ra để diệt. */
+  tranKhiDan: number
   xungDot: { detail: string; tuPhienBan: number; denPhienBan: number } | null
 }
 
 type HanhDongForm =
   | { type: 'nhap-o'; ma: string; cot: Cell; value: number | null }
-  | { type: 'dan-xong'; boQua: string[] }
+  | { type: 'dan-xong'; boQua: string[]; tran: number }
   | { type: 'ghi-chu'; ma: string; noiDung: string }
   | { type: 'chu'; ma: string; noiDung: string }
   | { type: 'bam-nop' }
@@ -173,7 +178,7 @@ function khoiTao(chiTiet: ChiTietBaoCao): TrangThaiForm {
   }
   const chu: Record<string, string> = {}
   for (const [ma, noiDung] of Object.entries(chiTiet.texts)) chu[ma] = noiDung ?? ''
-  return { version: chiTiet.version, nhap, ghiChu, chu, server, daBamNop: false, boQuaKhiDan: [], xungDot: null }
+  return { version: chiTiet.version, nhap, ghiChu, chu, server, daBamNop: false, boQuaKhiDan: [], tranKhiDan: 0, xungDot: null }
 }
 
 function rutGon(s: TrangThaiForm, h: HanhDongForm): TrangThaiForm {
@@ -185,10 +190,15 @@ function rutGon(s: TrangThaiForm, h: HanhDongForm): TrangThaiForm {
       // `boQuaKhiDan: []`: gõ tay là thao tác MỚI, kết quả lần dán trước thôi là chuyện đang xảy
       // ra. `danCot` bắn hết `nhap-o` RỒI mới bắn `dan-xong`, nên dòng này không xoá mất thông
       // điệp của chính lần dán đó.
-      return { ...s, boQuaKhiDan: [], nhap: { ...s.nhap, [h.ma]: { ...cu, [h.cot]: h.value } } }
+      return {
+        ...s,
+        boQuaKhiDan: [],
+        tranKhiDan: 0,
+        nhap: { ...s.nhap, [h.ma]: { ...cu, [h.cot]: h.value } },
+      }
     }
     case 'dan-xong':
-      return { ...s, boQuaKhiDan: h.boQua }
+      return { ...s, boQuaKhiDan: h.boQua, tranKhiDan: h.tran }
     case 'ghi-chu':
       return { ...s, ghiChu: { ...s.ghiChu, [h.ma]: h.noiDung } }
     case 'chu':
@@ -388,9 +398,14 @@ export function ReportForm({ mau, chiTiet, xungDot, onLuu, onChuyenTrangThai }: 
     const dsNhap = mau.indicators.filter((ct) => cellPolicy(ct.agg_type as AggType)[cot] === 'input')
     const bd = dsNhap.findIndex((ct) => ct.code === maBatDau)
     const boQua: string[] = []
+    let tran = 0
     dong.forEach((chuoi, i) => {
       const ct = dsNhap[bd + i]
-      if (ct === undefined) return // dán dài hơn số dòng còn lại: bỏ phần thừa
+      // Dán dài hơn số dòng còn lại: phần thừa không có ô nào để vào — đếm rồi nói ra (fix-2 F1).
+      if (ct === undefined) {
+        tran += 1
+        return
+      }
       const { value, error } = parseViNumber(chuoi, ct.decimals)
       // Dòng không đọc được thì GIỮ NGUYÊN ô đích. Ghi `null` đè lên số cũ là xoá dữ liệu vì một
       // ô rác trong vùng copy — dòng TRỐNG thì khác, `parseViNumber('')` trả null không lỗi và
@@ -398,8 +413,8 @@ export function ReportForm({ mau, chiTiet, xungDot, onLuu, onChuyenTrangThai }: 
       if (error === null) dispatch({ type: 'nhap-o', ma: ct.code, cot, value })
       else boQua.push(ct.code)
     })
-    // Bắn CẢ KHI không bỏ qua dòng nào: đó là cách xoá thông điệp của lần dán trước.
-    dispatch({ type: 'dan-xong', boQua })
+    // Bắn CẢ KHI lần dán này trọn vẹn: đó là cách xoá thông điệp của lần dán trước.
+    dispatch({ type: 'dan-xong', boQua, tran })
   }
 
   function bamChuyenTrangThai(c: ChuyenTrangThai) {
@@ -552,6 +567,7 @@ export function ReportForm({ mau, chiTiet, xungDot, onLuu, onChuyenTrangThai }: 
         suaDuoc={suaDuoc}
         thieuBatBuoc={thieuBatBuoc}
         boQuaKhiDan={s.boQuaKhiDan}
+        tranKhiDan={s.tranKhiDan}
         soDemLech={soDemLech}
         onLuu={luu}
         onChuyenTrangThai={bamChuyenTrangThai}
