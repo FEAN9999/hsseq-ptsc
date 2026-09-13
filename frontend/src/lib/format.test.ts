@@ -23,6 +23,13 @@ describe('format', () => {
     expect(r.text).toBe('quá hạn 2 ngày')
   })
 
+  // task-16-fix-brief.md F8: hạn là 23:59:59 giờ VN của chính hôm nay nên còn trọn ngày —
+  // "còn 0 ngày" đọc như đã hết hạn. Chỉ ca soNgay===0 đổi thành "hạn hôm nay".
+  it('hạn đúng hôm nay thì hiện "hạn hôm nay", không phải "còn 0 ngày"', () => {
+    const r = formatDue('2026-09-09T16:59:59Z', new Date('2026-09-09T03:00:00Z'))
+    expect(r.text).toBe('hạn hôm nay')
+  })
+
   it('số theo vi-VN, dấu chấm ngăn ngàn', () => {
     expect(formatNumber(1284500, 0)).toBe('1.284.500')
     expect(formatNumber(12.5, 2)).toBe('12,50')
@@ -30,5 +37,11 @@ describe('format', () => {
 
   it('null hiện — chứ không hiện 0', () => {
     expect(formatNumber(null, 0)).toBe('—')
+  })
+
+  // task-16-fix-brief.md F7: hiệu số của dòng computed có thể ra -0 (số học hợp lệ) —
+  // Intl.NumberFormat nhìn dấu bit nên .format(-0) ra "-0", sai khi hiện lên màn hình.
+  it('-0 hiện "0", không hiện "-0"', () => {
+    expect(formatNumber(-0, 0)).toBe('0')
   })
 })

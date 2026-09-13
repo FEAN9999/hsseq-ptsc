@@ -31,9 +31,16 @@ describe('cellPolicy: ma trận agg_type × 3 cột', () => {
     })
   })
 
-  it('agg_type lạ (giai đoạn 2) thì khoá ô và cảnh báo, không vỡ trang', () => {
+  // task-16-fix-brief.md F3: MAC_DINH_AN_TOAN tồn tại để khoá HẾT 3 cột, không riêng
+  // thisPeriod — bản cũ chỉ khẳng định .thisPeriod, mở accTotal thành 'input' trong khối đó
+  // vẫn 18/18 xanh (lỗi đúng chiều nguy hiểm: loại lạ mà mở được ô nhập). Khẳng định đủ hình
+  // dạng để đột biến đó phải đỏ.
+  it('agg_type lạ (giai đoạn 2) thì khoá cả 3 cột và cảnh báo, không vỡ trang', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    expect(cellPolicy('ratio' as never).thisPeriod).toBe('derived')
+    expect(cellPolicy('ratio' as never)).toEqual({
+      accPrev: 'derived', thisPeriod: 'derived', accTotal: 'derived',
+      requiredCell: null,
+    })
     expect(warn).toHaveBeenCalled()
   })
 })

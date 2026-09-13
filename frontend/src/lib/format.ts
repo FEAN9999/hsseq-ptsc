@@ -34,8 +34,9 @@ export function formatDateTime(iso: string): string {
 }
 
 /** Chỉ số ngày lịch (theo giờ VN) của một thời điểm — dùng để trừ ra số NGÀY LỊCH,
- * không trừ mili-giây (hai thời điểm cách nhau dưới 24h vẫn có thể khác ngày lịch VN,
- * và ngược lại cách nhau hơn 24h vẫn có thể cùng say số ngày chênh lệch mong đợi). */
+ * không trừ mili-giây: khoảng cách tính bằng mili-giây và khoảng cách tính bằng ngày lịch là
+ * hai đại lượng khác nhau (23:59 và 00:01 hôm sau chỉ cách nhau 2 phút nhưng khác ngày lịch;
+ * ngược lại 00:01 và 23:59 CÙNG một ngày cách nhau gần 24h nhưng lệch 0 ngày lịch). */
 function chiSoNgayVN(d: Date): number {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: MUI_GIO_VN,
@@ -48,20 +49,30 @@ function chiSoNgayVN(d: Date): number {
 }
 
 /** Hạn nộp: đếm theo NGÀY LỊCH giờ Việt Nam, không đếm mili-giây (xem task-16-carry.md C2).
- * `text` là câu đếm ngược/đếm xuôi để hiện trực tiếp; `title` là mốc tuyệt đối để hiện khi hover. */
+ * `text` là câu đếm ngược/đếm xuôi để hiện trực tiếp; `title` là mốc tuyệt đối để hiện khi hover.
+ *
+ * task-16-fix-brief.md F8: hạn là 23:59:59 giờ VN của CHÍNH ngày đó nên khi `soNgay === 0`
+ * người dùng còn trọn ngày — "còn 0 ngày" đọc như đã hết hạn trong khi thật ra chưa, và đây
+ * lại đúng là chuỗi được đọc dưới áp lực nhất. Chỉ ca này đổi thành "hạn hôm nay"; "còn 1 ngày"
+ * trở lên đọc bình thường, không đổi. */
 export function formatDue(iso: string, now: Date): { text: string; title: string } {
   const due = new Date(iso)
   const soNgay = chiSoNgayVN(due) - chiSoNgayVN(now)
-  const text = soNgay >= 0 ? `còn ${soNgay} ngày` : `quá hạn ${-soNgay} ngày`
+  const text = soNgay === 0 ? 'hạn hôm nay' : soNgay > 0 ? `còn ${soNgay} ngày` : `quá hạn ${-soNgay} ngày`
   return { text, title: `Hạn nộp: ${formatDateTime(iso)}` }
 }
 
 /** Số theo vi-VN: dấu chấm ngăn ngàn, dấu phẩy ngăn thập phân. `null` hiện dấu gạch —
- * không hiện "0", vì ô trống và ô nhập 0 mang ý nghĩa khác nhau trong báo cáo HSEQ. */
+ * không hiện "0", vì ô trống và ô nhập 0 mang ý nghĩa khác nhau trong báo cáo HSEQ.
+ *
+ * task-16-fix-brief.md F7: hiệu số của dòng computed có thể ra `-0` (số học hợp lệ, `-0 === 0`
+ * là `true`) — nhưng `Intl.NumberFormat` nhìn vào DẤU BIT của số chứ không phải giá trị so
+ * sánh, nên `.format(-0)` ra `"-0"`. Ép về `0` (literal, luôn là +0) trước khi format. */
 export function formatNumber(n: number | null, decimals: number): string {
   if (n === null) return '—'
+  const nSach = n === 0 ? 0 : n
   return new Intl.NumberFormat('vi-VN', {
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,
-  }).format(n)
+  }).format(nSach)
 }
