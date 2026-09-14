@@ -30,6 +30,11 @@ export function useUnits(period: string) {
 
   return {
     items: query.data ?? [],
+    // Vòng sửa 2 (task-25-fix-2.md P1/B-01): `items` đã mặc định `[]` nên không đủ để Dashboard.tsx
+    // phân biệt "chưa có dữ liệu" với "mảng rỗng thật" — cần `data` THÔ (chỉ `undefined` trước lần
+    // tải thành công ĐẦU TIÊN; sau đó `keepPreviousData` giữ nó có giá trị mãi, kể cả khi một lượt
+    // refetch nền hỏng) để ghép cùng `isError` chặn lỗi nền phá màn hình đang có dữ liệu.
+    data: query.data,
     isLoading: query.isLoading,
     isError: query.isError,
     // Vòng sửa 1 (task-25-fix-1.md A4) — cùng lý do useSummary.ts: cần đối tượng lỗi để Dashboard

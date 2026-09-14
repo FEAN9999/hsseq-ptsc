@@ -17,14 +17,24 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createMemoryRouter } from 'react-router-dom'
 
 import { App, routeObjects } from './routes'
+import { queryClient } from './queryClient'
 import { useToast } from '../components/ui/Toast'
 import { useSession } from './session'
 
 // Login.tsx tự gọi fetch('/health') lúc mount (carry C2) — stub để mọi lần dựng /login trong file
 // này thấy fetch trả lời ngay, không đợi thật chuỗi thử lại 5s×2 của brief Task 19.
+//
+// Vòng sửa 2 (task-25-fix-2.md P4/C2, task-25-rereview-1.md mục 8 [NHẸ]): `App` (routes.tsx:78)
+// bọc bằng ĐÚNG singleton `queryClient` sản xuất (không phải QueryClient riêng của từng test như
+// Dashboard.test.tsx) — CỐ Ý (bình luận đầu file: "chạy ĐÚNG cây thật"), nhưng thiếu dòng `.clear()`
+// này thì cache SỐNG SÓT giữa các `it()` trong CHÍNH file này (cùng module, `staleTime: 30_000`)
+// — một ca sau có thể xanh nhờ dữ liệu CACHE của ca trước, dù fetch của chính nó không hề chạy.
+// Không dựng lại kiến trúc test của file (vẫn dùng đúng singleton) — chỉ đảm bảo mỗi ca bắt đầu
+// từ cache RỖNG.
 beforeEach(() => {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ status: 'ok' }) }))
   useSession.getState().logout()
+  queryClient.clear()
 })
 
 function duong(initialPath: string) {
@@ -97,32 +107,36 @@ describe('bảng route', () => {
         { id: 1, code: 'HO', name: 'Ban ATCL' },
         ['dashboard.view'],
       )
-    vi.stubGlobal(
-      'fetch',
-      vi.fn((url: string) => {
-        if (url.includes('/dashboard/summary')) {
-          return Promise.resolve({
-            ok: true,
-            status: 200,
-            json: async () => ({
-              period_key: '2026-08',
-              reporting_units: 22,
-              approved_count: 0,
-              submitted_count: 0,
-              missing_units: [],
-              kpis: [],
-            }),
-          })
-        }
-        if (url.includes('/dashboard/units')) {
-          return Promise.resolve({ ok: true, status: 200, json: async () => [] })
-        }
-        return Promise.resolve({ ok: true, status: 200, json: async () => ({ status: 'ok' }) })
-      }),
-    )
+    const f = vi.fn((url: string) => {
+      if (url.includes('/dashboard/summary')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            period_key: '2026-08',
+            reporting_units: 22,
+            approved_count: 0,
+            submitted_count: 0,
+            missing_units: [],
+            kpis: [],
+          }),
+        })
+      }
+      if (url.includes('/dashboard/units')) {
+        return Promise.resolve({ ok: true, status: 200, json: async () => [] })
+      }
+      return Promise.resolve({ ok: true, status: 200, json: async () => ({ status: 'ok' }) })
+    })
+    vi.stubGlobal('fetch', f)
     duong('/dashboard')
     expect(await screen.findByText('Dashboard SKATMT')).toBeTruthy()
     expect(screen.getByText('Đăng xuất')).toBeTruthy()
+    // Vòng sửa 2 (task-25-fix-2.md P4/C2, task-25-rereview-1.md mục 8 [NHẸ]): tự vệ ĐỘC LẬP với
+    // `queryClient.clear()` ở `beforeEach` trên — "Dashboard SKATMT" tự vẽ ngay cả khi CHƯA có dữ
+    // liệu (carry ghi ở ca N26 trên), nên riêng khẳng định <h1> không buộc fetch của CHÍNH ca này
+    // phải thực sự chạy (một cache cũ sống sót vẫn đủ cho hai dòng expect ở trên). Khoá thêm CHÍNH
+    // request đã bay lên, để nếu ai lỡ xoá dòng `.clear()` kia thì ca này tự đỏ thay vì xanh giả.
+    expect(f.mock.calls.some(([u]) => String(u).includes('/dashboard/summary'))).toBe(true)
   })
 
   // S1 + S1a (vòng sửa 1 Task 20, task-20-fix-1.md, "Test bắt buộc cho S1" #1): trước bản vá này,

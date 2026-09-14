@@ -69,7 +69,16 @@ export function Dashboard() {
     )
   }
 
-  if (summary.isError || units.isError) {
+  // Vòng sửa 2 (task-25-fix-2.md P1/B-01, task-25-rereview-1.md B-01 [NẶNG] — LẦN THỨ BA của cùng
+  // lớp lỗi: Task 20 (/auth/me 503 đăng xuất một phiên còn hợp lệ), Task 23 (refetch nền hỏng xoá
+  // sạch reducer, task-23-fix-1 F1). `&& chưa có dữ liệu` KHÔNG thừa: `refetchOnWindowFocus` đang
+  // BẬT toàn cục (app/queryClient.ts), nên một lượt làm mới NỀN hỏng khi `data` cũ còn nguyên
+  // trong cache vẫn làm `isError = true`. Kiểm `isError` TRƯỚC `data` sẽ thay cả bảng 22 đơn vị,
+  // 6 ô KPI và dòng bao phủ ĐANG ĐÚNG bằng `InlineError` vì một cú 502 của Render free — người
+  // đang đọc số mất hết chỉ vì rời tab rồi quay lại. LỖI NỀN KHÔNG ĐƯỢC PHÁ MÀN HÌNH ĐANG CÓ DỮ
+  // LIỆU. 403 ở trên vẫn thay cả trang vì đó là kết luận, không phải trục trặc tạm thời — khuôn
+  // chép nguyên `ReportDetail.tsx:67`.
+  if ((summary.isError || units.isError) && (summary.data === undefined || units.data === undefined)) {
     return (
       <div>
         <TieuDe period={period} onChange={doiKy} />

@@ -70,7 +70,15 @@ export function useReportList() {
     xemTatCa,
     setXemTatCa,
     isLoading: query.isLoading,
-    isError: query.isError,
+    // Vòng sửa 2 Task 25 (task-25-fix-2.md P1b, task-25-rereview-1.md B-01/M-01): CÙNG LỚP LỖI đã
+    // vá ở Dashboard.tsx và ReportDetail.tsx (task-23-fix-1 F1) — LỖI NỀN KHÔNG ĐƯỢC PHÁ MÀN HÌNH
+    // ĐANG CÓ DỮ LIỆU (Task 20: /auth/me 503 đăng xuất một phiên còn hợp lệ; Task 23: refetch nền
+    // hỏng xoá sạch reducer). `Reports.tsx` chỉ đọc `isError` (boolean) để quyết định thay cả danh
+    // sách bằng `InlineError` — một lượt `refetchOnWindowFocus` hỏng khi `data` cũ còn nguyên
+    // trong cache vẫn làm `query.isError = true`, xoá mất danh sách ĐANG ĐÚNG trên màn hình. Gấp
+    // điều kiện `&& data === undefined` NGAY ở ĐÂY (không phải ở `Reports.tsx`) để trang giữ nguyên
+    // ý nghĩa "isError" = "không có gì để hiện" — `Reports.tsx` không cần đổi dòng nào.
+    isError: query.isError && query.data === undefined,
     refetch: query.refetch,
   }
 }

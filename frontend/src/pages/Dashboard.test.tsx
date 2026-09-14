@@ -29,6 +29,7 @@ import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-rou
 import { Dashboard } from './Dashboard'
 import { KpiTile } from '../features/dashboard/KpiTile'
 import type { UnitRow } from '../features/dashboard/useUnits'
+import { queryClient as queryClientSanXuat } from '../app/queryClient'
 
 beforeEach(() => {
   vi.unstubAllGlobals()
@@ -154,6 +155,12 @@ describe('/dashboard', () => {
     const coverage = await screen.findByText(/Chưa có báo cáo được duyệt/)
     expect(coverage.textContent).toBe('Chưa có báo cáo được duyệt · Đã nộp 2/22 · Chờ duyệt 2 · Chưa nộp 1')
     expect(screen.queryByText('0')).toBeNull()
+    // Vòng sửa 2 (task-25-fix-2.md P6-P10/M-11+M-32, task-25-rereview-1.md mục 9 [NHẸ]): nhánh
+    // `approvedCount === 0` (Coverage.tsx) — bỏ `mb-5` (M-11, mất khoảng cách dưới dòng coverage,
+    // đẩy sát lưới KPI) hoặc đổi `text-sec` thành `text-ink` (M-32, mất tín hiệu "đây là dòng phụ,
+    // không phải nội dung chính") đều vẫn xanh vì không ca nào đọc class của CHÍNH nhánh này.
+    expect(coverage.className).toContain('mb-5')
+    expect(coverage.className).toContain('text-sec')
   })
 
   it('LTI > 0 thì ô đỏ', async () => {
@@ -222,6 +229,41 @@ describe('/dashboard', () => {
     expect(chuaNop.getAttribute('aria-disabled')).toBe('true')
   })
 
+  // Vòng sửa 2 (task-25-fix-2.md P6-P10/M-51, task-25-rereview-1.md M-51 [NHẸ]): carry C1
+  // (UnitsTable.tsx:9-11) nói nguồn chân lý cho "dòng bấm được" là `report_id !== null`, KHÔNG
+  // phải `state !== null` — hai thứ trùng nhau ở MỌI fixture hiện có (DEFAULT_UNITS,
+  // DON_VI_CHUA_NOP) nên không ca nào phân biệt được nếu UnitsTable.tsx lỡ đổi điều kiện
+  // `coBaoCao` sang đọc `state`. Dựng MỘT dòng lệch cố ý (state khác null, report_id null) để
+  // khoá đúng quyết định carry C1 — lỗ phủ test thuần tuý, mã sản phẩm đã đúng từ trước.
+  it('carry C1: state khác null nhưng report_id null thì DÒNG VẪN không bấm được (M-51)', async () => {
+    const donViLa: UnitRow = {
+      org_unit: { code: 'U23', name: 'Đơn vị lạ' },
+      gio_cong: 50,
+      lti: 1,
+      fat: 1,
+      near_miss: 1,
+      hazob: 1,
+      gio_an_toan_tu_lti_cuoi: 500,
+      state: 'approved', // khác null — nhưng report_id null bên dưới mới là thứ QUYẾT ĐỊNH
+      report_id: null,
+    }
+    const f = vi.fn((url: string) => {
+      if (url.includes('/dashboard/summary')) {
+        return Promise.resolve({ ok: true, status: 200, json: async () => DEFAULT_SUMMARY })
+      }
+      if (url.includes('/dashboard/units')) {
+        return Promise.resolve({ ok: true, status: 200, json: async () => [donViLa] })
+      }
+      throw new Error(`URL không lường trước trong test: ${url}`)
+    })
+    vi.stubGlobal('fetch', f)
+    renderDashboard()
+
+    const dong = (await screen.findByText('Đơn vị lạ')).closest('tr')!
+    expect(dong.getAttribute('aria-disabled')).toBe('true')
+    expect(within(dong).queryByTestId('lti-U23')).toBeNull()
+  })
+
   it('đổi kỳ giữ dữ liệu cũ trong lúc tải (keepPreviousData), không nháy skeleton', async () => {
     moiApi()
     renderDashboard()
@@ -239,6 +281,25 @@ describe('/dashboard', () => {
       expect(urls.some((u) => u.includes('/dashboard/summary') && u.includes('period=2026-07'))).toBe(true)
       expect(urls.some((u) => u.includes('/dashboard/units') && u.includes('period=2026-07'))).toBe(true)
     })
+  })
+
+  // Vòng sửa 2 (task-25-fix-2.md P6-P10/M-47, task-25-rereview-1.md mục 9 [NHẸ]): đổi
+  // `key={row.org_unit.code}` (UnitsTable.tsx, Dong) thành `key={Math.random()}` vẫn xanh — mọi
+  // ca hiện có chỉ đọc TEXT/class sau khi render lại, không ca nào chứng minh React THỰC SỰ TÁI
+  // SỬ DỤNG đúng node DOM cũ (key không ổn định thì React huỷ+dựng lại node dù dữ liệu dòng không
+  // đổi). Đo bằng chính THAM CHIẾU node DOM: đổi kỳ trong lúc request mới còn treo khiến
+  // `keepPreviousData` giữ NGUYÊN mảng `rows` cũ (cùng `org_unit.code`) — key ổn định thì React
+  // tái dùng ĐÚNG node cũ (cùng tham chiếu), key đổi mỗi lần render (Math.random()) thì không.
+  it('key theo mã đơn vị ổn định: đổi kỳ (keepPreviousData) không dựng lại DOM node của dòng (M-47)', async () => {
+    moiApi()
+    renderDashboard()
+    await screen.findByText('PTSC Đình Vũ')
+    const dongTruoc = screen.getByText('Đơn vị U05').closest('tr')!
+    moiApiCham() // request kỳ mới treo — buộc re-render với rows CŨ (keepPreviousData)
+    await userEvent.click(screen.getByRole('button', { name: '‹ 07/2026' }))
+    expect(screen.queryByTestId('skeleton')).toBeNull() // đã re-render thật, không còn ở lần tải đầu
+    const dongSau = screen.getByText('Đơn vị U05').closest('tr')!
+    expect(dongSau).toBe(dongTruoc)
   })
 
   it('nút kỳ sau hiện đúng "09/2026 ›" và bấm vào đổi đúng period', async () => {
@@ -298,6 +359,16 @@ describe('/dashboard', () => {
     expect(await screen.findAllByRole('columnheader')).toHaveLength(8)
   })
 
+  // Vòng sửa 2 (task-25-fix-2.md P6-P10/M-43, task-25-rereview-1.md mục 7 [NHẸ]): ca trên chỉ
+  // đếm `columnheader` (8 <th> của `<thead>`) — thêm một `<td>` thứ 9 thừa vào MỖI dòng thân bảng
+  // vẫn xanh vì không ca nào đếm `cell` của một DÒNG THÂN cụ thể.
+  it('mỗi dòng thân bảng đúng 8 ô, không thừa/thiếu (M-43)', async () => {
+    moiApi()
+    renderDashboard()
+    const dong = (await screen.findByText('Đơn vị U05')).closest('tr')!
+    expect(within(dong).getAllByRole('cell')).toHaveLength(8)
+  })
+
   // Vòng sửa 1 (task-25-fix-1.md A5-a, review mục 11 "a"): bản vẽ đặt class="num" (canh PHẢI)
   // lên đúng 6 <th> cột số — "Đơn vị"/"Trạng thái" canh trái như cũ.
   it('6 tiêu đề cột SỐ canh phải, "Đơn vị"/"Trạng thái" canh trái (A5-a)', async () => {
@@ -310,6 +381,19 @@ describe('/dashboard', () => {
     }
     expect(oCot('Đơn vị').className).not.toContain('text-right')
     expect(oCot('Trạng thái').className).not.toContain('text-right')
+  })
+
+  // Vòng sửa 2 (task-25-fix-2.md P6-P10/M-15, task-25-rereview-1.md mục 7 [NHẸ]): A5-a ở trên
+  // chỉ khoá canh phải của TIÊU ĐỀ cột — bỏ `text-right` khỏi `O_SO` (áp cho `<td>` thân bảng,
+  // UnitsTable.tsx) vẫn xanh vì không ca nào đọc class của chính Ô SỐ trong thân bảng.
+  it('các ô SỐ trong thân bảng canh phải, không chỉ tiêu đề (M-15)', async () => {
+    moiApi()
+    renderDashboard()
+    const dong = (await screen.findByText('Đơn vị U05')).closest('tr')!
+    const oCells = within(dong).getAllByRole('cell')
+    for (const o of oCells.slice(1, 7)) expect(o.className).toContain('text-right')
+    expect(oCells[0].className).not.toContain('text-right')
+    expect(oCells[7].className).not.toContain('text-right')
   })
 
   // Vòng sửa 1 (task-25-fix-1.md A5-c, review mục 11 "c"): bản vẽ làm MỜ CẢ DÒNG "Chưa nộp"
@@ -325,6 +409,16 @@ describe('/dashboard', () => {
     const dongDaDuyet = screen.getByText('Đơn vị U05').closest('tr')!
     const oDaDuyet = within(dongDaDuyet).getAllByRole('cell')
     for (const o of oDaDuyet) expect(o.className).not.toContain('text-sec')
+  })
+
+  // Vòng sửa 2 (task-25-fix-2.md P6-P10/M-02+M-25, task-25-rereview-1.md mục 6 [NHẸ]): không ca
+  // nào khoá class bỏ viền dòng cuối (A5-h, UnitsTable.tsx) — xoá hẳn
+  // `[&_tbody_tr:last-child_td]:border-b-0` khỏi `<table>` vẫn xanh.
+  it('bảng có class bỏ viền dưới dòng cuối, tránh viền đôi sát khung ngoài (A5-h)', async () => {
+    moiApi()
+    renderDashboard()
+    const bang = await screen.findByRole('table')
+    expect(bang.className).toContain('[&_tbody_tr:last-child_td]:border-b-0')
   })
 
   // Không có trong 7 ca trích của brief, nhưng cùng khuôn InlineError đã dùng ở Reports.tsx
@@ -350,6 +444,49 @@ describe('/dashboard', () => {
     })
   })
 
+  // Vòng sửa 2 (task-25-fix-2.md P1/B-01, task-25-rereview-1.md B-01 [NẶNG] — LẦN THỨ BA của cùng
+  // lớp lỗi: Task 20 (/auth/me 503 đăng xuất phiên còn hợp lệ), Task 23 (refetch nền hỏng xoá
+  // sạch reducer, task-23-fix-1 F1), nay Task 25. `Dashboard.tsx:72` trước bản vá chỉ đọc
+  // `summary.isError || units.isError` (boolean thô) — một lượt `refetchOnWindowFocus` hỏng khi
+  // dữ liệu cũ còn nguyên trong cache vẫn làm `isError = true`, xoá mất bảng + 6 KPI + coverage
+  // ĐANG ĐÚNG trên màn hình, thay bằng "Không tải được dữ liệu". Khuôn chép nguyên
+  // `ReportDetail.tsx:67` (`loi && (…data === undefined || …data === undefined)`).
+  it('đang xem bảng + KPI + coverage, rời tab rồi quay lại gặp 502: TRANG VẪN CÒN, không bị thay bằng InlineError (P1/B-01)', async () => {
+    let goiThu = 0
+    const f = vi.fn((url: string) => {
+      goiThu++
+      const laLanDau = goiThu <= 2 // 2 request đầu (summary + units) tải thành công
+      if (url.includes('/dashboard/summary')) {
+        return laLanDau
+          ? Promise.resolve({ ok: true, status: 200, json: async () => DEFAULT_SUMMARY })
+          : Promise.resolve({ ok: false, status: 502, json: async () => ({ detail: 'Bad gateway' }) })
+      }
+      if (url.includes('/dashboard/units')) {
+        return laLanDau
+          ? Promise.resolve({ ok: true, status: 200, json: async () => DEFAULT_UNITS })
+          : Promise.resolve({ ok: false, status: 502, json: async () => ({ detail: 'Bad gateway' }) })
+      }
+      throw new Error(`URL không lường trước: ${url}`)
+    })
+    vi.stubGlobal('fetch', f)
+    renderDashboard()
+
+    expect(await screen.findByText('Đơn vị U05')).toBeTruthy()
+    expect(screen.getByRole('table')).toBeTruthy()
+
+    // `refetchOnWindowFocus` (mặc định TanStack v5 `true`, `renderDashboard()`/`QueryClient` của
+    // ca này không tắt nó) nghe `visibilitychange` trên WINDOW — cùng cơ chế `quayLaiTab` của
+    // ReportDetail.test.tsx.
+    await act(async () => {
+      window.dispatchEvent(new Event('visibilitychange'))
+    })
+
+    await waitFor(() => expect(goiThu).toBeGreaterThan(2))
+    expect(screen.getByText('Đơn vị U05')).toBeTruthy()
+    expect(screen.getByRole('table')).toBeTruthy()
+    expect(screen.queryByText('Không tải được dữ liệu')).toBeNull()
+  })
+
   // Vòng sửa 1 (task-25-fix-1.md A4, review mục 3/12): vai `reporter` không có `dashboard.view`
   // (seed/__init__.py:70) nên gõ thẳng /dashboard là đường đi tới được thật, không phải suy diễn.
   // Khuôn 403 đã có sẵn ở ReportDetail.tsx:46 ("không có quyền" + lối thoát) — Dashboard trước bản
@@ -362,7 +499,89 @@ describe('/dashboard', () => {
     renderDashboard()
     expect(await screen.findByText('Bạn không có quyền xem dashboard này')).toBeTruthy()
     expect(screen.queryByText('Không tải được dữ liệu')).toBeNull()
-    expect(screen.getByRole('link', { name: 'Về báo cáo của đơn vị' })).toBeTruthy()
+    // Vòng sửa 2 (task-25-fix-2.md P3/M-05): trước bản vá chỉ kiểm CHỮ của link — đổi
+    // `to="/reports"` thành `to="/dashboard"` (quay lại đúng màn vừa từ chối, vòng lặp kín) vẫn
+    // xanh. Khoá luôn ĐÍCH ĐẾN (khuôn `ReportDetail.test.tsx:219` đã dùng cho ca 403 của nó).
+    expect(screen.getByRole('link', { name: 'Về báo cáo của đơn vị' }).getAttribute('href')).toBe('/reports')
+    // Vòng sửa 2 (task-25-fix-2.md P6-P10/M-07, task-25-rereview-1.md mục 9 [NHẸ]): bỏ hẳn
+    // `<TieuDe/>` khỏi nhánh 403 (Dashboard.tsx) vẫn xanh — không ca nào kiểm <h1>/điều hướng kỳ
+    // còn sống khi trang đang ở màn 403.
+    expect(screen.getByRole('heading', { name: 'Dashboard SKATMT' })).toBeTruthy()
+    // Vòng sửa 2 (task-25-fix-2.md P6-P10/M-31, task-25-rereview-1.md mục 9 [NHẸ]): đổi
+    // `rounded-tile` của khung 403 thành `rounded-input` vẫn xanh — không ca nào đọc class bo góc
+    // của khung này.
+    expect(screen.getByText('Bạn không có quyền xem dashboard này').className).toContain('rounded-tile')
+  })
+
+  // Vòng sửa 2 (task-25-fix-2.md P2/M-01, task-25-rereview-1.md M-01 [VỪA]): `renderDashboard()`
+  // tự tắt `retry` — ca 403 phía trên XANH vì một lý do KHÔNG TỒN TẠI ngoài production.
+  // `app/queryClient.ts` (singleton thật) trước bản vá không đặt `retry` nào → mặc định TanStack
+  // Query là 3 lần thử lại kèm backoff, nên 403 THẬT (reporter thiếu dashboard.view) mất ~7-8 giây
+  // và bắn 8 request mới hiện đúng câu. Ca này dùng ĐÚNG cấu hình mặc định của singleton thật
+  // (`getDefaultOptions()`, không chép tay lại logic retry để tránh lệch bản gốc) — QueryClient
+  // MỚI (không đụng cache singleton, tránh C2/M-T1) nhưng cùng `retry`.
+  it('403 hiện NGAY với QueryClient cấu hình như bản thật, không đợi hết lượt thử lại 4xx (M-01)', async () => {
+    const f = vi.fn((_url: string) =>
+      Promise.resolve({ ok: false, status: 403, json: async () => ({ detail: 'Không có quyền dashboard.view' }) }),
+    )
+    vi.stubGlobal('fetch', f)
+    const qc = new QueryClient({ defaultOptions: queryClientSanXuat.getDefaultOptions() })
+    render(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter initialEntries={['/dashboard']}>
+          <Routes>
+            <Route path="/dashboard" element={<Dashboard />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+    expect(await screen.findByText('Bạn không có quyền xem dashboard này')).toBeTruthy()
+    // Không thử lại 4xx: đúng 1 lần gọi MỖI endpoint (2 tổng) — không phải 8 (2 endpoint × 4 lượt
+    // mặc định TanStack khi không đặt retry nào).
+    expect(f.mock.calls.length).toBe(2)
+  })
+
+  // Vòng sửa 2 (task-25-fix-2.md P6-P10/M-04+M-34, task-25-rereview-1.md mục 5 [NHẸ]): ca 403 ở
+  // trên (và M-01) luôn cho CẢ HAI endpoint cùng trả 403 — không phân biệt được nếu xoá hẳn trường
+  // `error` khỏi useSummary.ts (M-04) hay bỏ nhánh `units.error...` của phép OR trong `loi403`
+  // (M-34, Dashboard.tsx). Hai ca dưới ép LỆCH: chỉ MỘT bên trả 403, bên kia bình thường — mỗi ca
+  // khoá đúng MỘT nửa của `loi403`.
+  it('CHỈ units trả 403 (summary bình thường): vẫn hiện đúng câu "không có quyền" (M-34)', async () => {
+    const f = vi.fn((url: string) => {
+      if (url.includes('/dashboard/summary')) {
+        return Promise.resolve({ ok: true, status: 200, json: async () => DEFAULT_SUMMARY })
+      }
+      if (url.includes('/dashboard/units')) {
+        return Promise.resolve({
+          ok: false,
+          status: 403,
+          json: async () => ({ detail: 'Không có quyền dashboard.view' }),
+        })
+      }
+      throw new Error(`URL không lường trước trong test: ${url}`)
+    })
+    vi.stubGlobal('fetch', f)
+    renderDashboard()
+    expect(await screen.findByText('Bạn không có quyền xem dashboard này')).toBeTruthy()
+  })
+
+  it('CHỈ summary trả 403 (units bình thường): vẫn hiện đúng câu "không có quyền" (M-04)', async () => {
+    const f = vi.fn((url: string) => {
+      if (url.includes('/dashboard/summary')) {
+        return Promise.resolve({
+          ok: false,
+          status: 403,
+          json: async () => ({ detail: 'Không có quyền dashboard.view' }),
+        })
+      }
+      if (url.includes('/dashboard/units')) {
+        return Promise.resolve({ ok: true, status: 200, json: async () => DEFAULT_UNITS })
+      }
+      throw new Error(`URL không lường trước trong test: ${url}`)
+    })
+    vi.stubGlobal('fetch', f)
+    renderDashboard()
+    expect(await screen.findByText('Bạn không có quyền xem dashboard này')).toBeTruthy()
   })
 
   // ---- Vòng sửa 1 (task-25-fix-1.md Nhóm 2) — mã đã đúng, khoá thêm test cho các đột biến review
@@ -455,7 +674,13 @@ describe('/dashboard', () => {
   it('lần tải đầu tiên CÓ hiện skeleton trước khi dữ liệu về (B6, N12)', async () => {
     moiApiCham()
     renderDashboard()
-    expect(await screen.findByTestId('skeleton')).toBeTruthy()
+    const khungSkeleton = await screen.findByTestId('skeleton')
+    expect(khungSkeleton).toBeTruthy()
+    // Vòng sửa 2 (task-25-fix-2.md P6-P10/M-21, task-25-rereview-1.md mục 9 [NHẸ]): đổi
+    // `<Skeleton rows={10}/>` (Dashboard.tsx) thành `rows={3}` vẫn xanh — không ca nào đếm số
+    // dòng placeholder thật sự vẽ ra. `.rounded` định vị đúng các <div> DÒNG (Skeleton.tsx) —
+    // <div> bọc ngoài của chính Skeleton không có class này nên không lẫn vào số đếm.
+    expect(khungSkeleton.querySelectorAll('.rounded')).toHaveLength(10)
   })
 
   // B7 (N35): điều kiện skeleton phải gồm CẢ `units.isLoading` — nếu chỉ có `summary.isLoading`,

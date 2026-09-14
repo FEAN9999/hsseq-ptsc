@@ -87,8 +87,15 @@ export function UnitsTable({ rows, period }: { rows: UnitRow[]; period: string }
     <div className="overflow-x-auto border border-hair bg-surface rounded-input">
       {/* Vòng sửa 1 (task-25-fix-1.md A5-h, review mục 11 "h"): bỏ viền dưới của dòng CUỐI trong
           tbody — cùng khung bo/viền ngoài của chính div này thì viền dưới đó thành viền đôi ngay
-          trước mép khung. Scope riêng `tbody` (không phải `tr:last-child` trần như bản vẽ) để
-          không lỡ ăn luôn dòng tiêu đề — dòng đó vẫn CẦN viền để tách khỏi phần thân. */}
+          trước mép khung.
+          Vòng sửa 2 (task-25-fix-2.md P6-P10/M-02+M-25, task-25-rereview-1.md mục 6 [NHẸ]): SỬA
+          LẠI câu trên — nó nói SAI lý do dòng tiêu đề không bị ăn viền. Selector kết ở `_td`, còn
+          `<thead>` dùng `<th>` (không phải `<td>`), nên chính hậu tố `_td` đó — KHÔNG PHẢI scope
+          `tbody` — mới là thứ chặn dòng tiêu đề: bỏ scope `tbody` đi, còn trần `tr:last-child`,
+          vẫn khớp CẢ dòng tiêu đề (last-child của chính `<thead>`) lẫn dòng cuối `tbody`, nhưng
+          dòng tiêu đề không có `<td>` nào để `_td` bắt nên không mất viền. Giữ nguyên scope
+          `tbody` vì nó tự nói đúng Ý ĐỊNH ("dòng cuối PHẦN THÂN bảng") mà không cần suy luận qua
+          thẻ HTML — không phải vì thiếu nó sẽ sai. */}
       <table className="w-full border-collapse [&_tbody_tr:last-child_td]:border-b-0">
         <thead>
           <tr>

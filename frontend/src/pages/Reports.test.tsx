@@ -16,7 +16,7 @@
 // renderReports() bọc <MemoryRouter> với một route bắt hết ("*") render <DichDen/> hiện lại
 // pathname hiện tại, để khẳng định điều hướng nội bộ (Tạo báo cáo/409) trên CÂY THẬT thay vì spy
 // `location.assign` (Reports.tsx không còn gọi nó nữa cho điều hướng nội bộ).
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -483,5 +483,51 @@ describe('/reports — admin (report.approve) và viewer (report.view_all)', () 
     expect(screen.queryByText('Đơn vị')).toBeNull()
     expect(screen.queryByText(DON_VI_MAC_DINH.name)).toBeNull()
     expect(container.querySelectorAll('thead th').length).toBe(5)
+  })
+})
+
+// Vòng sửa 2 (task-25-fix-2.md P1b, task-25-rereview-1.md B-01/M-01): CÙNG LỚP LỖI đã vá ở
+// Dashboard.tsx (mục trên) và ReportDetail.tsx (task-23-fix-1 F1) — LỖI NỀN KHÔNG ĐƯỢC PHÁ MÀN
+// HÌNH ĐANG CÓ DỮ LIỆU. Trước bản vá này, `useReportList.ts` chỉ trả `isError` (boolean thô của
+// react-query) — một lượt refetch NỀN hỏng khi `data` cũ còn nguyên trong cache vẫn làm `isError`
+// thành `true`, và `Reports.tsx:214` (`isLoading ? … : isError ? <InlineError/> : …`) thay cả
+// danh sách bằng "Không tải được danh sách báo cáo". Đã ĐO bằng probe tạm trước khi sửa (task
+// yêu cầu): có dữ liệu → gọi lại qua `refetchOnWindowFocus` → 502 → danh sách BIẾN MẤT thật, đúng
+// tiền đề coordinator nêu.
+describe('/reports — lỗi nền không phá màn hình đang có dữ liệu (P1b)', () => {
+  it('đang xem danh sách, rời tab rồi quay lại gặp 502: danh sách VẪN CÒN, không bị thay bằng InlineError', async () => {
+    useSession.getState().login(
+      'tok-1',
+      { id: 1, email: 'admin@ptsc.local', full_name: 'Admin', position: null },
+      { id: 1, code: 'HO', name: 'Ban ATCL' },
+      ['report.approve'],
+    )
+    let goiThu = 0
+    const f = vi.fn((url: string) => {
+      if (!url.includes('/reports')) throw new Error(`URL không lường trước: ${url}`)
+      goiThu++
+      if (goiThu === 1) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => [dongDayDu({ period_key: '2026-08', state: 'submitted' })],
+        })
+      }
+      return Promise.resolve({ ok: false, status: 502, json: async () => ({ detail: 'Bad gateway' }) })
+    })
+    vi.stubGlobal('fetch', f)
+    renderReports()
+
+    expect(await screen.findByText(DON_VI_MAC_DINH.name)).toBeTruthy()
+
+    // `refetchOnWindowFocus` (mặc định TanStack v5 là `true`, `renderReports()` không tắt nó) nghe
+    // `visibilitychange` trên WINDOW — cùng cơ chế `quayLaiTab` của ReportDetail.test.tsx.
+    await act(async () => {
+      window.dispatchEvent(new Event('visibilitychange'))
+    })
+
+    await waitFor(() => expect(goiThu).toBeGreaterThan(1))
+    expect(screen.getByText(DON_VI_MAC_DINH.name)).toBeTruthy()
+    expect(screen.queryByText('Không tải được danh sách báo cáo')).toBeNull()
   })
 })
