@@ -88,7 +88,7 @@ hẳn về hậu quả. Bộ test vì vậy chia đôi theo đúng thứ nó C�
 
 | ở chế độ `BASE_URL` | ca |
 |---|---|
-| **chạy** (4) | không cuộn ngang · titlebar · rbac 403 · rbac chưa đăng nhập — đây là bộ khói cho một bản deploy |
+| **chạy** (6) | phân loại hostname ×2 (thuần, không cần server) · không cuộn ngang · titlebar · rbac 403 · rbac chưa đăng nhập — đây là bộ khói cho một bản deploy |
 | **bỏ qua**, in rõ lý do (6) | demo phân đoạn 2 · lớp làm mới cache · Ctrl+S · hộp thoại trên lớp dính · hộp thoại trên Toast · rbac người xem — sáu ca này cần một báo cáo **nháp sạch** |
 
 Muốn chạy cả sáu ca kia trên bản deploy thì reset ở chính máy chủ đó trước

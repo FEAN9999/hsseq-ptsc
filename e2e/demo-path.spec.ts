@@ -84,11 +84,16 @@ interface LopDinh {
  *  Liệt kê mọi phần tử `position: sticky|fixed` đang thật sự hiện, và TỰ KIỂM từng cái bằng chính
  *  phép bắn tia sẽ dùng ở bước sau: lớp nào không tự chứng minh được là "trên cùng tại điểm của
  *  nó" thì bị loại (đang bị che, bị cắt khỏi khung `overflow`, hoặc nằm ngoài tầm nhìn). Giữ nó
- *  lại chỉ tạo ra một khẳng định trỏ vào chỗ trống. */
+ *  lại chỉ tạo ra một khẳng định trỏ vào chỗ trống.
+ *
+ *  Gửi kèm chính CÁC PHẦN TỬ qua `window.__e2eLopDinh` (cùng thứ tự với mảng dữ liệu trả về):
+ *  `page.evaluate` chỉ chuyển được dữ liệu tuần tự hoá được, mà bước bắn tia lại cần so DANH TÍNH
+ *  với đúng những phần tử này — xem A1 ở `banTiaVaoManChan`. */
 function lietKeLopDinh(): LopDinh[] {
   const rong = document.documentElement.clientWidth
   const cao = document.documentElement.clientHeight
   const ra: LopDinh[] = []
+  const dsEl: Element[] = []
   for (const el of Array.from(document.querySelectorAll<HTMLElement>('body *'))) {
     const cs = getComputedStyle(el)
     if (cs.position !== 'sticky' && cs.position !== 'fixed') continue
@@ -99,8 +104,18 @@ function lietKeLopDinh(): LopDinh[] {
     const y = Math.round((Math.max(r.top, 0) + Math.min(r.bottom, cao)) / 2)
     if (Math.min(r.right, rong) - Math.max(r.left, 0) < 4) continue
     if (Math.min(r.bottom, cao) - Math.max(r.top, 0) < 4) continue
+    // Phần tử phủ GẦN KÍN khung nhìn không phải "lớp dính" mà là KHUNG của trang (vỏ ứng dụng,
+    // lớp phủ hộp thoại, nền mờ). Tâm của nó là tâm màn hình — đúng chỗ hộp thoại đứng — nên bắn
+    // tia vào đó chỉ hỏi "hộp thoại có che được chính cái khung chứa nó không", một câu vô nghĩa
+    // và luôn trả lời SAI. Cùng ngưỡng với định nghĩa "màn chắn" ở `banTiaVaoManChan`, có chủ ý:
+    // một phần tử hoặc là lớp dính để bị che, hoặc là màn chắn, không thể vừa là cả hai.
+    // (Giới hạn: một lớp dính THẬT phủ kín màn — ví dụ một tấm "đang tải" toàn trang — sẽ bị bỏ
+    // khỏi danh sách. Nó cũng lọt vào `manChan` nên ② không bắt được; đây là chỗ ca này không
+    // canh, ghi ra để người sau biết.)
+    if (r.width >= rong * 0.95 && r.height >= cao * 0.95) continue
     const tren = document.elementFromPoint(x, y)
     if (tren === null || !(el === tren || el.contains(tren))) continue
+    dsEl.push(el)
     ra.push({
       x,
       y,
@@ -109,53 +124,138 @@ function lietKeLopDinh(): LopDinh[] {
       z: cs.zIndex,
     })
   }
+  Object.assign(window, { __e2eLopDinh: dsEl })
   return ra
 }
 
-/** CHẠY TRONG TRANG. Bắn tia vào từng điểm đã liệt kê khi hộp thoại ĐANG MỞ, rồi hỏi: thứ trúng
- *  tia có thuộc "màn chắn" của hộp thoại không.
+/** CHẠY TRONG TRANG. Bắn tia vào từng điểm đã liệt kê khi hộp thoại ĐANG MỞ, rồi hỏi HAI câu về
+ *  thứ trúng tia. Cả hai đều phải đúng.
  *
- *  R4 (vòng sửa 2) — MÀN CHẮN TÌM THEO TÍNH CHẤT QUAN SÁT ĐƯỢC, KHÔNG THEO QUAN HỆ CÂY DOM.
- *  Bản vòng 1 tìm lớp phủ bằng "tổ tiên `position: fixed` gần nhất của `<dialog open>`". Cách đó
- *  gỡ được phần đóng băng CON SỐ `z-50`, nhưng vẫn đóng băng một quan hệ CẤU TRÚC: tách nền mờ ra
- *  thành ANH EM của `<dialog>` (khuôn mẫu modal phổ biến nhất, và là khuôn mẫu BẮT BUỘC nếu sau
- *  này dựng bằng portal) làm ca đỏ dù tính chất thật vẫn đúng — nền mờ vẫn phủ kín, tia vẫn trúng
- *  nó. Nay "màn chắn" = chính `<dialog open>` CỘNG mọi phần tử `position: fixed` phủ gần kín khung
- *  nhìn, bất kể chúng là cha, con hay anh em của nhau.
+ *  ① `hetLaLopDinh` — thứ trúng tia KHÔNG còn là chính lớp dính đó (hay con cháu của nó) nữa.
+ *     Đây đúng là PHỦ ĐỊNH của phép tự kiểm mà `lietKeLopDinh` vừa chạy ở cùng toạ độ: trước khi
+ *     mở hộp thoại, điểm ấy thuộc về lớp dính; sau khi mở, nó không được thuộc nữa. Nói cách khác:
+ *     "có thứ gì đó đã che được lớp này ở đúng chỗ ta đo".
+ *  ② `thuocManChan` — và thứ che nó là MÀN CHẮN của hộp thoại, chứ không phải một thứ ngẫu nhiên.
  *
- *  GIỚI HẠN ĐÃ BIẾT, ghi thẳng ra: nếu `Dialog` đổi sang `showModal()` thật (Task 24 cố ý KHÔNG
- *  dùng — xem task-24 carry), hộp thoại lên TOP LAYER và `::backdrop` không phải một phần tử, nên
- *  `elementFromPoint` sẽ trả về lớp dính bên dưới và ca này ĐỎ. Lúc đó ca phải được viết lại theo
- *  `:modal` / `inert` chứ không phải nới trần — thông điệp lỗi nói thẳng điều đó. */
+ *  A1 (vòng sửa 3) — VÌ SAO PHẢI CÓ ①. Bản vòng 2 chỉ có ②, và ② một mình MẤT SẠCH sức phân biệt
+ *  khi trang có một tổ tiên `fixed` phủ kín: đổi `AppShell` từ `min-h-screen` sang
+ *  `fixed inset-0 overflow-auto` (bố cục app-shell hợp lệ, rất phổ biến) là chính `AppShell` lọt
+ *  vào danh sách màn chắn, mà nó CHỨA mọi lớp dính của trang, nên `m.contains(el)` trả `true` cho
+ *  cả 10/10 điểm — kể cả khi tia trúng đúng cái `th` đang che hộp thoại (N43: `AppShell fixed` +
+ *  `z-50 → z-10`, một hồi quy THẬT, mà ca vẫn xanh). Chốt `soManPhuKin >= 1` không đỡ được: nó
+ *  đếm 2 và càng làm người đọc yên tâm.
+ *
+ *  VÌ SAO KHÔNG DÙNG PHÉP ĐỒNG NHẤT `m === el` (bản vá người soát đo sẵn). Nó chữa được N43,
+ *  nhưng nó BỎ SÓT một lớp phủ hợp lệ rất thường gặp: khung `fixed` bọc ngoài + một tấm nền mờ
+ *  `absolute inset-0` nằm BÊN TRONG nó (hoặc bất cứ con nào phủ kín khung). Lúc đó tia trúng đứa
+ *  CON, `m === el` sai, ca đỏ oan — cùng đúng dạng mù (d) mà hai vòng trước vừa bóc hai lớp. Điều
+ *  kiện ① nhắm thẳng vào thứ cần canh ("lớp dính có còn nổi lên không") nên không phải trả giá
+ *  bằng độ chính xác của ②. Đã đo bằng N57, xem task-27-report.md.
+ *
+ *  GIỚI HẠN ĐÃ BIẾT, ghi thẳng ra:
+ *  · `showModal()` thật — hộp thoại lên TOP LAYER, `::backdrop` không phải phần tử nên
+ *    `elementFromPoint` trả về lớp dính bên dưới ⇒ ① đỏ. Lúc đó ca phải viết lại theo
+ *    `:modal`/`inert`, KHÔNG phải nới trần.
+ *  · hộp thoại nằm trong shadow DOM hay iframe — `querySelector` của document gốc không thấy.
+ *    Đó là lớp còn lại sau khi A4 đã gỡ phần đóng băng TÊN THẺ. */
 function banTiaVaoManChan(diem: LopDinh[]) {
   const rong = document.documentElement.clientWidth
   const cao = document.documentElement.clientHeight
-  const hop = document.querySelector('dialog[open]')
+  // A4 (vòng sửa 3): tìm hộp thoại bằng VAI TRÒ ARIA trước, tên thẻ chỉ là một trong hai lối vào.
+  // Phần còn lại của bộ test đã dùng `getByRole('dialog')` từ đầu; riêng hàm trong trang này tụt
+  // xuống `dialog[open]` nên một hộp thoại dựng bằng `<div role="dialog" aria-modal>` — hợp lệ
+  // hoàn toàn, vì chính `Dialog.tsx` ghi rõ nó CỐ Ý không gọi `showModal()`, tức thẻ `<dialog>` ở
+  // đây không mang chức năng nào — bị phạt oan (N49).
+  const hop = document.querySelector('dialog[open], [role="dialog"]')
+  const lopDinhEl = (window as unknown as { __e2eLopDinh?: Element[] }).__e2eLopDinh ?? null
   const manChan: Element[] = []
   if (hop !== null) manChan.push(hop)
-  let soManPhuKin = 0
   for (const el of Array.from(document.querySelectorAll<HTMLElement>('body *'))) {
-    if (getComputedStyle(el).position !== 'fixed') continue
+    const viTri = getComputedStyle(el).position
+    // Nhận cả `absolute`: khi vỏ ứng dụng tự nó là `fixed inset-0` thì tấm nền mờ tự nhiên nhất
+    // lại là `absolute inset-0` bên trong vỏ. Nới ② như vậy không làm mất răng vì ① mới là chỗ
+    // cắn.
+    if (viTri !== 'fixed' && viTri !== 'absolute') continue
     const r = el.getBoundingClientRect()
     if (r.width < rong * 0.95 || r.height < cao * 0.95) continue
     manChan.push(el)
-    soManPhuKin++
   }
   return {
     coHopThoai: hop !== null,
-    soManPhuKin,
+    coDanhSachLop: lopDinhEl !== null && lopDinhEl.length === diem.length,
     taManChan: manChan
-      .map((m) => `${m.tagName.toLowerCase()}[z=${getComputedStyle(m).zIndex}]`)
+      .map((m) => `${m.tagName.toLowerCase()}[${getComputedStyle(m).position},z=${getComputedStyle(m).zIndex}]`)
       .join(' + '),
-    diem: diem.map((d) => {
+    diem: diem.map((d, i) => {
       const el = document.elementFromPoint(d.x, d.y)
+      const lop = lopDinhEl === null ? null : (lopDinhEl[i] ?? null)
       return {
         ...d,
+        hetLaLopDinh: lop !== null && el !== null && !(el === lop || lop.contains(el)),
         thuocManChan: el !== null && manChan.some((m) => m === el || m.contains(el)),
         tren: el === null ? 'null' : `${el.tagName.toLowerCase()} "${(el.textContent ?? '').trim().slice(0, 20)}"`,
       }
     }),
   }
+}
+
+/** Hai khẳng định dùng chung cho C-T24/2 và C-T24/2b — viết một chỗ để hai ca không trôi khỏi nhau. */
+function chotManChan(ketQua: ReturnType<typeof banTiaVaoManChan>, tenCa: string): void {
+  expect(ketQua.coHopThoai, `${tenCa}: không tìm thấy hộp thoại nào đang mở — phép bắn tia sẽ vô nghĩa`).toBe(true)
+  expect(
+    ketQua.coDanhSachLop,
+    `${tenCa}: danh sách phần tử lớp dính (window.__e2eLopDinh) không khớp với danh sách toạ độ — ` +
+      'khẳng định "hết là lớp dính" dưới đây sẽ trỏ nhầm phần tử',
+  ).toBe(true)
+  for (const d of ketQua.diem) {
+    expect(
+      d.hetLaLopDinh,
+      `${tenCa}: lớp dính ${d.ten} (${d.viTri}, z=${d.z}) tại (${d.x},${d.y}) VẪN là thứ trên cùng ` +
+        `sau khi hộp thoại mở — tia trúng ${d.tren}, vẫn nằm trong chính lớp đó ` +
+        `(màn chắn đo được: ${ketQua.taManChan})`,
+    ).toBe(true)
+    expect(
+      d.thuocManChan,
+      `${tenCa}: tại (${d.x},${d.y}) lớp dính ${d.ten} đã bị che, NHƯNG thứ che nó không thuộc màn ` +
+        `chắn của hộp thoại — tia trúng ${d.tren} (màn chắn: ${ketQua.taManChan})`,
+    ).toBe(true)
+  }
+}
+
+/** Thông điệp của phép đo THỜI ĐIỂM ở C-T24/1 — A5 (vòng sửa 3).
+ *
+ *  Bản vòng 2 chỉ nêu hai khả năng, cả hai đều đổ tội cho MÃ. Nhưng phép đo này có một mặt âm đã
+ *  được đo: hai đại lượng phản ứng NGƯỢC CHIỀU nhau với tải máy. `treRoiO` bị ghim bởi
+ *  `setTimeout(DO_TRE)` theo đồng hồ tường nên gần như đứng yên (1510ms → 1661ms khi bóp CPU
+ *  100×); `treCtrlS` là thuần độ trễ JS nên lớn gần tuyến tính theo độ chậm (9ms → 1789ms). Lề vì
+ *  thế bào mòn ~1:1 theo hệ số chậm máy: ca bắt đầu báo oan từ khoảng **50× chậm CPU**, và ở 100×
+ *  hai số ĐẢO thứ tự.
+ *
+ *  Ca không cần chịu được 100× chậm — đó là đòi hỏi vô lý. Nhưng thông điệp thì phải NÓI THẬT:
+ *  một lượt đỏ ngẫu nhiên mà đổ tội cho mã sẽ khiến người sau nới trần cho yên chuyện, và lúc đó
+ *  ca mất răng vĩnh viễn. */
+function thongDiepThoiDiem(treCtrlS: number, treRoiO: number): string {
+  const daoNguoc = treCtrlS >= treRoiO
+  const coDauHieuMayCham = daoNguoc || treCtrlS > 100
+  const dauHieu = daoNguoc
+    ? `treCtrlS (${treCtrlS}ms) còn LỚN HƠN treRoiO (${treRoiO}ms) — hai số đã ĐẢO thứ tự, ` +
+      'điều chỉ xảy ra khi độ trễ JS vượt cả một debounce đồng hồ tường'
+    : `treCtrlS = ${treCtrlS}ms, lớn hơn hẳn mức thường gặp (~10ms trên máy rảnh)`
+  return [
+    `Ctrl+S mất ${treCtrlS}ms tới lúc request RỜI trình duyệt; đường tự-lưu-khi-rời-ô mất ${treRoiO}ms.`,
+    'Hai số phải cách nhau thì ca mới phân biệt được "phím tắt tự lưu" với "cú blur do chính phím',
+    'tắt gây ra đã lưu hộ". BA cách đọc, đọc đủ cả ba trước khi sửa bất cứ thứ gì:',
+    coDauHieuMayCham
+      ? `  (1) MÁY ĐANG CHẬM — khả năng đáng ngờ NHẤT ở lượt này: ${dauHieu}. treRoiO bị ghim bởi ` +
+        'setTimeout(DO_TRE) theo đồng hồ tường nên gần như đứng yên khi máy tải, còn treCtrlS là ' +
+        'thuần độ trễ JS nên lớn gần tuyến tính theo độ chậm. Đo được: ca báo oan từ khoảng 50× ' +
+        'chậm CPU. Chạy lại lúc máy rảnh TRƯỚC KHI kết luận mã hỏng (retries: 0 nên không có lượt thứ hai tự động).'
+      : '  (1) MÁY ĐANG CHẬM — lượt này không có dấu hiệu (treCtrlS vẫn ở mức bình thường), nhưng ca ' +
+        'báo oan từ khoảng 50× chậm CPU nên vẫn phải loại trừ trước.',
+    '  (2) Phím tắt đã thôi gọi saveNow(), nên PUT đến từ lớp tự-lưu-khi-blur — LỖI THẬT, sửa mã.',
+    '  (3) Debounce DO_TRE đã bị bỏ, không trình duyệt nào tách được hai đường nữa — phải VIẾT LẠI ca,',
+    '      ĐỪNG nới trần: nới trần là cách chắc chắn nhất để ca mất răng vĩnh viễn.',
+  ].join('\n')
 }
 
 test.describe('phân đoạn 2 của buổi demo', () => {
@@ -483,6 +583,12 @@ test.describe('phân đoạn 2 của buổi demo', () => {
     // B-5.3 nằm giữa bảng (chỉ tiêu thứ 34/53). `chotODangGo()` của Ctrl+S làm blur() rồi focus()
     // lại ô — trên trình duyệt thật, focus() có thể kéo trang/khung cuộn về phía phần tử.
     const o = oChiTieu(page, 'B-5.3', 'Tháng này')
+    // Số seed phải KHÁC hai số ca này sắp gõ (9 rồi 8): trùng thì `NumberCell.xuLyBlur` không bắn
+    // `onCommit` (không có lượt lưu nào), và khẳng định "đọc lại đúng 8" ở cuối ca cũng thoả sẵn
+    // mà chẳng chứng minh gì.
+    const soSeed = doSoVi(await o.inputValue())
+    expect(soSeed, 'số seed của B-5.3 trùng số ca sắp gõ ⇒ mọi khẳng định lưu sẽ là bằng chứng rỗng').not.toBe(8)
+    expect(soSeed, 'số seed của B-5.3 trùng số ca sắp gõ ⇒ mọi khẳng định lưu sẽ là bằng chứng rỗng').not.toBe(9)
     await o.scrollIntoViewIfNeeded()
     await o.click()
     // Ô phải THỰC SỰ nằm trong tầm nhìn trước khi đo: nếu nó đang khuất, mọi cú nhảy sau đó là
@@ -563,14 +669,26 @@ test.describe('phân đoạn 2 của buổi demo', () => {
     const treRoiO = Date.now() - mocRoiO
     await choLuuRoiO
 
+    expect(treRoiO, thongDiepThoiDiem(treCtrlS, treRoiO)).toBeGreaterThan(3 * treCtrlS)
+
+    // ── A3 (vòng sửa 3): MỘT giá trị đi TRỌN VÒNG ────────────────────────────────────────────
+    //
+    // Mọi khẳng định phía trên dừng ở "có một `PUT` bay đi và màn hình nói Đã lưu". Đó chưa phải
+    // bằng chứng con số tới được database: cho `thanGui()` trả `[]` thì `PUT` vẫn rời ngay, server
+    // vẫn 200, dải đầu vẫn hiện "Đã lưu HH:MM" — và số người dùng vừa gõ biến mất không dấu vết
+    // (N33: **cả 20 ca đều xanh**). Với một buổi demo mà cả màn hình là số, đó là kiểu hỏng tệ
+    // nhất có thể xảy ra trước mặt khán giả.
+    //
+    // Phạm vi hẹp nhất có thể: ĐÚNG MỘT ô, đi trọn vòng. `reload()` dựng lại `QueryClient` từ số
+    // không nên con số đọc được sau đây chỉ có thể đến từ máy chủ.
+    await page.reload()
+    await expect(page.locator('tbody tr')).toHaveCount(62)
+    const oSauNapLai = doSoVi(await oChiTieu(page, 'B-5.3', 'Tháng này').inputValue())
     expect(
-      treRoiO,
-      `Ctrl+S mất ${treCtrlS}ms tới lúc server nhận, còn đường tự-lưu-khi-rời-ô mất ${treRoiO}ms. ` +
-        'Hai số này PHẢI cách nhau thì ca mới phân biệt được "phím tắt tự lưu" với "cú blur do ' +
-        'chính phím tắt gây ra đã lưu hộ". Bằng nhau nghĩa là một trong hai: phím tắt đã thôi gọi ' +
-        'saveNow() (lỗi — sửa mã), hoặc debounce DO_TRE đã bị bỏ (lúc đó không trình duyệt nào ' +
-        'tách được hai đường nữa — phải viết lại ca, đừng nới trần).',
-    ).toBeGreaterThan(3 * treCtrlS)
+      oSauNapLai,
+      `gõ 8 vào B-5.3, thấy "Đã lưu", nạp lại trang thì máy chủ trả về ${oSauNapLai} — con số ` +
+        'người dùng gõ KHÔNG tới được database dù màn hình đã nói là đã lưu',
+    ).toBe(8)
   })
 
   // Q2 + Q4 (vòng sửa 1). Hai thứ đổi so với bản đầu:
@@ -623,20 +741,7 @@ test.describe('phân đoạn 2 của buổi demo', () => {
 
     const ketQua = await page.evaluate(banTiaVaoManChan, lopDinh)
 
-    expect(ketQua.coHopThoai, 'không có `dialog[open]` nào — phép bắn tia dưới đây sẽ vô nghĩa').toBe(true)
-    expect(
-      ketQua.soManPhuKin,
-      'không tìm thấy màn chắn `position:fixed` nào phủ kín khung nhìn — hộp thoại của app này phải ' +
-        'có một lớp phủ như vậy (nếu đã đổi sang `showModal()` thật thì ca này phải viết lại theo ' +
-        '`:modal`/`inert`, xem chú thích của banTiaVaoManChan)',
-    ).toBeGreaterThanOrEqual(1)
-    for (const d of ketQua.diem) {
-      expect(
-        d.thuocManChan,
-        `lớp dính ${d.ten} (${d.viTri}, z=${d.z}) tại (${d.x},${d.y}) vẫn nổi trên hộp thoại ` +
-          `(màn chắn: ${ketQua.taManChan}) — tia trúng ${d.tren}`,
-      ).toBe(true)
-    }
+    chotManChan(ketQua, 'C-T24/2')
 
     // Và phần tử bên dưới KHÔNG CÒN bấm được — vế "nút của nó làm gì" của lớp phủ. Bấm vào đúng
     // toạ độ nút "Nộp báo cáo" lúc này không được mở thêm hộp thoại thứ hai.
@@ -706,14 +811,7 @@ test.describe('phân đoạn 2 của buổi demo', () => {
     ).toBe(true)
 
     const ketQua = await page.evaluate(banTiaVaoManChan, lopDinh)
-    expect(ketQua.coHopThoai, 'không có `dialog[open]` nào — phép bắn tia dưới đây sẽ vô nghĩa').toBe(true)
-    for (const d of ketQua.diem) {
-      expect(
-        d.thuocManChan,
-        `lớp nổi ${d.ten} (${d.viTri}, z=${d.z}) tại (${d.x},${d.y}) vẫn nổi trên hộp thoại ` +
-          `(màn chắn: ${ketQua.taManChan}) — tia trúng ${d.tren}`,
-      ).toBe(true)
-    }
+    chotManChan(ketQua, 'C-T24/2b')
 
     await page.keyboard.press('Escape')
     await expect(page.getByRole('dialog')).toHaveCount(0)
