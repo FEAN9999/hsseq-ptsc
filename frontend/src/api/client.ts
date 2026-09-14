@@ -12,9 +12,9 @@
 //   400 mã lặp / sai luật giá trị           services/reports.py:451,489     {errors:[{indicator_code,message}]}
 //   400 trường chữ nhóm C (Task 23b)       services/reports.py:515         {errors:[{field_code,message}]}
 // HAI hình dạng `errors` khác nhau: bốn điểm dùng khoá `indicator_code`, MỘT điểm (ba ô chữ
-// nhóm C) dùng `field_code` — C1..C3 không phải mã chỉ tiêu. `ApiErrorItem` dưới đây vẫn khai
-// `indicator_code` BẮT BUỘC, cố ý chưa nới: nới kiểu là việc của task nối FE, nơi lỗi ô chữ mới
-// thật sự có chỗ hiện (hiện chưa màn hình nào đọc `.errors`).
+// nhóm C) dùng `field_code` — C1..C3 không phải mã chỉ tiêu. Task 24 nới `ApiErrorItem` cho cả
+// hai (cả hai đều optional, mỗi điểm ném chỉ gửi MỘT trong hai) vì từ Task 24 lỗi đã có chỗ hiện:
+// banner "Không lưu được" và banner "Không chuyển trạng thái được" của form đều liệt từng dòng.
 // CHÚ Ý: lỗi sai luật nghiệp vụ (ValidationError) là 400, KHÔNG phải 422 — 422 ở dự án này chỉ
 // xảy ra khi payload sai schema Pydantic (lỗi lập trình FE), không phải khi sai luật nghiệp vụ.
 // 409 có HAI nghĩa khác hẳn nhau (xung đột phiên bản cần nạp lại `values`/`version`, hay thao
@@ -23,7 +23,11 @@
 import { useSession } from '../app/session'
 
 export interface ApiErrorItem {
-  indicator_code: string
+  /** Mã chỉ tiêu — bốn trong năm điểm ném 400 dùng khoá này. */
+  indicator_code?: string
+  /** Mã ô chữ nhóm C (`services/reports.py:515`) — C1..C3 không phải mã chỉ tiêu, nên chúng đi
+   * bằng khoá RIÊNG chứ không mượn `indicator_code`. */
+  field_code?: string
   message: string
 }
 

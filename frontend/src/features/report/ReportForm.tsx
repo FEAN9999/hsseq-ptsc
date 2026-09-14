@@ -22,7 +22,9 @@
 import { useEffect, useMemo, useReducer, useRef } from 'react'
 
 import { Banner } from '../../components/ui/Banner'
+import { Dialog } from '../../components/ui/Dialog'
 import { useSession } from '../../app/session'
+import type { ApiErrorItem } from '../../api/client'
 import { parseViNumber } from '../../lib/parseViNumber'
 import { formatDateTime, formatPeriod } from '../../lib/format'
 import { cellPolicy, type AggType, type Cell, type Mode } from './cellPolicy'
@@ -32,6 +34,7 @@ import { FormModeBar, maNeo } from './FormModeBar'
 import { GroupHeader, type NhomMau } from './GroupHeader'
 import { useKeyboardNav } from './useKeyboardNav'
 import { useSaveValues, type KetQuaLuu, type ODoi } from './useSaveValues'
+import { noiDungDialog, useChuyenTrangThai, type LoiChuyen } from './useChuyenTrangThai'
 
 // ---------------------------------------------------------------- hợp đồng API
 // Hình dạng chép từ backend: `ReportDetailOut` (app/schemas/report.py:80) và
@@ -158,6 +161,12 @@ interface TrangThaiForm {
    * dòng không đọc được, đúng lớp lỗi S1 sinh ra để diệt. */
   tranKhiDan: number
   xungDot: { detail: string; tuPhienBan: number; denPhienBan: number } | null
+  /** Lỗi của lượt chuyển trạng thái gần nhất (Task 24). KHÔNG gộp vào `xungDot`: 409 của
+   * `POST .../transition` mang `{state, version}` mà KHÔNG mang `values`, và hai loại 409 của nó
+   * không phân biệt được từ thân lỗi (hop-dong-loi-backend.md) — nên nó không có quyền nói câu
+   * "phiên bản X → Y. Ô đang gõ được giữ" như banner 409 của lớp lưu. Chỉ hiện `detail` nguyên
+   * văn, kèm từng dòng `errors` của 400 "thiếu ô bắt buộc lúc nộp". */
+  loiChuyen: LoiChuyen | null
 }
 
 type HanhDongForm =
@@ -166,6 +175,7 @@ type HanhDongForm =
   | { type: 'ghi-chu'; ma: string; noiDung: string }
   | { type: 'chu'; ma: string; noiDung: string }
   | { type: 'bam-nop' }
+  | { type: 'loi-chuyen'; loi: LoiChuyen | null }
   | { type: 'xung-dot'; loi: LoiXungDot }
   | { type: 'gia-tri-server'; phienBan: number; values: GiaTriBaoCao[] }
 
@@ -180,7 +190,18 @@ function khoiTao(chiTiet: ChiTietBaoCao): TrangThaiForm {
   }
   const chu: Record<string, string> = {}
   for (const [ma, noiDung] of Object.entries(chiTiet.texts)) chu[ma] = noiDung ?? ''
-  return { version: chiTiet.version, nhap, ghiChu, chu, server, daBamNop: false, boQuaKhiDan: [], tranKhiDan: 0, xungDot: null }
+  return {
+    version: chiTiet.version,
+    nhap,
+    ghiChu,
+    chu,
+    server,
+    daBamNop: false,
+    boQuaKhiDan: [],
+    tranKhiDan: 0,
+    xungDot: null,
+    loiChuyen: null,
+  }
 }
 
 function rutGon(s: TrangThaiForm, h: HanhDongForm): TrangThaiForm {
@@ -207,6 +228,8 @@ function rutGon(s: TrangThaiForm, h: HanhDongForm): TrangThaiForm {
       return { ...s, chu: { ...s.chu, [h.ma]: h.noiDung } }
     case 'bam-nop':
       return { ...s, daBamNop: true }
+    case 'loi-chuyen':
+      return { ...s, loiChuyen: h.loi }
     case 'gia-tri-server': {
       // task-23-carry.md C9: phản hồi của `PUT /reports/{id}/values` mang `values` đã TÍNH LẠI
       // (dòng computed, lũy kế, cột Lệch, kiểm tra bộ đếm) — cùng đường tính với GET. Đây là con
@@ -379,32 +402,34 @@ function OGiaTri({
 export interface ReportFormProps {
   mau: MauBaoCao
   chiTiet: ChiTietBaoCao
-  /** Tín hiệu 409 từ Task 23 (`useSaveValues`). Mỗi lần xung đột là một object MỚI — effect dưới
-   * đây theo dõi bằng danh tính object, không so nội dung. */
-  xungDot?: LoiXungDot | null
   /** Một lượt làm mới NỀN của trang (`GET /reports/{id}` sau mỗi lần lưu) vừa hỏng. Không phá màn
    * hình: số trên bảng vẫn là số đọc được lần cuối, đã vá bằng phản hồi PUT (C9) — chỉ nói ra ở
    * dải đầu để người nhập biết màn hình có thể đang cũ (fix-1 F1). */
   loiLamMoi?: boolean
+  /** Thay hành động "Lưu" của Ctrl+S và nút Lưu. Từ Task 23 lớp lưu nằm ngay trong form nên app
+   * thật KHÔNG truyền prop này; nó ở lại vì Ctrl+S bấm trong lúc CON TRỎ CÒN TRONG Ô không sinh
+   * ra `PUT` nào (`NumberCell` chỉ chốt ô lúc rời ô), nên đó là seam DUY NHẤT đo được phần phím
+   * tắt: chặn hộp "Lưu trang", Cmd+S, CapsLock, gỡ listener lúc unmount, closure mới nhất. */
   onLuu?: () => void
-  onChuyenTrangThai?: (chuyen: ChuyenTrangThai) => void
 }
 
-export function ReportForm({ mau, chiTiet, xungDot, loiLamMoi = false, onLuu, onChuyenTrangThai }: ReportFormProps) {
+export function ReportForm({ mau, chiTiet, loiLamMoi = false, onLuu }: ReportFormProps) {
   const [s, dispatch] = useReducer(rutGon, chiTiet, khoiTao)
   const quyen = useSession((st) => st.permissions)
   const formRef = useRef<HTMLDivElement>(null)
   const luuGiaTri = useSaveValues(chiTiet.id, chiTiet.version)
+  const chuyen = useChuyenTrangThai(chiTiet.id, chiTiet.header, {
+    onLoi: (loi) => dispatch({ type: 'loi-chuyen', loi }),
+  })
 
   const luu = onLuu ?? (() => void luuGiaTri.saveNow())
   // Gắn ở GỐC form chứ không ở riêng khung bảng: Ctrl+S phải chạy cả khi người dùng đang đứng
   // trong textarea nhóm C — vừa gõ xong phần nhận xét là lúc người ta bấm lưu nhiều nhất.
   useKeyboardNav(formRef, luu)
 
-  // 409 tới từ HAI đường: hook lưu ngay trong form này (đường thật), và prop `xungDot` cho nơi gọi
-  // nào cầm sẵn một lỗi 409 của đường khác. Cả hai đều theo dõi bằng DANH TÍNH object — mỗi lần
-  // xung đột là một object mới, nên effect chạy đúng một lần cho mỗi lần xung đột.
-  const xungDotHienTai = luuGiaTri.xungDot ?? xungDot ?? null
+  // 409 của lớp lưu. Theo dõi bằng DANH TÍNH object — mỗi lần xung đột là một object mới, nên
+  // effect chạy đúng một lần cho mỗi lần xung đột.
+  const xungDotHienTai = luuGiaTri.xungDot
   useEffect(() => {
     if (xungDotHienTai) dispatch({ type: 'xung-dot', loi: xungDotHienTai })
   }, [xungDotHienTai])
@@ -479,6 +504,9 @@ export function ReportForm({ mau, chiTiet, xungDot, loiLamMoi = false, onLuu, on
   }
 
   async function bamChuyenTrangThai(c: ChuyenTrangThai) {
+    // Lượt hỏi mới xoá câu lỗi của lượt trước: để nguyên banner cũ bên cạnh hộp thoại vừa mở là
+    // bảo người dùng lượt này cũng đã hỏng trước cả khi họ bấm.
+    dispatch({ type: 'loi-chuyen', loi: null })
     if (c.action_code === 'submit') {
       dispatch({ type: 'bam-nop' })
       const conThieu = mau.indicators.some((ct) => {
@@ -495,10 +523,11 @@ export function ReportForm({ mau, chiTiet, xungDot, loiLamMoi = false, onLuu, on
     // chưa lên tới server là nộp thiếu đúng những ô vừa gõ, và khoá `version` của lượt transition
     // cũng đã cũ. Câu vì sao đã nằm ở banner/dải đầu do lượt lưu vừa rồi dựng lên.
     if (!(await luuGiaTri.saveNow())) return
-    onChuyenTrangThai?.(c)
+    chuyen.hoi(c)
   }
 
   const soCot = coCotLech ? 7 : 6
+  const dangHoi = chuyen.dangHoi
 
   return (
     <div ref={formRef}>
@@ -542,7 +571,10 @@ export function ReportForm({ mau, chiTiet, xungDot, loiLamMoi = false, onLuu, on
           động từ tên transition trong DB, viết cứng ở đây là hiện sai câu (C2). */}
       {luuGiaTri.loiLuu !== null && (
         <Banner kind="danger">
-          <span role="alert">Không lưu được: {luuGiaTri.loiLuu}</span>
+          <span role="alert">
+            Không lưu được: {luuGiaTri.loiLuu}
+            <DongLoi ds={luuGiaTri.loiLuuChiTiet} />
+          </span>
         </Banner>
       )}
 
@@ -550,6 +582,19 @@ export function ReportForm({ mau, chiTiet, xungDot, loiLamMoi = false, onLuu, on
         <Banner kind="warning">
           <span role="alert">
             {s.xungDot.detail} (phiên bản {s.xungDot.tuPhienBan} → {s.xungDot.denPhienBan}). Ô đang gõ được giữ.
+          </span>
+        </Banner>
+      )}
+
+      {/* Lỗi của lượt chuyển trạng thái (Task 24): 400 thiếu ô bắt buộc lúc nộp, 403, và CẢ HAI
+          loại 409. Hiện `detail` NGUYÊN VĂN — câu 409 loại "thao tác không hợp lệ ở trạng thái
+          hiện tại" dựng ĐỘNG từ tên tiếng Việt của transition trong DB, viết cứng ở đây là hiện
+          sai câu (task-24-carry.md C1). */}
+      {s.loiChuyen !== null && (
+        <Banner kind="danger">
+          <span role="alert">
+            Không chuyển trạng thái được: {s.loiChuyen.detail}
+            <DongLoi ds={s.loiChuyen.errors} />
           </span>
         </Banner>
       )}
@@ -657,7 +702,43 @@ export function ReportForm({ mau, chiTiet, xungDot, loiLamMoi = false, onLuu, on
         onLuu={luu}
         onChuyenTrangThai={bamChuyenTrangThai}
       />
+
+      {/* `dangHoi` gán ra một `const` TRƯỚC khi dựng hộp thoại: TypeScript chỉ giữ được phép thu
+          hẹp "khác null" bên trong closure `onConfirm` khi nó nhìn vào một binding không đổi. */}
+      {dangHoi !== null && (
+        <Dialog
+          open={chuyen.dialogMo}
+          {...noiDungDialog(dangHoi, chiTiet.header)}
+          pending={chuyen.pending}
+          // `s.version` chứ không phải `chiTiet.version`: mỗi lần lưu server trả về số mới và
+          // reducer vá vào đây. Gửi số của lần tải trang là cầm chắc 409 với chính mình ngay sau
+          // cú "Nộp luôn lưu trước" ở trên.
+          onConfirm={(ghiChu) => void chuyen.xacNhan(dangHoi, chiTiet.state, s.version, ghiChu)}
+          onCancel={chuyen.huy}
+        />
+      )}
     </div>
+  )
+}
+
+/** Từng dòng `errors[]` của một lỗi 400. `detail` của 400 luôn chỉ là "Dữ liệu không hợp lệ" —
+ * một mình nó không nói được ô nào sai (task-24-carry.md C1: "Hiện danh sách, không hiện một câu
+ * chung chung").
+ *
+ * Mã đọc từ `indicator_code` HOẶC `field_code`: backend có HAI hình dạng `errors` khác nhau, ba ô
+ * chữ nhóm C đi bằng khoá thứ hai (`services/reports.py:515`). Không có link neo tới ô: mã chỉ
+ * tiêu thì neo được (`maNeo`), mã ô chữ thì không có neo nào mang đúng tên đó — một danh sách nửa
+ * bấm được nửa không còn khó hiểu hơn là không bấm được. */
+function DongLoi({ ds }: { ds: ApiErrorItem[] | null }) {
+  if (ds === null || ds.length === 0) return null
+  return (
+    <ul className="mt-1 mb-0 pl-5 list-disc">
+      {ds.map((it) => (
+        <li key={it.indicator_code ?? it.field_code}>
+          {it.indicator_code ?? it.field_code}: {it.message}
+        </li>
+      ))}
+    </ul>
   )
 }
 

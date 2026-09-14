@@ -651,6 +651,61 @@ describe('useSaveValues — đường lỗi', () => {
     expect(h.current.dirtyCount).toBe(1)
   })
 
+  // task-24-carry.md C-T23c: 400 mang HAI hình dạng `errors` khác nhau — `indicator_code` cho ô
+  // số (`services/reports.py:451,489`) và `field_code` cho ba ô chữ nhóm C (`:515`). Cả hai phải
+  // đi trọn vẹn lên tới nơi hiển thị: `detail` một mình chỉ nói "Dữ liệu không hợp lệ", không nói
+  // được ô nào sai.
+  it('400 mang nguyên danh sách errors lên trên, cả dòng field_code lẫn dòng indicator_code', async () => {
+    putSpy.mockRejectedValueOnce(
+      new ApiError(400, {
+        detail: 'Dữ liệu không hợp lệ',
+        errors: [
+          { indicator_code: 'B-2.1', message: 'Số không được âm' },
+          { field_code: 'C1', message: 'Nội dung vượt quá 2000 ký tự' },
+        ],
+      }),
+    )
+    const h = ren()
+    act(() => {
+      h.current.markDirty('B-2.1', { thisPeriod: -1 })
+    })
+    await tick(1600)
+    expect(h.current.loiLuuChiTiet).toEqual([
+      { indicator_code: 'B-2.1', message: 'Số không được âm' },
+      { field_code: 'C1', message: 'Nội dung vượt quá 2000 ký tự' },
+    ])
+  })
+
+  it('lỗi KHÔNG kèm errors (403) thì loiLuuChiTiet là null, không phải mảng rỗng giả', async () => {
+    putSpy.mockRejectedValueOnce(new ApiError(403, { detail: 'Báo cáo ở trạng thái không cho sửa' }))
+    const h = ren()
+    act(() => {
+      h.current.markDirty('B-2.1', { thisPeriod: 1 })
+    })
+    await tick(1600)
+    expect(h.current.loiLuuChiTiet).toBeNull()
+  })
+
+  it('lưu lại thành công thì xoá luôn danh sách errors cũ, không để nó dính lại', async () => {
+    putSpy.mockRejectedValueOnce(
+      new ApiError(400, {
+        detail: 'Dữ liệu không hợp lệ',
+        errors: [{ indicator_code: 'B-2.1', message: 'Số không được âm' }],
+      }),
+    )
+    const h = ren()
+    act(() => {
+      h.current.markDirty('B-2.1', { thisPeriod: -1 })
+    })
+    await tick(1600)
+    expect(h.current.loiLuuChiTiet).toHaveLength(1)
+    act(() => {
+      h.current.markDirty('B-2.1', { thisPeriod: 2 })
+    })
+    await tick(1600)
+    expect(h.current.loiLuuChiTiet).toBeNull()
+  })
+
   it('403 (trạng thái không cho sửa) hiện nguyên văn detail, không nói "mất kết nối"', async () => {
     putSpy.mockRejectedValueOnce(new ApiError(403, { detail: 'Báo cáo ở trạng thái không cho sửa' }))
     const h = ren()

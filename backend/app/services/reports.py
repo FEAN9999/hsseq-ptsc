@@ -574,13 +574,19 @@ def ghi_gia_tri(
             ).all()
         }
         for ma, noi_dung in texts.items():
-            # `""` và `null` là CÙNG một ý "ô rỗng" — chuẩn hoá về `None`. FE nạp
-            # bằng `noiDung ?? ''` (frontend/.../ReportForm.tsx:182) nên ô bị xoá
-            # trắng gửi lên `""`, còn ô chưa ai gõ bao giờ là `NULL`: để nguyên
-            # thì `report_text.content` có HAI cách biểu diễn "rỗng" và mọi truy
-            # vấn `WHERE content IS NOT NULL` ở đường in/xuất sau này đếm sai.
-            # Chuẩn hoá ở BACKEND chứ không ở FE — đây là chỗ nghẹt duy nhất mọi
-            # client đi qua, sửa ở FE thì client sau lại đẻ ra bản thứ hai.
+            # `""` và `null` là CÙNG một ý "ô rỗng" — chuẩn hoá về `None`. Để
+            # nguyên thì `report_text.content` có HAI cách biểu diễn "rỗng" và
+            # mọi truy vấn `WHERE content IS NOT NULL` ở đường in/xuất sau này
+            # đếm sai. Chuẩn hoá ở BACKEND chứ không ở FE — đây là chỗ nghẹt duy
+            # nhất mọi client đi qua, sửa ở FE thì client sau lại đẻ ra bản thứ
+            # hai.
+            # HIỆN TRẠNG (Task 24): CHƯA màn hình nào gửi `texts` lên. Form FM01
+            # cho gõ ba ô chữ nhóm C nhưng lớp lưu (frontend/.../useSaveValues.ts)
+            # chỉ dựng khoá `values`, nên đường ghi này mới chỉ có test và loader
+            # fixture đi qua. Ghi lại đúng như vậy thay vì mô tả một đường FE
+            # chưa tồn tại: khi ai đó nối, ô bị xoá trắng sẽ tới đây dưới dạng
+            # `""` (FE nạp bằng `noiDung ?? ''`, ReportForm.tsx) còn ô chưa ai gõ
+            # bao giờ là `NULL` — đó đúng là hai nhánh dòng dưới đang gộp lại.
             noi_dung = noi_dung or None
             row_chu = dong_chu.get(ma)
             if row_chu is None:

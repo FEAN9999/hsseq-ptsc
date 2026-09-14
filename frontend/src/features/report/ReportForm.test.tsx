@@ -18,9 +18,10 @@
 // PHẢI `npm run build` trước khi chạy file này: các khẳng định màu banner đọc CSS THẬT đã build
 // (`resolveCascadeWinner`, task-20-carry.md C4) chứ không hỏi `className.includes`.
 import { useState, type ReactElement, type ReactNode } from 'react'
-import { act, render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ReportForm, type ChiTietBaoCao, type GiaTriBaoCao, type MauBaoCao, type ChiTieuMau, type LoiXungDot } from './ReportForm'
@@ -123,16 +124,21 @@ interface VeOpts {
   texts?: Record<string, string | null>
   mau?: MauBaoCao
   onLuu?: () => void
-  onChuyenTrangThai?: (c: (typeof CHUYEN)[number]) => void
 }
 
-/** Cây thật bọc form trong `QueryClientProvider` (app/routes.tsx): lớp lưu của Task 23 nằm NGAY
- * TRONG form (`useSaveValues` → `useQueryClient()` để invalidate cache sau mỗi lần lưu), nên thiếu
- * provider là ném ngay lúc render. Mỗi cây một client RIÊNG — dùng chung là đường cho cache rò từ
- * ca này sang ca kia. */
+/** Cây thật bọc form trong `QueryClientProvider` + router (app/routes.tsx): lớp lưu của Task 23
+ * nằm NGAY TRONG form (`useSaveValues` → `useQueryClient()`), và lớp chuyển trạng thái của Task 24
+ * gọi `useNavigate()` cho link "Xem dashboard" của toast — thiếu một trong hai provider là ném
+ * ngay lúc render. Bọc lại cho khớp CÂY THẬT thay vì bẻ mã sản phẩm sang `location.assign` cho
+ * vừa test: đó đúng là nguyên nhân của lỗi S1 ở Task 20 (task-20-fix-1.md). Mỗi cây một client
+ * RIÊNG — dùng chung là đường cho cache rò từ ca này sang ca kia. */
 function BocQuery({ children }: { children: ReactNode }) {
   const [qc] = useState(() => new QueryClient())
-  return <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+  return (
+    <QueryClientProvider client={qc}>
+      <MemoryRouter>{children}</MemoryRouter>
+    </QueryClientProvider>
+  )
 }
 
 function veCay(ui: ReactElement) {
@@ -171,19 +177,33 @@ function ve(opts: VeOpts = {}) {
     texts: opts.texts ?? Object.fromEntries(mau.text_fields.map((t) => [t.code, null])),
   }
 
-  const props = { mau, chiTiet, onLuu: opts.onLuu, onChuyenTrangThai: opts.onChuyenTrangThai }
+  const props = { mau, chiTiet, onLuu: opts.onLuu }
   const r = veCay(<ReportForm {...props} />)
   return {
     ...r,
-    /** Bơm 409 qua prop `xungDot`. Task 22 dựng prop này cho đường đi dự kiến của Task 23; Task 23
-     * đặt `useSaveValues` NGAY TRONG form nên đường THẬT là hook (đo ở khối "đường lỗi của lớp
-     * lưu" cuối file). Prop vẫn là đường hợp lệ cho nơi gọi nào cầm sẵn một lỗi 409 của lượt khác,
-     * và các ca dưới đây đo phần hiển thị 409 mà không phải dựng cả một lượt lưu hỏng. */
-    batLoi409: (loi: LoiXungDot) => r.rerender(<ReportForm {...props} xungDot={loi} />),
     /** Bật cờ "lượt làm mới nền vừa hỏng" — trong app thật cờ này tới từ `pages/ReportDetail.tsx`
      * (fix-1 F1); đường đi thật đo ở ReportDetail.test.tsx, ở đây chỉ đo phần hiển thị. */
     batLoiLamMoi: () => r.rerender(<ReportForm {...props} loiLamMoi />),
   }
+}
+
+/** Hẹn `api.put` từ chối bằng đúng thân 409 "người khác vừa sửa" của
+ * `services/reports.py:438`, rồi đi ĐÚNG đường người dùng đi: sửa một ô, bấm "Lưu".
+ *
+ * Task 22 có prop `xungDot` để bơm thẳng lỗi vào form; Task 24 bỏ prop đó (app thật không ai
+ * truyền — task-24-carry.md C-T23b) nên mọi ca 409 dưới đây chạy qua lớp lưu thật. */
+async function bat409(
+  u: ReturnType<typeof nguoiDung>,
+  ma: string,
+  so: string,
+  loi: LoiXungDot,
+) {
+  putSpy.mockRejectedValueOnce(
+    new ApiError(409, { detail: loi.detail, state: 'draft', version: loi.version, values: loi.values }),
+  )
+  await u.click(o(ma, 'Tháng này'))
+  await u.keyboard(so)
+  await u.click(screen.getByRole('button', { name: 'Lưu' }))
 }
 
 /** Ô của một dòng theo nhãn đầy đủ "<mã> <tên>, <cột>". Xem ghi chú đầu file về việc neo hai đầu. */
@@ -223,6 +243,20 @@ function theoDoiChan(key: string) {
 // Lớp lưu của Task 23 nằm NGAY TRONG form: rời một ô có sửa là hẹn một `PUT` sau 1,5 giây. Chặn
 // `api.put` cho CẢ file — ca nào không nói gì về lưu cũng không được bắn request thật ra ngoài.
 const putSpy = vi.spyOn(api, 'put')
+// Task 24: nút chuyển trạng thái dẫn tới `POST /reports/{id}/transition`. Chặn cho CẢ file —
+// ca nào không nói gì về chuyển trạng thái cũng không được bắn request thật ra ngoài.
+const postSpy = vi.spyOn(api, 'post')
+
+/** Thân của lần `api.post` thứ `lan` (`mock.calls[lan]` là `[path, body]`). */
+function thanPost(lan: number): Record<string, unknown> {
+  return postSpy.mock.calls[lan][1] as Record<string, unknown>
+}
+
+/** Nút BÊN TRONG hộp thoại. Bắt buộc phải thu hẹp phạm vi: nút chính của hộp thoại "Duyệt" trùng
+ * tên với nút "Duyệt" của thanh dính dưới, `screen.getByRole` sẽ ném lỗi "nhiều phần tử". */
+function nutHop(ten: string): HTMLElement {
+  return within(screen.getByRole('dialog')).getByRole('button', { name: ten })
+}
 
 /** Thân của lần `api.put` thứ `lan` (`mock.calls[lan]` là `[path, body]`). */
 function thanPut(lan: number): { version: number; values: Record<string, unknown>[] } {
@@ -233,6 +267,8 @@ beforeEach(() => {
   useSession.getState().logout()
   putSpy.mockReset()
   putSpy.mockResolvedValue({ version: 9, values: [] })
+  postSpy.mockReset()
+  postSpy.mockResolvedValue({ state: 'submitted', version: 9 })
 })
 
 afterEach(() => {
@@ -459,26 +495,25 @@ describe('nộp và ô bắt buộc', () => {
     expect(screen.getByText(/Thiếu \d+ ô bắt buộc/)).toBeTruthy()
   })
 
-  it('thiếu ô bắt buộc thì KHÔNG gọi chuyển trạng thái (chặn trước vòng mạng)', async () => {
-    const onChuyenTrangThai = vi.fn()
-    ve({ state: 'draft', vai: 'reporter', onChuyenTrangThai })
+  it('thiếu ô bắt buộc thì KHÔNG mở hộp thoại và KHÔNG gửi transition (chặn trước vòng mạng)', async () => {
+    ve({ state: 'draft', vai: 'reporter' })
     await userEvent.click(screen.getByRole('button', { name: 'Nộp báo cáo' }))
-    expect(onChuyenTrangThai).not.toHaveBeenCalled()
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(postSpy).not.toHaveBeenCalled()
   })
 
-  it('đủ ô bắt buộc thì Nộp gọi đúng chuyển trạng thái submit của trạng thái hiện tại', async () => {
-    const onChuyenTrangThai = vi.fn()
+  it('đủ ô bắt buộc thì Nộp mở hộp thoại của đúng chuyển trạng thái submit', async () => {
     ve({
       state: 'draft',
       vai: 'reporter',
       mau: mauNho([chiTieu({ code: 'B-1.1' })]),
       values: [{ indicator_code: 'B-1.1', this_period: 5 }],
-      onChuyenTrangThai,
     })
     await userEvent.click(screen.getByRole('button', { name: 'Nộp báo cáo' }))
-    expect(onChuyenTrangThai).toHaveBeenCalledWith(
-      expect.objectContaining({ action_code: 'submit', from_state: 'draft' }),
-    )
+    // Câu chữ của hộp thoại là bằng chứng nó chọn ĐÚNG transition `submit` (spec dòng 682), chứ
+    // không phải chỉ "có một hộp thoại nào đó" mở ra.
+    const hop = await screen.findByRole('dialog')
+    expect(hop.textContent).toContain('Nộp báo cáo 08/2026 của PTSC Miền Trung?')
   })
 
   it('ô bắt buộc của counter là Cộng dồn, không phải Tháng này (theo cellPolicy)', async () => {
@@ -501,7 +536,6 @@ describe('nộp và ô bắt buộc', () => {
       chiTieu({ code: 'B-1.1', agg_type: 'sum' }),
       chiTieu({ code: 'B-1.5', agg_type: 'counter' }),
     ])
-    const chan = vi.fn()
     const { unmount } = ve({
       state: 'draft',
       vai: 'reporter',
@@ -510,14 +544,12 @@ describe('nộp và ô bắt buộc', () => {
         { indicator_code: 'B-1.1', this_period: 1 },
         { indicator_code: 'B-1.5', acc_total_entered: 500 }, // đủ ô bắt buộc của counter
       ],
-      onChuyenTrangThai: chan,
     })
     await userEvent.click(screen.getByRole('button', { name: 'Nộp báo cáo' }))
-    expect(chan).toHaveBeenCalledTimes(1)
+    expect(await screen.findByRole('dialog')).toBeTruthy()
     expect(screen.queryByText(/Thiếu \d+ ô bắt buộc/)).toBeNull()
     unmount()
 
-    const chan2 = vi.fn()
     ve({
       state: 'draft',
       vai: 'reporter',
@@ -526,24 +558,21 @@ describe('nộp và ô bắt buộc', () => {
         { indicator_code: 'B-1.1', this_period: 1 },
         { indicator_code: 'B-1.5', this_period: 7 }, // điền nhầm cột: Cộng dồn vẫn trống
       ],
-      onChuyenTrangThai: chan2,
     })
     await userEvent.click(screen.getByRole('button', { name: 'Nộp báo cáo' }))
-    expect(chan2).not.toHaveBeenCalled()
+    expect(screen.queryByRole('dialog')).toBeNull()
     expect(screen.getByText(/Thiếu 1 ô bắt buộc/)).toBeTruthy()
   })
 
   it('dòng computed không bao giờ bị tính là thiếu ô bắt buộc', async () => {
-    const onChuyenTrangThai = vi.fn()
     ve({
       state: 'draft',
       vai: 'reporter',
       mau: mauNho([chiTieu({ code: 'B-1.4', agg_type: 'computed', formula: 'B-1.1', required: true })]),
-      onChuyenTrangThai,
     })
     await userEvent.click(screen.getByRole('button', { name: 'Nộp báo cáo' }))
     expect(screen.queryByText(/Thiếu \d+ ô bắt buộc/)).toBeNull()
-    expect(onChuyenTrangThai).toHaveBeenCalled()
+    expect(await screen.findByRole('dialog')).toBeTruthy()
   })
 
   it('thanh dưới đếm đúng số ô thiếu và mỗi mã là link tới neo của dòng đó', async () => {
@@ -636,15 +665,15 @@ describe('nộp và ô bắt buộc', () => {
 
 describe('banner', () => {
   it('banner 409 giữ nguyên số đang gõ, chỉ vá cột chỉ đọc và version', async () => {
-    const t = ve({
+    const u = userEvent.setup()
+    ve({
       state: 'draft',
       vai: 'reporter',
       version: 8,
       values: [{ indicator_code: 'B-1.1', acc_prev_computed: 402100 }],
     })
-    await userEvent.type(o('B-2.1', 'Tháng này'), '7')
 
-    t.batLoi409({
+    await bat409(u, 'B-2.1', '7', {
       detail: 'Người khác vừa sửa báo cáo này',
       version: 9,
       values: [giaTri({ indicator_code: 'B-1.1', acc_prev_computed: 999 })],
@@ -663,7 +692,8 @@ describe('banner', () => {
   // kiện THẬT (người khác vừa ghi đè báo cáo), phải cắt ngang trình đọc màn hình; hai banner tĩnh
   // thì không. Ca này khoá cả ba vai trò cùng lúc.
   it('ba banner chia vai đúng: 409 là alert, banner trả lại và kỳ thiếu là status', async () => {
-    const t = ve({
+    const u = userEvent.setup()
+    ve({
       state: 'returned',
       vai: 'reporter',
       decision_note: 'Thiếu số B-8.1',
@@ -673,11 +703,18 @@ describe('banner', () => {
     expect(screen.queryByRole('alert')).toBeNull()
     expect(screen.getAllByRole('status')).toHaveLength(2)
 
-    t.batLoi409({ detail: 'Người khác vừa sửa báo cáo này', version: 9, values: [] })
+    await bat409(u, 'B-1.1', '7', { detail: 'Người khác vừa sửa báo cáo này', version: 9, values: [] })
 
     const bao = await screen.findByRole('alert')
     expect(bao.textContent).toContain('Người khác vừa sửa báo cáo này')
-    expect(screen.getAllByRole('status')).toHaveLength(2) // hai banner tĩnh vẫn là status
+    // Gọi TÊN từng vùng status thay vì đếm tổng: từ Task 23 dải đầu có thêm một vùng status
+    // ("Chưa lưu (1 ô)") mà lượt lưu hỏng ở trên vừa dựng lên, nên một con số tổng không còn nói
+    // được banner nào là banner nào — và nó cũng không bao giờ nói được điều quan trọng nhất:
+    // câu 409 KHÔNG được nằm trong một vùng status.
+    const dsStatus = screen.getAllByRole('status').map((e) => e.textContent ?? '')
+    expect(dsStatus.filter((t) => t.includes('Ban ATCL trả lại'))).toHaveLength(1)
+    expect(dsStatus.filter((t) => t.includes('Lũy kế chưa tính kỳ 07/2026'))).toHaveLength(1)
+    expect(dsStatus.some((t) => t.includes('Người khác vừa sửa báo cáo này'))).toBe(false)
   })
 
   // fix-2 F8 (R12): riêng banner "kỳ thiếu" — gỡ `role="status"` của nó thì vùng sống biến mất mà
@@ -689,16 +726,18 @@ describe('banner', () => {
   })
 
   it('409 lần hai đếm từ version MỚI — chứng minh version đã được vá vào state', async () => {
-    const t = ve({ state: 'draft', vai: 'reporter', version: 8 })
-    t.batLoi409({ detail: 'Người khác vừa sửa báo cáo này', version: 9, values: [] })
+    const u = userEvent.setup()
+    ve({ state: 'draft', vai: 'reporter', version: 8 })
+    await bat409(u, 'B-1.1', '7', { detail: 'Người khác vừa sửa báo cáo này', version: 9, values: [] })
     expect(await screen.findByText(/phiên bản 8 → 9/)).toBeTruthy()
-    t.batLoi409({ detail: 'Người khác vừa sửa báo cáo này', version: 12, values: [] })
+    await bat409(u, 'B-1.1', '8', { detail: 'Người khác vừa sửa báo cáo này', version: 12, values: [] })
     expect(await screen.findByText(/phiên bản 9 → 12/)).toBeTruthy()
   })
 
   it('409 hiện NGUYÊN VĂN detail của server, không viết lại câu', async () => {
-    const t = ve({ state: 'draft', vai: 'reporter' })
-    t.batLoi409({ detail: 'Một câu hoàn toàn khác từ server', version: 9, values: [] })
+    const u = userEvent.setup()
+    ve({ state: 'draft', vai: 'reporter' })
+    await bat409(u, 'B-1.1', '7', { detail: 'Một câu hoàn toàn khác từ server', version: 9, values: [] })
     expect(await screen.findByText(/Một câu hoàn toàn khác từ server/)).toBeTruthy()
   })
 
@@ -708,20 +747,18 @@ describe('banner', () => {
   })
 
   it('banner kỳ thiếu là xám và KHÔNG chặn nộp', async () => {
-    const onChuyenTrangThai = vi.fn()
     ve({
       state: 'draft',
       vai: 'reporter',
       missing_periods: ['2026-07'],
       mau: mauNho([chiTieu({ code: 'B-1.1' })]),
       values: [{ indicator_code: 'B-1.1', this_period: 5 }],
-      onChuyenTrangThai,
     })
     const b = screen.getByText(/Lũy kế chưa tính kỳ 07\/2026/)
     expect(resolveCascadeWinner(b.closest('div')!.className, 'background-color')).toBe('bg-mutedbg')
 
     await userEvent.click(screen.getByRole('button', { name: 'Nộp báo cáo' }))
-    expect(onChuyenTrangThai).toHaveBeenCalled()
+    expect(await screen.findByRole('dialog')).toBeTruthy()
   })
 
   it('không thiếu kỳ nào thì không có banner kỳ thiếu', () => {
@@ -740,19 +777,17 @@ describe('bộ đếm lệch công thức', () => {
   }
 
   it('counter lệch: cảnh báo ngay ô + câu gợi ý, KHÔNG chặn nộp', async () => {
-    const onChuyenTrangThai = vi.fn()
     ve({
       state: 'draft',
       vai: 'reporter',
       mau: mauNho([chiTieu({ code: 'B-1.5', agg_type: 'counter' })]),
       values: [{ indicator_code: 'B-1.5', this_period: 180, acc_total_entered: 180, counter_check: LECH }],
-      onChuyenTrangThai,
     })
     expect(screen.getByText(/Lệch công thức/)).toBeTruthy()
     expect(screen.getByText(/1 bộ đếm lệch công thức chưa có ghi chú/)).toBeTruthy()
 
     await userEvent.click(screen.getByRole('button', { name: 'Nộp báo cáo' }))
-    expect(onChuyenTrangThai).toHaveBeenCalled()
+    expect(await screen.findByRole('dialog')).toBeTruthy()
   })
 
   // status 'bo_qua' CÓ message không rỗng (report_rules.py: "Kỳ trước chưa duyệt, không kiểm tra
@@ -2173,22 +2208,40 @@ describe('đường lỗi của lớp lưu', () => {
 describe('Nộp luôn lưu trước rồi mới chuyển trạng thái', () => {
   beforeEach(dongHoGia)
 
-  it('bấm Nộp khi còn ô chưa lưu: PUT đi trước, transition đi sau', async () => {
+  // task-24-carry.md C-T23a: ô cuối người dùng gõ trước khi bấm "Nộp" gần như luôn còn trong cửa
+  // sổ debounce 1,5 giây. PUT phải đi TRƯỚC `POST .../transition`, nếu không báo cáo được nộp
+  // THIẾU đúng con số vừa gõ và không ai biết. Ca này đo cả hai đầu: thân PUT có ô đó, và thứ tự
+  // hai lời gọi mạng.
+  it('bấm Nộp khi còn ô chưa lưu: PUT đi trước, POST transition đi sau', async () => {
     const u = nguoiDung()
-    const onChuyenTrangThai = vi.fn()
     ve({
       state: 'draft',
       vai: 'reporter',
       mau: mauNho([chiTieu({ code: 'B-1.1' })]),
-      onChuyenTrangThai,
     })
     await u.click(o('B-1.1', 'Tháng này'))
     await u.keyboard('12')
     await u.click(screen.getByRole('button', { name: 'Nộp báo cáo' }))
+    await screen.findByRole('dialog')
+    await u.click(nutHop('Nộp'))
 
     expect(thanPut(0).values).toEqual([{ indicator_code: 'B-1.1', this_period: 12 }])
-    expect(onChuyenTrangThai).toHaveBeenCalledTimes(1)
-    expect(putSpy.mock.invocationCallOrder[0]).toBeLessThan(onChuyenTrangThai.mock.invocationCallOrder[0])
+    expect(postSpy).toHaveBeenCalledTimes(1)
+    expect(putSpy.mock.invocationCallOrder[0]).toBeLessThan(postSpy.mock.invocationCallOrder[0])
+  })
+
+  // Lưu chạy TRƯỚC khi hộp thoại mở, không phải sau khi xác nhận: người dùng thấy câu "Sau khi nộp
+  // bạn không sửa được" thì số của họ đã lên tới server rồi. Nếu lượt lưu đó hỏng thì hộp thoại
+  // KHÔNG được mở ra (ca "lưu hỏng" ngay dưới).
+  it('PUT chạy ngay lúc bấm nút, TRƯỚC khi hộp thoại xác nhận mở ra', async () => {
+    const u = nguoiDung()
+    ve({ state: 'draft', vai: 'reporter', mau: mauNho([chiTieu({ code: 'B-1.1' })]) })
+    await u.click(o('B-1.1', 'Tháng này'))
+    await u.keyboard('12')
+    await u.click(screen.getByRole('button', { name: 'Nộp báo cáo' }))
+    expect(await screen.findByRole('dialog')).toBeTruthy()
+    expect(putSpy).toHaveBeenCalledTimes(1)
+    expect(postSpy).not.toHaveBeenCalled()
   })
 
   // N8 của người soát: thu hẹp "lưu trước" về riêng `submit` vẫn xanh. Danh sách chuyển trạng thái
@@ -2203,42 +2256,269 @@ describe('Nộp luôn lưu trước rồi mới chuyển trạng thái', () => {
 
   it('chuyển trạng thái KHÁC "Nộp" cũng lưu trước rồi mới transition', async () => {
     const u = nguoiDung()
-    const onChuyenTrangThai = vi.fn()
-    ve({ state: 'draft', vai: 'admin', mau: MAU_DUYET_TU_NHAP(), onChuyenTrangThai })
+    ve({ state: 'draft', vai: 'admin', mau: MAU_DUYET_TU_NHAP() })
     await u.click(o('B-1.1', 'Tháng này'))
     await u.keyboard('12')
     await u.click(screen.getByRole('button', { name: 'Duyệt' }))
+    await screen.findByRole('dialog')
+    await u.click(nutHop('Duyệt'))
 
     expect(thanPut(0).values).toEqual([{ indicator_code: 'B-1.1', this_period: 12 }])
-    expect(putSpy.mock.invocationCallOrder[0]).toBeLessThan(onChuyenTrangThai.mock.invocationCallOrder[0])
+    expect(putSpy.mock.invocationCallOrder[0]).toBeLessThan(postSpy.mock.invocationCallOrder[0])
   })
 
   it('chuyển trạng thái KHÁC "Nộp" mà lưu hỏng thì cũng dừng', async () => {
     putSpy.mockRejectedValueOnce(new TypeError('Failed to fetch'))
     const u = nguoiDung()
-    const onChuyenTrangThai = vi.fn()
-    ve({ state: 'draft', vai: 'admin', mau: MAU_DUYET_TU_NHAP(), onChuyenTrangThai })
+    ve({ state: 'draft', vai: 'admin', mau: MAU_DUYET_TU_NHAP() })
     await u.click(o('B-1.1', 'Tháng này'))
     await u.keyboard('12')
     await u.click(screen.getByRole('button', { name: 'Duyệt' }))
     expect(putSpy).toHaveBeenCalledTimes(1)
-    expect(onChuyenTrangThai).not.toHaveBeenCalled()
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(postSpy).not.toHaveBeenCalled()
   })
 
   it('lưu hỏng thì KHÔNG chuyển trạng thái — nộp bằng số chưa lên server là nộp thiếu', async () => {
     putSpy.mockRejectedValueOnce(new TypeError('Failed to fetch'))
     const u = nguoiDung()
-    const onChuyenTrangThai = vi.fn()
     ve({
       state: 'draft',
       vai: 'reporter',
       mau: mauNho([chiTieu({ code: 'B-1.1' })]),
-      onChuyenTrangThai,
     })
     await u.click(o('B-1.1', 'Tháng này'))
     await u.keyboard('12')
     await u.click(screen.getByRole('button', { name: 'Nộp báo cáo' }))
     expect(putSpy).toHaveBeenCalledTimes(1)
-    expect(onChuyenTrangThai).not.toHaveBeenCalled()
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(postSpy).not.toHaveBeenCalled()
+  })
+})
+
+// ============================================================ hộp thoại chuyển trạng thái (Task 24)
+//
+// Đường đi đầy đủ: bấm nút ở thanh dính → lưu → hộp thoại xác nhận → `POST .../transition`.
+// Khối này đo từ cú bấm tới THÂN REQUEST và tới BANNER lỗi, không đo prop giả nào — Task 24 đã bỏ
+// hẳn prop `onChuyenTrangThai`/`xungDot` của Task 22 (task-24-carry.md C-T23b).
+
+describe('hộp thoại chuyển trạng thái', () => {
+  beforeEach(dongHoGia)
+
+  const MOT_DONG = () => mauNho([chiTieu({ code: 'B-1.1' })])
+  const DA_DIEN = [{ indicator_code: 'B-1.1', this_period: 5 }]
+
+  /** Mở hộp thoại của một nút ở thanh dính rồi trả về chính hộp thoại đó. */
+  async function moHop(u: ReturnType<typeof nguoiDung>, tenNut: string): Promise<HTMLElement> {
+    await u.click(screen.getByRole('button', { name: tenNut }))
+    return screen.findByRole('dialog')
+  }
+
+  it('Nộp: hộp thoại nêu đúng kỳ, đơn vị và hậu quả (spec dòng 682)', async () => {
+    const u = nguoiDung()
+    ve({ state: 'draft', vai: 'reporter', mau: MOT_DONG(), values: DA_DIEN })
+    const hop = await moHop(u, 'Nộp báo cáo')
+    expect(hop.textContent).toContain('Nộp báo cáo 08/2026 của PTSC Miền Trung?')
+    expect(hop.textContent).toContain('Sau khi nộp bạn không sửa được cho tới khi Ban ATCL trả lại.')
+    // Không phải thao tác `requires_note` thì KHÔNG có ô lý do nào.
+    expect(within(hop).queryByRole('textbox')).toBeNull()
+  })
+
+  it('Duyệt: hộp thoại nêu hậu quả "vào tổng toàn Tổng công ty"', async () => {
+    const u = nguoiDung()
+    ve({ state: 'submitted', vai: 'admin', mau: MOT_DONG(), values: DA_DIEN })
+    const hop = await moHop(u, 'Duyệt')
+    expect(hop.textContent).toContain('Duyệt báo cáo này?')
+    expect(hop.textContent).toContain('Số liệu sẽ vào tổng toàn Tổng công ty.')
+  })
+
+  // task-24-carry.md C8: brief không có ca nào kiểm câu chữ của Trả lại / Mở lại.
+  it('Trả lại: nhãn ô lý do đúng nguyên văn spec và nút chính là nút danger', async () => {
+    const u = nguoiDung()
+    ve({ state: 'submitted', vai: 'admin', mau: MOT_DONG(), values: DA_DIEN })
+    const hop = await moHop(u, 'Trả lại…')
+    expect(hop.textContent).toContain('Trả lại báo cáo')
+    expect(within(hop).getByLabelText('Lý do trả lại (người nộp sẽ thấy nguyên văn)')).toBeTruthy()
+    expect(resolveCascadeWinner(nutHop('Trả lại').className, 'background-color')).toBe('bg-danger')
+  })
+
+  it('Mở lại: cũng bắt nhập lý do, và nêu hậu quả "rời khỏi tổng"', async () => {
+    const u = nguoiDung()
+    ve({ state: 'approved', vai: 'admin', mau: MOT_DONG(), values: DA_DIEN })
+    const hop = await moHop(u, 'Mở lại…')
+    expect(hop.textContent).toContain('Số liệu sẽ rời khỏi tổng cho tới khi duyệt lại')
+    expect(within(hop).getByRole('textbox')).toBeTruthy()
+    expect(nutHop('Mở lại').hasAttribute('disabled')).toBe(true)
+  })
+
+  it('xác nhận Nộp gửi đúng thân transition tới đúng báo cáo', async () => {
+    const u = nguoiDung()
+    ve({ id: 77, version: 3, state: 'draft', vai: 'reporter', mau: MOT_DONG(), values: DA_DIEN })
+    await moHop(u, 'Nộp báo cáo')
+    await u.click(nutHop('Nộp'))
+    expect(postSpy.mock.calls[0][0]).toBe('/reports/77/transition')
+    // Không `note` cho thao tác không đòi lý do: gửi thừa chuỗi rỗng là ghi đè `decision_note`
+    // của lượt trả lại trước bằng khoảng trắng.
+    expect(thanPost(0)).toEqual({ action: 'submit', expected_state: 'draft', version: 3 })
+  })
+
+  // `version` của transition phải là số MỚI NHẤT server trả về, không phải số của lần tải trang:
+  // cú "Nộp luôn lưu trước" ngay trước đó đã đẩy version lên. Gửi số cũ là 409 với chính mình.
+  it('version gửi đi là version SAU lần lưu, không phải version lúc tải trang', async () => {
+    putSpy.mockResolvedValueOnce({ version: 20, values: [] })
+    const u = nguoiDung()
+    ve({ state: 'draft', vai: 'reporter', version: 3, mau: MOT_DONG() })
+    await u.click(o('B-1.1', 'Tháng này'))
+    await u.keyboard('12')
+    await moHop(u, 'Nộp báo cáo')
+    await u.click(nutHop('Nộp'))
+    expect(thanPut(0).version).toBe(3)
+    expect(thanPost(0).version).toBe(20)
+  })
+
+  it('Trả lại: lý do người duyệt gõ đi NGUYÊN VĂN vào thân request', async () => {
+    const u = nguoiDung()
+    ve({ state: 'submitted', vai: 'admin', mau: MOT_DONG(), values: DA_DIEN })
+    const hop = await moHop(u, 'Trả lại…')
+    await u.click(within(hop).getByRole('textbox'))
+    await u.keyboard('Thiếu số B-8.1 và B-8.2')
+    await u.click(nutHop('Trả lại'))
+    expect(thanPost(0)).toEqual({
+      action: 'return',
+      expected_state: 'submitted',
+      version: 8,
+      note: 'Thiếu số B-8.1 và B-8.2',
+    })
+  })
+
+  it('Huỷ đóng hộp thoại và KHÔNG gửi gì', async () => {
+    const u = nguoiDung()
+    ve({ state: 'draft', vai: 'reporter', mau: MOT_DONG(), values: DA_DIEN })
+    await moHop(u, 'Nộp báo cáo')
+    await u.click(nutHop('Huỷ'))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(postSpy).not.toHaveBeenCalled()
+  })
+
+  it('Esc đóng hộp thoại và KHÔNG gửi gì', async () => {
+    const u = nguoiDung()
+    ve({ state: 'draft', vai: 'reporter', mau: MOT_DONG(), values: DA_DIEN })
+    await moHop(u, 'Nộp báo cáo')
+    await u.keyboard('{Escape}')
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(postSpy).not.toHaveBeenCalled()
+  })
+
+  // task-24-carry.md C3: nút chính phải KHOÁ trong lúc request bay. Không khoá thì bấm hai lần là
+  // hai `POST` — lần thứ hai chắc chắn 409 và người dùng nhìn thấy một câu lỗi cho thao tác vừa
+  // thành công.
+  it('đang gửi: nút chính khoá và đổi chữ "Đang gửi…"', async () => {
+    postSpy.mockReturnValueOnce(new Promise(() => {})) // treo: đo đúng lúc request còn bay
+    const u = nguoiDung()
+    ve({ state: 'draft', vai: 'reporter', mau: MOT_DONG(), values: DA_DIEN })
+    await moHop(u, 'Nộp báo cáo')
+    await u.click(nutHop('Nộp'))
+    const nut = nutHop('Đang gửi…')
+    expect(nut.hasAttribute('disabled')).toBe(true)
+    await u.click(nut)
+    expect(postSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('chuyển trạng thái xong thì đóng hộp thoại', async () => {
+    const u = nguoiDung()
+    ve({ state: 'draft', vai: 'reporter', mau: MOT_DONG(), values: DA_DIEN })
+    await moHop(u, 'Nộp báo cáo')
+    await u.click(nutHop('Nộp'))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  })
+
+  // task-24-carry.md C1: 400 lúc nộp mang `errors[{indicator_code, message}]` — hiện DANH SÁCH,
+  // không hiện một câu chung chung. `detail` của 400 chỉ là "Dữ liệu không hợp lệ".
+  it('400 thiếu ô bắt buộc: đóng hộp thoại, banner liệt từng mã kèm câu của server', async () => {
+    postSpy.mockRejectedValueOnce(
+      new ApiError(400, {
+        detail: 'Dữ liệu không hợp lệ',
+        errors: [
+          { indicator_code: 'B-8.1', message: 'Chỉ tiêu bắt buộc' },
+          { indicator_code: 'B-8.4', message: 'Chỉ tiêu bắt buộc' },
+        ],
+      }),
+    )
+    const u = nguoiDung()
+    ve({ state: 'draft', vai: 'reporter', mau: MOT_DONG(), values: DA_DIEN })
+    await moHop(u, 'Nộp báo cáo')
+    await u.click(nutHop('Nộp'))
+
+    const bao = await screen.findByRole('alert')
+    expect(bao.textContent).toContain('Dữ liệu không hợp lệ')
+    expect(bao.textContent).toContain('B-8.1: Chỉ tiêu bắt buộc')
+    expect(bao.textContent).toContain('B-8.4: Chỉ tiêu bắt buộc')
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  // Câu 409 loại "thao tác không hợp lệ ở trạng thái hiện tại" dựng ĐỘNG từ tên tiếng Việt của
+  // transition trong DB (hop-dong-loi-backend.md) — hiện nguyên văn, không viết lại.
+  it('409 trong hộp thoại: đóng hộp thoại, banner hiện NGUYÊN VĂN detail của server', async () => {
+    postSpy.mockRejectedValueOnce(
+      new ApiError(409, { detail: 'Không thể "Duyệt" ở trạng thái hiện tại', state: 'draft', version: 9 }),
+    )
+    const u = nguoiDung()
+    ve({ state: 'submitted', vai: 'admin', mau: MOT_DONG(), values: DA_DIEN })
+    await moHop(u, 'Duyệt')
+    await u.click(nutHop('Duyệt'))
+
+    const bao = await screen.findByRole('alert')
+    expect(bao.textContent).toContain('Không thể "Duyệt" ở trạng thái hiện tại')
+    // KHÔNG mượn banner 409 của lớp lưu: transition 409 không mang `values` nên không có "ô đang
+    // gõ" nào được giữ, và hai loại 409 của nó không phân biệt được để nói "phiên bản X → Y".
+    expect(bao.textContent).not.toContain('phiên bản')
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('mất mạng lúc chuyển trạng thái: banner nói rõ chưa gửi được, không hiện JSON', async () => {
+    postSpy.mockRejectedValueOnce(new TypeError('Failed to fetch'))
+    const u = nguoiDung()
+    ve({ state: 'draft', vai: 'reporter', mau: MOT_DONG(), values: DA_DIEN })
+    await moHop(u, 'Nộp báo cáo')
+    await u.click(nutHop('Nộp'))
+    const bao = await screen.findByRole('alert')
+    expect(bao.textContent).toContain('Mất kết nối, chưa gửi được')
+  })
+
+  it('bấm lại lần sau xoá banner lỗi của lần trước', async () => {
+    postSpy.mockRejectedValueOnce(new ApiError(403, { detail: 'Bạn không có quyền duyệt báo cáo này' }))
+    const u = nguoiDung()
+    ve({ state: 'draft', vai: 'reporter', mau: MOT_DONG(), values: DA_DIEN })
+    await moHop(u, 'Nộp báo cáo')
+    await u.click(nutHop('Nộp'))
+    expect(await screen.findByText(/Bạn không có quyền duyệt báo cáo này/)).toBeTruthy()
+
+    await u.click(screen.getByRole('button', { name: 'Nộp báo cáo' }))
+    await screen.findByRole('dialog')
+    expect(screen.queryByText(/Bạn không có quyền duyệt báo cáo này/)).toBeNull()
+  })
+
+  // task-24-carry.md C-T23c: lỗi của ba ô chữ nhóm C đi bằng khoá `field_code`, KHÔNG phải
+  // `indicator_code` (`services/reports.py:515`). Trước Task 24 nó không có chỗ nào hiện được.
+  it('400 của lớp lưu: liệt cả dòng mang indicator_code lẫn dòng mang field_code', async () => {
+    putSpy.mockRejectedValueOnce(
+      new ApiError(400, {
+        detail: 'Dữ liệu không hợp lệ',
+        errors: [
+          { indicator_code: 'B-1.1', message: 'Giá trị không được âm' },
+          { field_code: 'C1', message: 'Nội dung vượt quá 2000 ký tự' },
+        ],
+      }),
+    )
+    const u = nguoiDung()
+    ve({ state: 'draft', vai: 'reporter', mau: MOT_DONG() })
+    await u.click(o('B-1.1', 'Tháng này'))
+    await u.keyboard('12')
+    await u.click(screen.getByRole('button', { name: 'Lưu' }))
+
+    const bao = await screen.findByRole('alert')
+    expect(bao.textContent).toContain('Không lưu được: Dữ liệu không hợp lệ')
+    expect(bao.textContent).toContain('B-1.1: Giá trị không được âm')
+    expect(bao.textContent).toContain('C1: Nội dung vượt quá 2000 ký tự')
   })
 })

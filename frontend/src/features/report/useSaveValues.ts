@@ -29,7 +29,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 
-import { api, ApiError } from '../../api/client'
+import { api, ApiError, type ApiErrorItem } from '../../api/client'
 import { invalidateReportQueries } from '../../api/invalidate'
 import { formatTime } from '../../lib/format'
 import type { GiaTriBaoCao, LoiXungDot } from './ReportForm'
@@ -70,6 +70,10 @@ export interface KetQuaLuu {
   /** `detail` NGUYÊN VĂN của lỗi server không phải xung đột phiên bản. Tuyệt đối không viết lại
    * câu: 409 loại hai và 400 đều mang câu do backend dựng. */
   loiLuu: string | null
+  /** Từng dòng lỗi của 400 (`errors[]`), đi kèm `loiLuu`. `detail` của 400 chỉ là "Dữ liệu không
+   * hợp lệ" — câu đó một mình không nói được ô nào sai, mà đây lại là ĐƯỜNG DUY NHẤT lỗi độ dài
+   * 2000 ký tự của ba ô chữ nhóm C về được tới màn hình (`services/reports.py:515`). */
+  loiLuuChiTiet: ApiErrorItem[] | null
   /** 409 "người khác vừa sửa": object MỚI mỗi lần xung đột (nơi gọi theo dõi bằng danh tính). */
   xungDot: LoiXungDot | null
   /** Giá trị server trả về sau lần lưu thành công gần nhất — C9. Object MỚI mỗi lần lưu. */
@@ -109,6 +113,7 @@ export function useSaveValues(reportId: number, phienBanDau: number): KetQuaLuu 
   const [dirtyCount, setDirtyCount] = useState(0)
   const [offline, setOffline] = useState(false)
   const [loiLuu, setLoiLuu] = useState<string | null>(null)
+  const [loiLuuChiTiet, setLoiLuuChiTiet] = useState<ApiErrorItem[] | null>(null)
   const [xungDot, setXungDot] = useState<LoiXungDot | null>(null)
   const [giaTriMoi, setGiaTriMoi] = useState<PhanHoiLuu | null>(null)
 
@@ -152,6 +157,7 @@ export function useSaveValues(reportId: number, phienBanDau: number): KetQuaLuu 
     setDirtyCount(0)
     setStatus('saving')
     setLoiLuu(null)
+    setLoiLuuChiTiet(null)
     try {
       const kq = await api.put<PhanHoiLuu>(`/reports/${reportId}/values`, {
         version: phienBan.current,
@@ -178,6 +184,7 @@ export function useSaveValues(reportId: number, phienBanDau: number): KetQuaLuu 
           setXungDot({ detail: loi.detail, version: phienBan.current, values: loi.values as GiaTriBaoCao[] })
         } else {
           setLoiLuu(loi.detail)
+          setLoiLuuChiTiet(loi.errors ?? null)
         }
       } else {
         // Không phải `ApiError` = chưa từng có phản hồi nào (fetch ném TypeError). Đó là mất mạng,
@@ -244,6 +251,7 @@ export function useSaveValues(reportId: number, phienBanDau: number): KetQuaLuu 
     dirtyCount,
     offline,
     loiLuu,
+    loiLuuChiTiet,
     xungDot,
     giaTriMoi,
     markDirty,
