@@ -24,6 +24,21 @@
 //   không phải bỏ sót âm thầm): `to={{ pathname: … }}` (object `To`), `to={cond ? a : b}` (ternary),
 //   `to={HANG_SO}` (biến/hằng số cùng file), `navigate({ pathname: … })` (dạng object của
 //   `useNavigate`), và thẻ neo thường `<a href="…">` (không phải điều hướng SPA qua react-router).
+//   task-26-fix-4.md T6(b): năm hình dạng vừa liệt đều là hình dạng dự án KHÔNG dùng (người soát
+//   quét thật và xác nhận), trong khi hình dạng CÓ THẬT mà bộ quét mù lại bị bỏ sót khỏi danh sách —
+//   COMPONENT BỌC CỦA CHÍNH DỰ ÁN MANG PROP `to=`: `<MucNav to="/dashboard|/reports|/status">`
+//   (`components/Sidebar.tsx:91-93`, ba đích LITERAL, trong đó `/status` không xuất hiện ở bất kỳ
+//   file nào khác trong tập quét). Neo tên thẻ chỉ nhận `Link|NavLink|Navigate` nên `<MucNav>` không
+//   ra phần tử nào. Hôm nay bất biến vẫn KÍN cho Sidebar vì "nguồn 1" (routes.test.tsx dựng
+//   `<Sidebar/>` thật rồi đọc href thật) phủ gián tiếp — thả một đích chết vào `<MucNav>` là ca
+//   nguồn 1 đỏ. Nhưng một component bọc `to=` MỚI đặt NGOÀI Sidebar (không có "nguồn 1" nào render
+//   thật) sẽ mù hoàn toàn.
+//
+// task-26-fix-4.md T6(a)/[M-25]: gỡ `src/components` khỏi phạm vi quét vẫn 718/718 xanh — hôm nay
+// không file nào dưới `src/components` có `to="…"` LITERAL khớp neo (đúng lý do vừa nêu: Sidebar
+// dùng `<MucNav>`/`to={to}`), nên chính việc MỞ RỘNG phạm vi ở vòng 3 không có ai canh và một lần
+// refactor gỡ nó ra sẽ qua CI im lặng. Tách danh sách thư mục thành hằng số EXPORT để
+// `routeScan.test.ts` khẳng định được trực tiếp.
 /// <reference types="node" />
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -103,12 +118,10 @@ export function duongDanTrongNoiDung(noiDung: string): string[] {
  * src/components, đã chuẩn hoá — dùng để khẳng định carry C3/C5 (nguồn 4): mỗi đích phải khớp một
  * route thật trong `routeObjects`. task-26-fix-3.md S3: thêm `src/components` (trước đây chỉ
  * pages/features) — `<NavLink>`(Sidebar.tsx)/`<Navigate>` là idiom dự án dùng thật dưới cây này. */
+export const THU_MUC_QUET = ['pages', 'features', 'components'] as const
+
 export function duongDanDieuHuongTrongTrang(): string[] {
-  const files = [
-    ...moiFileNguon(join(SRC_DIR, 'pages')),
-    ...moiFileNguon(join(SRC_DIR, 'features')),
-    ...moiFileNguon(join(SRC_DIR, 'components')),
-  ]
+  const files = THU_MUC_QUET.flatMap((thuMuc) => moiFileNguon(join(SRC_DIR, thuMuc)))
   const ra = new Set<string>()
   for (const f of files) {
     const noiDung = readFileSync(f, 'utf-8')

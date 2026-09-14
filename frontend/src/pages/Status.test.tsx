@@ -148,8 +148,10 @@ function DichDen() {
 // Toast là store TOÀN CỤC (Task 15) — mount cạnh <Status/> giống production (routes.tsx: <Toast/>
 // đứng cạnh <RouterProvider>, không lồng trong trang) để ca "Đã sao chép n đơn vị" tìm được chữ
 // trên màn hình qua chính useToast() thật, không phải một cơ chế toast riêng của trang.
-function renderStatus(initialPath = '/status') {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+function renderStatus(
+  initialPath = '/status',
+  qc = new QueryClient({ defaultOptions: { queries: { retry: false } } }),
+) {
   return render(
     <>
       <QueryClientProvider client={qc}>
@@ -163,6 +165,39 @@ function renderStatus(initialPath = '/status') {
       <Toast />
     </>,
   )
+}
+
+// task-26-fix-4.md — "Dùng đúng chính sách `retry` sản xuất, không chỉ `retry:false`". `renderStatus`
+// ở trên tắt hẳn retry, nên mọi ca dựng-cảnh-lỗi-nền của nó đo một đường KHÁC đường người dùng thật
+// đi: dưới bản sản xuất, một lỗi 5xx còn kéo theo BA lượt thử lại nữa trước khi query sang `error`,
+// và chỉ sau lượt cuối cùng mới có trạng thái CUỐI để đọc. Hai override dưới đây KHÔNG đụng vào
+// chính sách retry (hàm `retry` lấy NGUYÊN từ app/queryClient.ts):
+//   staleTime: 0 — bản sản xuất đặt 30_000, mà cảnh cần dựng BẮT ĐẦU bằng một lượt làm mới ở NỀN
+//     (refetchOnWindowFocus). Để nguyên 30s thì lượt làm mới đó không bao giờ chạy trong test và
+//     cảnh không dựng được (ở sản xuất nó vẫn chạy — chỉ là sau 30 giây).
+//   retryDelay: 0 — bản sản xuất dùng backoff mặc định 1s/2s/4s ⇒ ~7 giây chờ THẬT mỗi ca. SỐ LƯỢT
+//     thử và điều kiện dừng (4xx dừng ngay, 5xx thử 3 lần) giữ nguyên — chỉ bỏ thời gian chờ.
+function renderStatusRetrySanXuat(initialPath = '/status') {
+  const macDinh = queryClientSanXuat.getDefaultOptions().queries
+  return renderStatus(
+    initialPath,
+    new QueryClient({ defaultOptions: { queries: { ...macDinh, staleTime: 0, retryDelay: 0 } } }),
+  )
+}
+
+// task-26-rereview-3.md [T2]: `waitFor(<đã gọi lần đầu>)` KHÔNG phải mốc đúng — nó thoả ngay ở lần
+// thử ĐẦU, lúc query mới còn `pending` và `placeholderData` vẫn đang giữ lưới cũ, nên ca đọc một
+// KHOẢNH KHẮC chứ không bao giờ thấy trạng thái CUỐI. Mốc đúng: lặp cho tới khi không còn lượt gọi
+// MỚI nào trong một nhịp — tự động chờ hết cả ba lượt thử lại của chính sách sản xuất mà không phải
+// khoá cứng con số 4 (số lượt là chi tiết của queryClient.ts, không phải của ca này).
+async function choLang(demLuotGoi: () => number) {
+  let truoc = -1
+  while (truoc !== demLuotGoi()) {
+    truoc = demLuotGoi()
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 60))
+    })
+  }
 }
 
 describe('/status', () => {
@@ -243,6 +278,24 @@ describe('/status', () => {
     expect(resolveCascadeWinner(chipDac.className, 'border-color')).toBe(
       resolveCascadeWinner(oDac.className, 'border-color'),
     )
+  })
+
+  // task-26-fix-4.md T4 [M-43]: hoán CHỮ hai vế của dòng chú giải ("viền rỗng" ↔ "đặc") mà giữ
+  // nguyên hai chip → 718/718 vẫn xanh. Dòng này là chìa khoá DUY NHẤT trên toàn màn cho ký hiệu
+  // outline/đặc, nên nó có thể dạy NGƯỢC hoàn toàn mà bộ test im lặng: ca Q5 chỉ đọc CHỮ, ca R2 và
+  // ca tuyệt đối cũ chỉ đọc CHIP — không ca nào đọc QUAN HỆ chip ↔ chữ đứng ngay cạnh nó, mà chính
+  // quan hệ đó mới là thứ dòng chú giải sinh ra để nói. Ca này đọc đúng quan hệ: với TỪNG chip, chữ
+  // đứng NGAY SAU nó (nextSibling) phải là vế nói về đúng ký hiệu của chính chip đó.
+  it('T4/[M-43]: chú giải nối ĐÚNG chip với chữ đứng cạnh — chip viền rỗng trước chữ "viền rỗng", chip đặc trước chữ "đặc"', async () => {
+    moiApi()
+    renderStatus()
+    await screen.findByText('PTSC Đình Vũ')
+    const chuGiai = screen.getByTestId('chu-giai')
+    const [chipTruoc, chipSau] = within(chuGiai).getAllByText('Đã duyệt')
+    expect(resolveCascadeWinner(chipTruoc.className, 'background-color')).toBe('bg-transparent')
+    expect(chipTruoc.nextSibling?.textContent).toMatch(/^\s*viền rỗng/)
+    expect(resolveCascadeWinner(chipSau.className, 'background-color')).not.toBe('bg-transparent')
+    expect(chipSau.nextSibling?.textContent).toMatch(/^\s*đặc/)
   })
 
   it('is_late hiện Đã nộp (muộn)', async () => {
@@ -580,6 +633,43 @@ describe('/status', () => {
 
   // ---- Tải/lỗi: khuôn ReportDetail.tsx/Dashboard.tsx, carry C13.
 
+  // task-26-fix-4.md T5 [M-39]: bỏ vế `den === undefined` khỏi nhánh "không kỳ mở" → 718/718 vẫn
+  // xanh. Hậu quả thật: giữa lúc `/periods` đã về mà `/status` còn bay (mạng chậm), màn hiện "Chưa
+  // có kỳ nào đang mở để hiển thị tình trạng nộp" trong khi kỳ 09/2026 đang mở hẳn hoi — một câu nói
+  // dối chớp trên màn, và ở cảnh cửa-thứ-bảy thì nó ở lại luôn. Ca `Q2/[B-2]` không bắt vì ở đó
+  // `den` THẬT SỰ `undefined`; ca "lần tải đầu tiên CÓ hiện skeleton" không bắt vì nó chặn CẢ HAI
+  // endpoint (nên `ky.data` cũng `undefined`). Thiếu đúng một cảnh, chính là cảnh này.
+  it('T5/[M-39]: /periods về TRƯỚC, /status còn treo — hiện SKELETON, không phải "Chưa có kỳ nào đang mở"', async () => {
+    const f = vi.fn((url: string) => {
+      if (url.includes('/templates/FM01/periods')) {
+        return Promise.resolve({ ok: true, status: 200, json: async () => PERIODS })
+      }
+      if (url.includes('/status?')) {
+        return new Promise<never>(() => {})
+      }
+      throw new Error(`URL không lường trước: ${url}`)
+    })
+    vi.stubGlobal('fetch', f)
+    renderStatus()
+    // Mốc: `/status` ĐÃ được bắn ⇒ `ky.data` đã về và `den` đã suy ra được (09/2026 đang mở).
+    await waitFor(() => expect(f.mock.calls.some(([u]) => String(u).includes('/status?'))).toBe(true))
+    expect(await screen.findByTestId('skeleton')).toBeTruthy()
+    expect(screen.queryByText('Chưa có kỳ nào đang mở để hiển thị tình trạng nộp')).toBeNull()
+  })
+
+  // task-26-fix-4.md T7 [C-1b]: `/status` trả `{periods: [], units: []}` với mã 200 — BE trục trặc,
+  // hoặc mẫu chưa có kỳ nào — làm `data.periods[0]` là `undefined`, `formatPeriod` gọi `.split` trên
+  // `undefined` và NỔ TypeError. Không có ErrorBoundary nào trong `src/` nên đó là TRẮNG MÀN: kiểu
+  // hỏng tệ nhất trong danh sách, đo được ở CẢ vòng 2 lẫn vòng 3 mà hai lần đều xếp "không chặn".
+  // Mốc đọc là `chu-giai` — nó CHỈ có ở thân render chính, nên tới được nó nghĩa là thân render đã
+  // chạy trọn vẹn, không ném (nếu còn lỗi thì ca đỏ ngay tại đây).
+  it('T7/[C-1b]: /status trả 200 với periods RỖNG — trang vẫn vẽ được, không nổ trắng màn (ẩn dòng phạm vi)', async () => {
+    moiApi({ trangThai: { periods: [], units: [] } })
+    renderStatus()
+    expect(await screen.findByTestId('chu-giai')).toBeTruthy()
+    expect(screen.queryByText(/kỳ đầu có dữ liệu/)).toBeNull()
+  })
+
   it('lần tải đầu tiên CÓ hiện skeleton trước khi dữ liệu về', async () => {
     vi.stubGlobal('fetch', vi.fn(() => new Promise<never>(() => {})))
     renderStatus()
@@ -666,16 +756,25 @@ describe('/status', () => {
     expect(screen.queryByText('Không tải được dữ liệu')).toBeNull()
   })
 
-  // task-26-fix-3.md S1 [LỖI HÀNH VI] — cửa THỨ SÁU. Khác ca C13 mục 2 ngay trên (ở đó queryKey của
-  // `tk` KHÔNG đổi — cùng-queryKey lỗi nền là đường ĐÃ đúng từ trước): ca này đổi `den` Ở NỀN trước
-  // (quản trị mở kỳ mới — đúng cảnh Q1 vòng 1 vừa vá), làm queryKey của `tk` đổi theo, RỒI query của
-  // queryKey MỚI đó lỗi TRƯỚC KHI kịp thành công một lần. TanStack v5 chỉ áp
-  // `placeholderData`/`keepPreviousData` lúc query `pending`; sang `error` thì `tk.data` rơi về
-  // `undefined` dù `keepPreviousData` vừa hiện đúng lưới cũ một khoảnh khắc trước — bản vá vòng 2
-  // (`tk.data === undefined`) không phân biệt được trạng thái này với "chưa từng có dữ liệu", nên
-  // lưới bị InlineError nuốt mất dù dữ liệu cũ hoàn toàn còn đúng (đây là "cửa thứ sáu").
-  it('S1/[H-1]: /periods đổi ở NỀN sang kỳ MỚI rồi /status của kỳ MỚI lỗi: LƯỚI VẪN CÒN, không bị thay bằng InlineError', async () => {
+  // task-26-fix-3.md S1 + task-26-fix-4.md T1/T2 — cửa THỨ BẢY của "lỗi nền phá màn đang có dữ
+  // liệu". Cảnh: đã có lưới trên màn, RỒI `/periods` đổi ở NỀN sang kỳ MỚI (quản trị mở kỳ mới —
+  // việc hằng tháng) làm `queryKey` của `tk` đổi, RỒI query của queryKey MỚI đó lỗi TRƯỚC KHI kịp
+  // thành công một lần. TanStack v5 chỉ áp `placeholderData`/`keepPreviousData` lúc query `pending`;
+  // sang `error` thì `tk.data` rơi về `undefined` dù `keepPreviousData` vừa hiện đúng lưới cũ một
+  // khoảnh khắc trước.
+  //
+  // BẢN TRƯỚC CỦA CA NÀY LÀ BẰNG CHỨNG RỖNG (task-26-rereview-3.md [T2], mù kiểu (a)+(b)): nó chờ
+  // `goiThuPeriods > 1` — mốc chỉ chứng minh `/periods` đã về lượt hai, KHÔNG chứng minh query
+  // `/status` của kỳ MỚI đã chạy xong — nên `waitFor` thoả ngay ở lần thử ĐẦU, lúc `tk` còn `pending`
+  // và `placeholderData` vẫn đang giữ lưới cũ; trạng thái CUỐI không bao giờ được đọc. Khẳng định âm
+  // lại chỉ canh `InlineError`, trong khi trạng thái CUỐI hồi đó là **skeleton**. Người soát chèn một
+  // dòng chờ lắng 50ms là ca ĐỎ ngay trên HEAD, mã sản phẩm không đụng gì.
+  // Ba thứ sửa ở ca này, và cả ba đều cần: (1) chờ đúng mốc — lượt gọi `/status` CỦA KỲ MỚI, rồi chờ
+  // LẮNG cho hết cả ba lượt thử lại; (2) canh CẢ HAI màn hình thay thế (`skeleton` LẪN `InlineError`)
+  // — cửa này có hai lối thoát, ca cũ chỉ bịt một; (3) chạy dưới ĐÚNG chính sách `retry` sản xuất.
+  it('S1/[H-1]: /periods đổi ở NỀN sang kỳ MỚI rồi /status của kỳ MỚI lỗi — trạng thái CUỐI vẫn là LƯỚI (không skeleton, không InlineError) kèm băng báo dữ liệu cũ', async () => {
     let goiThuPeriods = 0
+    let goiStatusKyMoi = 0
     const PERIODS_MOI = [...PERIODS, { period_key: '2026-10', is_open: true }]
     const f = vi.fn((url: string) => {
       if (url.includes('/templates/FM01/periods')) {
@@ -688,6 +787,7 @@ describe('/status', () => {
       }
       if (url.includes('/status?')) {
         if (url.includes('to=2026-10')) {
+          goiStatusKyMoi++
           return Promise.resolve({ ok: false, status: 500, json: async () => ({ detail: 'Lỗi máy chủ' }) })
         }
         return Promise.resolve({ ok: true, status: 200, json: async () => DEFAULT_STATUS })
@@ -695,17 +795,27 @@ describe('/status', () => {
       throw new Error(`URL không lường trước: ${url}`)
     })
     vi.stubGlobal('fetch', f)
-    renderStatus()
+    renderStatusRetrySanXuat()
     expect(await screen.findByText('PTSC Đình Vũ')).toBeTruthy()
 
     await act(async () => {
       window.dispatchEvent(new Event('visibilitychange'))
     })
-    await waitFor(() => expect(goiThuPeriods).toBeGreaterThan(1))
-    // queryKey của `tk` đã đổi (den 09 -> 10) và query MỚI đó đã lỗi 500 — lưới PHẢI còn nguyên,
-    // không bị thay bằng "Không tải được dữ liệu".
-    await waitFor(() => expect(screen.getByText('PTSC Đình Vũ')).toBeTruthy())
+    // Mốc ĐÚNG: `/status` của kỳ MỚI (to=2026-10) đã bắn, rồi chờ LẮNG hết cả ba lượt thử lại 5xx.
+    await waitFor(() => expect(goiStatusKyMoi).toBeGreaterThan(0))
+    await choLang(() => goiStatusKyMoi)
+
+    // Trạng thái CUỐI (không phải khoảnh khắc): lưới CÒN...
+    expect(screen.getByText('PTSC Đình Vũ')).toBeTruthy()
+    // ...và không rơi vào BẤT KỲ màn hình thay thế nào trong hai lối thoát của cửa này.
+    expect(screen.queryByTestId('skeleton')).toBeNull()
     expect(screen.queryByText('Không tải được dữ liệu')).toBeNull()
+    // Giữ lưới mà IM LẶNG là một lỗi khác (người dùng đọc số cũ tưởng số mới): phải có băng nói dữ
+    // liệu đang cũ + một đường thử lại. Khoá bằng testid + sự CÓ MẶT của nút, không khoá nguyên văn
+    // câu chữ — để một bản vá sau đổi lời mà không bị ca này phạt (mù kiểu (d)).
+    const bang = screen.getByTestId('bang-du-lieu-cu')
+    expect(bang.textContent).not.toBe('')
+    expect(within(bang).getByRole('button', { name: 'Thử lại' })).toBeTruthy()
   })
 
   // task-26-fix-1.md Q1 [CHẶN] — lớp lỗi "lỗi nền phá màn đang có dữ liệu" (carry C13 mục 2) lần

@@ -16,7 +16,7 @@
 // tưởng tượng).
 import { describe, expect, it } from 'vitest'
 
-import { duongDanTrongNoiDung } from './routeScan'
+import { duongDanTrongNoiDung, THU_MUC_QUET } from './routeScan'
 
 describe('duongDanTrongNoiDung — <Link to=>: từng kiểu trích dẫn/hình dạng prop (task-26-fix-2.md R4)', () => {
   it.each<[string, string, string]>([
@@ -96,5 +96,15 @@ describe('duongDanTrongNoiDung — navigate(): cả ba kiểu trích dẫn (task
   // không phải hằng số tĩnh — KHÔNG được quét; kiểm bằng chạy THẬT đường đăng nhập (Login.test.tsx).
   it('navigate(bien) — đích động — KHÔNG ra phần tử nào', () => {
     expect(duongDanTrongNoiDung('navigate(noiBo)')).toEqual([])
+  })
+})
+
+// task-26-fix-4.md T6(a) / task-26-rereview-3.md [M-25]: trước ca này, gỡ `src/components` khỏi
+// phạm vi quét vẫn 718/718 xanh — không file nào dưới đó có `to="…"` LITERAL khớp neo hôm nay, nên
+// chính VIỆC MỞ RỘNG phạm vi ở vòng 3 không có ai canh. Khẳng định thẳng vào danh sách thư mục
+// (hằng số mà `duongDanDieuHuongTrongTrang` đọc): gỡ một thư mục ra là ca này đỏ, không im lặng.
+describe('phạm vi quét — carry C5 nguồn 4 (task-26-fix-4.md T6a)', () => {
+  it('[M-25] quét ĐÚNG ba thư mục: pages, features, components', () => {
+    expect([...THU_MUC_QUET]).toEqual(['pages', 'features', 'components'])
   })
 })
