@@ -216,6 +216,35 @@ describe('/status', () => {
     expect(screen.getByText(/đặc = nộp trên hệ thống/)).toBeTruthy()
   })
 
+  // task-26-fix-2.md R2: Q5 (trên) chỉ đọc CHỮ — người soát đảo/bỏ/đổi kind hai chip chú giải mà
+  // 697/697 vẫn xanh, vì không ca nào đọc CHÍNH CÁI CHIP. Khoá bằng cách đo `className` (qua
+  // resolveCascadeWinner, cùng kỹ thuật người soát dùng ở Phần C-2 báo cáo soát) của hai chip chú
+  // giải trùng khít chip tương ứng thật trong lưới, trên cả hai thuộc tính cascade quyết định
+  // outline (background-color VÀ border-color — thiếu border-color thì đổi outline↔đặc mà giữ
+  // nguyên nền trong suốt vẫn lọt). `within(chuGiai)` khoanh đúng phạm vi, tách khỏi chip "Đã duyệt"
+  // trùng chữ trong lưới.
+  it('R2: chip chú giải KHÔNG vẽ sai ký hiệu — className trùng khít chip tương ứng trong lưới', async () => {
+    moiApi()
+    renderStatus()
+    await screen.findByText('PTSC Đình Vũ')
+    const chuGiai = screen.getByTestId('chu-giai')
+    const [chipRong, chipDac] = within(chuGiai).getAllByText('Đã duyệt')
+    const oRong = screen.getByTestId('o-U01-2026-06') // approved + seed -> outline
+    const oDac = screen.getByTestId('o-U22-2026-08') // approved + live -> đặc
+    expect(resolveCascadeWinner(chipRong.className, 'background-color')).toBe(
+      resolveCascadeWinner(oRong.className, 'background-color'),
+    )
+    expect(resolveCascadeWinner(chipRong.className, 'border-color')).toBe(
+      resolveCascadeWinner(oRong.className, 'border-color'),
+    )
+    expect(resolveCascadeWinner(chipDac.className, 'background-color')).toBe(
+      resolveCascadeWinner(oDac.className, 'background-color'),
+    )
+    expect(resolveCascadeWinner(chipDac.className, 'border-color')).toBe(
+      resolveCascadeWinner(oDac.className, 'border-color'),
+    )
+  })
+
   it('is_late hiện Đã nộp (muộn)', async () => {
     moiApi()
     renderStatus()
@@ -303,11 +332,16 @@ describe('/status', () => {
   // Tự phát hiện qua mutation-test: tự mutate tongTheoKy (StatusGrid.tsx) bỏ hẳn
   // `.filter((n) => (dem.get(n.state) ?? 0) > 0)` — ca "dòng cuối là Tổng theo kỳ" trên chỉ kiểm
   // .textContent CÓ CHỨA "Tổng theo kỳ" (tên dòng), không kiểm NỘI DUNG con số từng ô, nên 25/25 ca
-  // cũ vẫn xanh dù mọi ô kỳ sẽ hiện đủ "4 duyệt · 0 nộp · 0 nháp · 0 trả lại · 0 chưa" thay vì đúng
-  // "4 duyệt" NGẮN GỌN (mockup: "22/22 duyệt" — không liệt nhóm rỗng). Đọc theo ÁNH XẠ tiêu đề kỳ
-  // (carry C12 mục 2, không theo chỉ số cột cứng) — kỳ 2026-06 trong DEFAULT_UNITS mọi đơn vị đều
-  // 'approved', nên kết quả ĐÚNG DUY NHẤT phải là chuỗi "4 duyệt", không có nhóm 0 nào kèm theo.
-  it('dòng Tổng theo kỳ chỉ liệt nhóm khác 0 — kỳ toàn "đã duyệt" chỉ hiện "4 duyệt", không kèm "0 nộp"/"0 nháp"/…', async () => {
+  // cũ vẫn xanh dù ô kỳ này sẽ hiện đủ "4 duyệt · 0 nộp · 1 nháp · 0 trả lại · 0 chưa" thay vì đúng
+  // "4 duyệt · 1 nháp" NGẮN GỌN (mockup: "22/22 duyệt" — không liệt nhóm rỗng). Đọc theo ÁNH XẠ tiêu
+  // đề kỳ (carry C12 mục 2, không theo chỉ số cột cứng).
+  // task-26-fix-2.md R6: tên + đoạn trên từng khẳng định kỳ 2026-06 "toàn đã duyệt" / kết quả ĐÚNG
+  // DUY NHẤT là "4 duyệt" — SAI kể từ khi P05 (draft ở 2026-06, task-26-fix-1.md Q6) vào
+  // DEFAULT_UNITS: U01/U05/U22/U23 approved (4) + P05 draft (1), nên nhóm khác 0 ở kỳ này là HAI,
+  // không phải một — tên/chú thích nói dối so với khẳng định thật `'4 duyệt · 1 nháp'` bên dưới. Sửa
+  // lại cho khớp; giá trị của ca (khoá đúng chỉ-liệt-nhóm-khác-0, không phải chỉ-một-nhóm) không đổi
+  // — "0 nộp"/"0 trả lại"/"0 chưa" vẫn đúng là ba nhóm phải VẮNG MẶT ở kỳ này.
+  it('dòng Tổng theo kỳ chỉ liệt nhóm khác 0 — kỳ 06/2026 (4 duyệt + 1 nháp/P05) không kèm "0 nộp"/"0 trả lại"/"0 chưa"', async () => {
     moiApi()
     renderStatus()
     const tieuDe = (await screen.findAllByRole('columnheader')).map((h) => h.textContent)
@@ -335,8 +369,11 @@ describe('/status', () => {
   // task-26-fix-1.md Q6: KHÔNG ca nào trước bản vá này đọc cột "kỳ đang mở" (09/2026) của dòng Tổng
   // — đúng cột người xem demo nhìn nhiều nhất. Đột biến Đ10 (đổi nhãn nhóm 'chưa' thành rác) SỐNG vì
   // lẽ đó: 06/2026 và 08/2026 (hai cột duy nhất có ca trước đây) không đơn vị nào null ở đó, nên
-  // nhóm 'chưa' chưa từng xuất hiện trong bất kỳ khẳng định nào. Ca này khoá đúng cột đó, với ĐỦ NĂM
-  // nhóm cùng khác 0 một lượt (P05 'trả lại' mới thêm đứng vào đúng vị trí thứ tư theo NHOM_TONG).
+  // nhóm 'chưa' chưa từng xuất hiện trong bất kỳ khẳng định nào. Ca này khoá đúng cột đó — CHỈ BỐN
+  // nhóm khác 0 ở cột 09/2026 (P05 'trả lại' mới thêm đứng vào đúng vị trí thứ tư theo NHOM_TONG;
+  // 'draft'/nháp KHÔNG xuất hiện ở cột này, DEFAULT_UNITS không có đơn vị nào 'draft' ở 09/2026) —
+  // task-26-fix-2.md R5: bản trước ghi nhầm "ĐỦ NĂM nhóm", đã sửa; ca ĐỦ NĂM nhóm thật (khoá cả thứ
+  // tự draft ↔ returned, chưa ai khoá trước bản vá này) nằm riêng ngay dưới, dữ liệu tự dựng cô lập.
   it('Q6: dòng Tổng theo kỳ ở CỘT KỲ ĐANG MỞ (09/2026) — đủ cả "trả lại" và "chưa", đúng thứ tự NHOM_TONG', async () => {
     moiApi()
     renderStatus()
@@ -345,6 +382,29 @@ describe('/status', () => {
     const oCells = within(dongTong).getAllByRole('cell').map((c) => c.textContent)
     // U01 duyệt, U05 nộp, U22 chưa, U23 chưa, P05 trả lại -> 1 duyệt · 1 nộp · 1 trả lại · 2 chưa
     expect(oCells[tieuDe.indexOf('09/2026')]).toBe('1 duyệt · 1 nộp · 1 trả lại · 2 chưa')
+  })
+
+  // task-26-fix-2.md R5: ca Q6 (trên) chỉ có BỐN nhóm khác 0 ở cột nó khoá — 'draft' vắng mặt, nên
+  // thứ tự draft ↔ returned trong NHOM_TONG (StatusGrid.tsx) CHƯA từng bị bất kỳ ca nào kiểm. Ca này
+  // tự dựng MỘT kỳ với ĐỦ NĂM nhóm cùng khác 0 (dữ liệu cô lập — không đụng DEFAULT_UNITS, tránh vỡ
+  // các ca khác đang dựa vào đúng 5 đơn vị/vị trí hàng của nó), khoá ĐÚNG thứ tự NHOM_TONG trọn vẹn.
+  it('R5: dòng Tổng theo kỳ — ĐỦ NĂM nhóm cùng khác 0, đúng thứ tự NHOM_TONG trọn vẹn (kể cả draft ↔ returned)', async () => {
+    const unitsNamNhom: StatusUnit[] = [
+      { code: 'X1', name: 'X1', cells: [o('2026-06', 'approved', 'seed', false, 91)] },
+      { code: 'X2', name: 'X2', cells: [o('2026-06', 'submitted', 'live', false, 92)] },
+      { code: 'X3', name: 'X3', cells: [o('2026-06', 'draft', 'live', false, 93)] },
+      { code: 'X4', name: 'X4', cells: [o('2026-06', 'returned', 'live', false, 94)] },
+      { code: 'X5', name: 'X5', cells: [o('2026-06', null, null, null, null)] },
+    ]
+    moiApi({
+      periods: [{ period_key: '2026-06', is_open: true }],
+      trangThai: { periods: ['2026-06'], units: unitsNamNhom },
+    })
+    renderStatus()
+    const tieuDe = (await screen.findAllByRole('columnheader')).map((h) => h.textContent)
+    const dongTong = screen.getByText('Tổng theo kỳ').closest('tr')!
+    const oCells = within(dongTong).getAllByRole('cell').map((c) => c.textContent)
+    expect(oCells[tieuDe.indexOf('06/2026')]).toBe('1 duyệt · 1 nộp · 1 nháp · 1 trả lại · 1 chưa')
   })
 
   // ---- Ngoài brief — carry C6/C7: from/to suy từ GET /templates/FM01/periods, không khoá cứng.
@@ -638,7 +698,115 @@ describe('/status', () => {
     expect(screen.queryByTestId('skeleton')).toBeNull()
   })
 
+  // task-26-fix-2.md R1 [LỖI HÀNH VI] — nhánh Q2 (vòng sửa 1) là cửa THỨ NĂM của cùng lớp lỗi trên:
+  // nhánh đó không hỏi `tk.data`, nên khi `/templates/FM01/periods` làm mới Ở NỀN và trả về "không
+  // kỳ nào is_open" (quản trị đóng hết kỳ trước khi mở kỳ mới — hai thao tác, không nguyên tử; hoặc
+  // một lượt 200 thân rỗng — trục trặc BE), cả lưới người dùng đang đọc bị thay bằng một dòng chữ,
+  // dù `tk.data` (nhờ `keepPreviousData` của Q1) vẫn còn nguyên và vẫn ĐÚNG — đó là lịch sử đã
+  // duyệt, không tự sai đi chỉ vì hiện giờ không kỳ nào đang mở.
+  it('R1/[H-1]: đang xem lưới, /periods đổi ở NỀN thành "không kỳ nào mở": LƯỚI VẪN CÒN, không bị thay bằng câu giải thích', async () => {
+    let goiThu = 0
+    const PERIODS_DONG_HET = PERIODS.map((p) => ({ ...p, is_open: false })) // quản trị đóng hết kỳ
+    const f = vi.fn((url: string) => {
+      goiThu++
+      const laLanDau = goiThu <= 2
+      if (url.includes('/templates/FM01/periods')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => (laLanDau ? PERIODS : PERIODS_DONG_HET),
+        })
+      }
+      if (url.includes('/status?')) {
+        return Promise.resolve({ ok: true, status: 200, json: async () => DEFAULT_STATUS })
+      }
+      throw new Error(`URL không lường trước: ${url}`)
+    })
+    vi.stubGlobal('fetch', f)
+    renderStatus()
+    expect(await screen.findByText('PTSC Đình Vũ')).toBeTruthy()
+
+    await act(async () => {
+      window.dispatchEvent(new Event('visibilitychange'))
+    })
+    await waitFor(() => expect(goiThu).toBeGreaterThan(2))
+    expect(screen.getByText('PTSC Đình Vũ')).toBeTruthy()
+    expect(screen.queryByText('Chưa có kỳ nào đang mở để hiển thị tình trạng nộp')).toBeNull()
+  })
+
   // ---- 403 (thiếu status.view — vd. reporter gõ thẳng URL /status).
+
+  // task-26-fix-2.md R3: Q1/[B-1] (trên) mock `/status` trả CÙNG một body bất kể `to=`, nên chỉ
+  // khoá được NỬA bất biến — "giữ dữ liệu cũ TRONG LÚC TẢI" — mù với vế còn lại: "đóng băng dữ liệu
+  // cũ VĨNH VIỄN" (bỏ hẳn `den` khỏi queryKey của `tk` cũng làm ca Q1/[B-1] xanh — xem
+  // task-26-rereview-1.md R3). Ca này cho kỳ MỚI (`to=2026-10`) một body THẬT SỰ khác (đơn vị khác
+  // tên hẳn, không lẫn với DEFAULT_STATUS) và GIỮ LẠI (deferred) đúng lượt gọi đó, để đọc được CẢ
+  // HAI pha: Pha 1 — lưới CŨ còn nguyên trong lúc kỳ MỚI đang tải; Pha 2 — sau khi tải xong, lưới
+  // PHẢI đổi sang dữ liệu kỳ MỚI, không kẹt lại ở dữ liệu cũ.
+  it('R3: đổi kỳ ở NỀN — trong lúc tải giữ lưới CŨ, tải xong đổi sang dữ liệu kỳ MỚI (không đóng băng vĩnh viễn)', async () => {
+    const PERIODS_MOI = [...PERIODS, { period_key: '2026-10', is_open: true }]
+    const STATUS_MOI = {
+      periods: PERIODS_MOI.map((p) => p.period_key),
+      units: [
+        {
+          code: 'U99',
+          name: 'PTSC Kỳ Mới',
+          cells: [
+            o('2026-06', 'approved', 'seed', false, 699),
+            o('2026-07', 'approved', 'seed', false, 799),
+            o('2026-08', 'approved', 'seed', false, 899),
+            o('2026-09', 'approved', 'seed', false, 999),
+            o('2026-10', null, null, null, null),
+          ],
+        },
+      ],
+    }
+    let goiThuPeriods = 0
+    let daGoiStatusMoi = false
+    let moKhoaStatusMoi: (() => void) | undefined
+    const cho = new Promise<void>((resolve) => {
+      moKhoaStatusMoi = resolve
+    })
+    const f = vi.fn((url: string) => {
+      if (url.includes('/templates/FM01/periods')) {
+        goiThuPeriods++
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => (goiThuPeriods === 1 ? PERIODS : PERIODS_MOI),
+        })
+      }
+      if (url.includes('/status?')) {
+        if (url.includes('to=2026-10')) {
+          daGoiStatusMoi = true
+          return cho.then(() => ({ ok: true, status: 200, json: async () => STATUS_MOI }))
+        }
+        return Promise.resolve({ ok: true, status: 200, json: async () => DEFAULT_STATUS })
+      }
+      throw new Error(`URL không lường trước: ${url}`)
+    })
+    vi.stubGlobal('fetch', f)
+    renderStatus()
+    expect(await screen.findByText('PTSC Đình Vũ')).toBeTruthy()
+
+    await act(async () => {
+      window.dispatchEvent(new Event('visibilitychange'))
+    })
+    // Pha 1: query kỳ MỚI đã BẮT ĐẦU (đang treo, chưa mở khoá) — lưới CŨ phải còn nguyên, không
+    // skeleton, chưa thấy dữ liệu kỳ mới.
+    await waitFor(() => expect(daGoiStatusMoi).toBe(true))
+    expect(screen.getByText('PTSC Đình Vũ')).toBeTruthy()
+    expect(screen.queryByText('PTSC Kỳ Mới')).toBeNull()
+    expect(screen.queryByTestId('skeleton')).toBeNull()
+
+    // Pha 2: mở khoá — lưới PHẢI đổi sang dữ liệu kỳ MỚI, không kẹt lại ở dữ liệu cũ.
+    await act(async () => {
+      moKhoaStatusMoi?.()
+    })
+    await waitFor(() => expect(screen.getByText('PTSC Kỳ Mới')).toBeTruthy())
+    expect(screen.queryByText('PTSC Đình Vũ')).toBeNull()
+  })
+
 
   it('403 (thiếu status.view) hiện đúng câu "không có quyền" kèm lối thoát, không phải InlineError chung', async () => {
     const f = vi.fn((url: string) => {

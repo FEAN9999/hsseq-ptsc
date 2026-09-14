@@ -73,8 +73,22 @@ export function Status() {
 
   const saoChep = useCopyMissing()
 
-  // Vòng lỗi 403 (thiếu status.view — reporter gõ thẳng URL vẫn tới được route, khuôn
-  // Dashboard.tsx/ReportDetail.tsx): thay CẢ TRANG, đây là kết luận chứ không phải trục trặc tạm.
+  // task-26-fix-2.md R1 [LỖI HÀNH VI]: bốn cửa riêng lẻ của "lỗi nền phá màn đang có dữ liệu" đã vá
+  // rời nhau (Task 20/23/25 qua `error`, Task 26 Q1 qua `loading`/`queryKey`, Q2 qua `data` — rồi Q2
+  // TỰ nó lại mở ra cửa thứ NĂM vì quên hỏi `tk.data`) chứng minh vá từng-cửa-một đang ĐẺ RA cửa
+  // mới. Từ đây LUẬT áp cho TOÀN BỘ cụm nhánh sớm dưới đây, không phải từng mệnh đề rời:
+  //
+  //   MỌI NHÁNH THAY CẢ MÀN HÌNH PHẢI HỎI "TÔI ĐÃ CÓ DỮ LIỆU CHƯA?" TRƯỚC — skeleton, câu trạng
+  //   thái, InlineError, tất cả. CHỈ 403/404 được thay VÔ ĐIỀU KIỆN, vì chúng là KẾT LUẬN (quyền
+  //   không đủ không tự khỏi bằng tải lại), không phải trạng thái tạm.
+  //
+  // Liệt kê + kiểm từng nhánh sớm của trang này theo đúng luật trên (bốn nhánh, theo thứ tự bên
+  // dưới — StatusGrid.test.tsx không có nhánh sớm nào khác ngoài bốn cái này):
+  //   1. 403           — MIỄN, đúng luật (kết luận, xem `loi.status === 403` bên dưới).
+  //   2. lỗi nền (C13)  — ĐÃ hỏi `ky.data === undefined || tk.data === undefined` từ trước, đúng luật.
+  //   3. Q2 "không kỳ mở" — CHƯA hỏi `tk.data` (đây chính là cửa R1) — VÁ ngay dưới.
+  //   4. skeleton       — chính là "hỏi rồi vẫn chưa có" — đúng luật (đây là nhánh MỌI đường hội tụ
+  //      về khi thật sự chưa có dữ liệu, không phải một cửa cần hỏi thêm).
   const loi = ky.error ?? tk.error
   if (loi instanceof ApiError && loi.status === 403) {
     return (
@@ -110,13 +124,16 @@ export function Status() {
     )
   }
 
-  // task-26-fix-1.md Q2: `is_open` là cột boolean quản trị đặt tay (templates.py:113), "không kỳ
-  // nào đang mở" là trạng thái CSDL BÌNH THƯỜNG (giữa hai kỳ, hoặc mẫu vừa seed chưa mở kỳ nào) —
-  // không phải tình huống không thể xảy ra. Không có nhánh này thì `den === undefined` mãi mãi giữ
-  // `enabled` của `tk` ở `false`, `/status` không bao giờ được gọi, và nhánh skeleton bên dưới quay
-  // VĨNH VIỄN không một chữ giải thích. Đặt TRƯỚC nhánh skeleton — khác nhánh đó (chờ MỘT LẦN rồi
-  // xong), tình huống này sẽ KHÔNG BAO GIỜ tự hết bằng cách chờ.
-  if (ky.data !== undefined && den === undefined) {
+  // task-26-fix-1.md Q2 + task-26-fix-2.md R1: `is_open` là cột boolean quản trị đặt tay
+  // (templates.py:113), "không kỳ nào đang mở" là trạng thái CSDL BÌNH THƯỜNG (giữa hai kỳ, hoặc
+  // mẫu vừa seed chưa mở kỳ nào) — không phải tình huống không thể xảy ra. Nhưng nó KHÔNG chỉ xảy
+  // ra lúc tải lần đầu: `/templates/FM01/periods` có thể làm mới Ở NỀN, trong lúc người dùng ĐANG
+  // ĐỌC lưới (`tk.data` còn nguyên nhờ `keepPreviousData` của Q1), rồi trả về danh sách không còn
+  // kỳ nào `is_open` (quản trị đóng hết kỳ trước khi mở kỳ mới — hai thao tác, không nguyên tử; hoặc
+  // một lượt 200 thân rỗng). `tk.data === undefined` bắt buộc: lưới đang đúng không được thay bằng
+  // câu giải thích chỉ vì `/periods` vừa đổi — đúng luật chung nêu ở đầu cụm nhánh. Vẫn đặt TRƯỚC
+  // nhánh skeleton (khác nhánh đó — chờ MỘT LẦN rồi xong — tình huống này KHÔNG tự hết bằng chờ).
+  if (tk.data === undefined && ky.data !== undefined && den === undefined) {
     return (
       <div>
         <TieuDe>Tình trạng nộp · {TEMPLATE}</TieuDe>
@@ -172,7 +189,9 @@ export function Status() {
           chip nền trong suốt trên màn, chỉ khác màu viền). Dùng <Chip> THẬT (không phải hình vẽ) để
           mẫu ví dụ tự động khớp đúng hành vi outline thật của StatusGrid.tsx, không lệch nếu Chip.tsx
           đổi cách vẽ outline sau này. */}
-      <p className="flex items-center gap-1.5 text-sec text-table mb-5">
+      {/* task-26-fix-2.md R2: testid CHỈ để ca test khoanh đúng phạm vi (`within`) hai chip chú
+          giải — tách khỏi chip cùng chữ "Đã duyệt" trong lưới — không phải hành vi/hiển thị. */}
+      <p data-testid="chu-giai" className="flex items-center gap-1.5 text-sec text-table mb-5">
         <Chip kind="approved" outline /> viền rỗng = nạp từ file tổng hợp ·{' '}
         <Chip kind="approved" /> đặc = nộp trên hệ thống
       </p>
