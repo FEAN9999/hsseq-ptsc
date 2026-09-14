@@ -655,6 +655,32 @@ describe('nộp và ô bắt buộc', () => {
     expect(screen.queryByText('Bắt buộc')).toBeNull()
   })
 
+  // fix-4: Esc gỡ câu lỗi của LẦN SỬA vừa bị huỷ ("Chỉ nhập số" — nói về chữ đang nằm trong ô),
+  // nhưng KHÔNG được gỡ "Bắt buộc" — lỗi đó nói về giá trị ĐÃ CHỐT và Esc không trả lời được nó.
+  // Trả ô về đúng trạng thái trống mà lần bấm Nộp vừa rồi đã chỉ ra là thiếu, rồi im lặng, là giấu
+  // mất đúng ô đang chặn người ta nộp.
+  it('Esc gỡ lỗi chữ vừa gõ nhưng trả lại lời nhắc "Bắt buộc" đang treo sẵn', async () => {
+    const u = userEvent.setup()
+    ve({ state: 'draft', vai: 'reporter', mau: mauNho([chiTieu({ code: 'B-8.1' })]) })
+    await u.click(screen.getByRole('button', { name: 'Nộp báo cáo' }))
+    const oB = o('B-8.1', 'Tháng này')
+    await u.click(oB)
+    await u.keyboard('abc')
+    // Ctrl+S chốt ô ngay tại chỗ (K1) nên ô đỏ lên mà con trỏ KHÔNG rời đi — đúng tình huống người
+    // ta bấm Esc. Bấm Tab rồi quay lại là một chuyện khác: lúc đó "giá trị trước khi sửa" của lượt
+    // focus MỚI chính là chuỗi hỏng, Esc trả về đúng nó (hành vi sẵn có, không thuộc vòng này).
+    await u.keyboard('{Control>}s{/Control}')
+    expect(screen.getByText('Chỉ nhập số')).toBeTruthy()
+
+    await u.keyboard('{Escape}')
+    expect(chu(oB)).toBe('')
+    expect(screen.queryByText('Chỉ nhập số')).toBeNull()
+    // "Bắt buộc" quay lại vì nó là lỗi NGOÀI, tính từ state của form. Rằng Esc KHÔNG chép nó vào
+    // lỗi nội bộ của ô thì đo ở NumberCell.test.tsx (ca `loiNgoai` tắt sau Esc) — ở đây hai loại
+    // lỗi hiện ra bằng đúng một câu chữ nên không phân biệt được.
+    expect(screen.getAllByText('Bắt buộc').length).toBeGreaterThan(0)
+  })
+
   // Đột biến N4: `MA_HIEN_TOI_DA` 8 → 100. Form FM01 trống thiếu 52 ô; liệt hết sẽ đẩy thanh dính
   // cao gần nửa màn hình.
   it('thiếu quá nhiều ô: thanh dưới liệt tối đa 8 mã rồi rút gọn thành "+n"', async () => {
@@ -983,7 +1009,7 @@ describe('bàn phím kiểu Excel', () => {
   // Ca QUYẾT ĐỊNH của L1: ô đang LỖI. Sau Ctrl+S ô đỏ lên, và Esc là đường thoát DUY NHẤT về số
   // cũ — nếu mốc khôi phục đã bị dời thành "100a" thì Esc trả lại đúng chuỗi hỏng đó và số 100
   // biến mất khỏi cả màn hình lẫn mốc, trên form 55 dòng chỉ còn cách nhớ lại mà gõ tay.
-  it('Esc cứu được ô đang lỗi sau Ctrl+S: trả về số cũ, không trả lại chuỗi hỏng', async () => {
+  it('Esc cứu được ô đang lỗi sau Ctrl+S: trả về số cũ VÀ hết đỏ ngay', async () => {
     const u = userEvent.setup()
     ve({ state: 'draft', vai: 'reporter', values: [{ indicator_code: 'B-2.1', this_period: 100 }] })
     const oB = o('B-2.1', 'Tháng này')
@@ -996,6 +1022,12 @@ describe('bàn phím kiểu Excel', () => {
     await u.keyboard('{Escape}')
     expect(chu(oB)).toBe('100')
     expect(o('B-2.1', 'Cộng dồn').textContent).toBe('100')
+    // fix-4: hết đỏ NGAY, không chờ rời ô. `100` là giá trị ô đang có trước khi sửa, tức theo định
+    // nghĩa là hợp lệ — một ô mang giá trị hợp lệ mà vẫn `aria-invalid="true"` là trạng thái sai,
+    // và trình đọc màn hình đọc "không hợp lệ" cho một ô đã đúng. Người nhập thì thấy Esc "không
+    // ăn" rồi bấm tiếp hoặc bỏ cuộc.
+    expect(oB.getAttribute('aria-invalid')).toBeNull()
+    expect(screen.queryByText('Chỉ nhập số')).toBeNull()
   })
 
   // fix-3 D2: `xuLyBlur` ghi lại `value` của ô trong lúc ô đang KHÔNG focus, nên React không khôi

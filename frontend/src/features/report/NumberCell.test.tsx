@@ -309,6 +309,37 @@ describe('NumberCell', () => {
     expect(onPasteColumn).toHaveBeenCalledWith(['10', '20'])
   })
 
+  // fix-4, mặt còn lại: chỉ ESC mới gỡ lỗi giữa chừng. Gõ thêm vào một ô đang đỏ KHÔNG được tự tắt
+  // đỏ — chữ trong ô vẫn sai, tắt câu lỗi lúc đó là bỏ người dùng lại với một ô sai mà không nói gì.
+  it('gõ thêm vào ô ĐANG LỖI vẫn giữ đỏ — chỉ Esc (hoặc lần chốt sau) mới gỡ (fix-4)', async () => {
+    render(<NumberCell value={42} decimals={0} ariaLabel="x" />)
+    const o = screen.getByLabelText('x')
+    await userEvent.click(o)
+    await userEvent.clear(o)
+    await userEvent.type(o, 'abc')
+    await userEvent.tab()
+    expect(o.getAttribute('aria-invalid')).toBe('true')
+
+    await userEvent.click(o) // S3: focus lại ô đang lỗi thì giữ nguyên 'abc'
+    await userEvent.type(o, 'd')
+    expect(o.getAttribute('aria-invalid')).toBe('true')
+  })
+
+  // fix-4: Esc xoá lỗi NỘI BỘ (câu nói về chữ đang nằm trong ô) và KHÔNG được chép `loiNgoai` vào
+  // đó. `loiNgoai` nói về giá trị ĐÃ CHỐT ("Bắt buộc" sau lần bấm Nộp) và do cha tính lại theo từng
+  // phím gõ; một bản sao nằm trong state của ô sẽ treo lại sau khi cha đã thôi báo thiếu.
+  it('Esc không chép loiNgoai vào lỗi nội bộ — cha thôi báo thì câu đó tắt (fix-4)', async () => {
+    const { rerender } = render(<NumberCell value={null} decimals={0} ariaLabel="x" loiNgoai="Bắt buộc" />)
+    const o = screen.getByLabelText('x')
+    await userEvent.click(o)
+    await userEvent.keyboard('{Escape}')
+    expect(screen.getByText('Bắt buộc')).toBeTruthy()
+
+    rerender(<NumberCell value={7} decimals={0} ariaLabel="x" loiNgoai={null} />)
+    expect(screen.queryByText('Bắt buộc')).toBeNull()
+    expect(o.getAttribute('aria-invalid')).toBeNull()
+  })
+
   // fix-2 T8 (rereview §4b mutation T13) — canh `!dangFocus.current` bọc `setError(null)` (mã S2)
   // chưa từng được khẳng định trong đúng tổ hợp "đang focus VÀ đang lỗi": nếu canh bị bỏ, cha đổi
   // `value` trong lúc người dùng đang gõ dở trên một ô lỗi sẽ bị xoá trắng aria-invalid ngay dưới

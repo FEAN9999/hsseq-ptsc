@@ -12,7 +12,7 @@
  * lên `onPasteColumn` — nơi gọi (ReportForm, Task 22) mới gọi `parseViNumber` cho từng dòng với
  * đúng `decimals` của dòng đích.
  */
-import { useEffect, useId, useRef, useState, type ChangeEvent, type ClipboardEvent } from 'react'
+import { useEffect, useId, useRef, useState, type ChangeEvent, type ClipboardEvent, type KeyboardEvent } from 'react'
 import { parseViNumber } from '../../lib/parseViNumber'
 
 export interface NumberCellProps {
@@ -123,6 +123,19 @@ export function NumberCell({ value, decimals, ariaLabel, loiNgoai, onChange, onC
     onChange?.(parseViNumber(t, decimals))
   }
 
+  /** Esc = HUỶ lần sửa đang dở. `useKeyboardNav` (listener cấp lưới, bọt lên TRƯỚC trình xử lý
+   * React này) đã trả chữ về giá trị trước khi sửa — mà giá trị đó theo định nghĩa là giá trị ô
+   * ĐANG CÓ, tức hợp lệ. Câu lỗi do chính lần sửa vừa bị huỷ đẻ ra phải đi theo nó: một ô mang giá
+   * trị hợp lệ mà vẫn `aria-invalid="true"` là trạng thái SAI — người nhập bấm Esc để thoát khỏi
+   * ô đang đỏ, thấy vẫn đỏ, kết luận Esc không ăn; còn trình đọc màn hình thì đọc "không hợp lệ"
+   * cho một ô đã đúng (fix-4).
+   *
+   * KHÔNG đụng `loiNgoai`: lỗi đó nói về giá trị ĐÃ CHỐT ("Bắt buộc" sau lần bấm Nộp đầu tiên),
+   * không phải về chữ đang nằm trong ô — Esc không trả lời được nó. */
+  function xuLyPhim(e: KeyboardEvent<HTMLInputElement>) {
+    if (e.key === 'Escape') setError(null)
+  }
+
   function xuLyDan(e: ClipboardEvent<HTMLInputElement>) {
     // fix-1 S10: không có nơi nhận thì đừng preventDefault — để mặc định trình duyệt xử lý paste
     // như một lần gõ bình thường vào chính ô này, đừng nuốt im lặng không giải thích.
@@ -161,6 +174,7 @@ export function NumberCell({ value, decimals, ariaLabel, loiNgoai, onChange, onC
         onBlur={xuLyBlur}
         onChange={xuLyChange}
         onPaste={xuLyDan}
+        onKeyDown={xuLyPhim}
         // h-7 (28px) chứ không phải h-9 (36px): dòng bảng CŨNG cao 36px (tokens.css `td{height:36px}`),
         // nên ô nhập cao bằng cả dòng sẽ đặt viền dưới của nó chồng đúng lên hairline của `<td>` —
         // viền đôi mà task-22-carry.md C11 cảnh báo. Bản vẽ chốt sẵn con số: `.cell{height:28px}`.
