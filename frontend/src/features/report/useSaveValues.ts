@@ -6,9 +6,11 @@
 //
 // NĂM ĐIỀU ĐỊNH HÌNH FILE NÀY:
 //
-// 1. THÂN REQUEST LÀ `{version, values[]}` (backend/app/schemas/report.py `PutValuesIn`).
+// 1. THÂN REQUEST LÀ `{version, values[], texts?}` (backend/app/schemas/report.py `PutValuesIn`).
 //    `version` là khoá lạc quan: gửi sai số là 409 ở MỌI lần lưu. Sau mỗi lần lưu, `version` mới
-//    lấy từ PHẢN HỒI — không tự cộng 1, vì lần ghi của người khác cũng đẩy số đó lên.
+//    lấy từ PHẢN HỒI — không tự cộng 1, vì lần ghi của người khác cũng đẩy số đó lên. `version`
+//    cũng đổi vì một lệnh ghi KHÁC của chính người này: chuyển trạng thái. Đó là lý do có
+//    `datPhienBan` — xem điểm 6.
 //
 // 2. PAYLOAD MỘT PHẦN: chỉ mã có mặt trong `values` bị đụng tới, mã vắng mặt giữ nguyên nội dung
 //    đang lưu (`validate_values`, app/domain/report_rules.py). Nên hàng chờ dưới đây chỉ giữ ô đã
@@ -26,6 +28,16 @@
 //
 // 5. SAI LUẬT NGHIỆP VỤ LÀ 400, KHÔNG PHẢI 422 (services/reports.py:427,465). 422 ở dự án này chỉ
 //    xảy ra khi payload sai schema Pydantic, tức lỗi lập trình FE.
+//
+// 6. BA Ô CHỮ NHÓM C ĐI CHUNG ENDPOINT NÀY, KHÔNG PHẢI ENDPOINT THỨ HAI. Task 23b mở rộng
+//    `PutValuesIn` bằng `texts: dict[str, str | null] | None` đúng để một lượt Ctrl+S là MỘT
+//    `version`, MỘT dòng audit. `texts` VẮNG MẶT = lượt ghi này không đụng `report_text`; có mặt
+//    thì chỉ mã nằm trong dict bị ghi. Nên hàng chờ chữ dưới đây tách riêng với hàng chờ số, và
+//    khoá `texts` chỉ xuất hiện trong thân request khi thật sự có ô chữ vừa đổi.
+//
+// 7. `version` KHÔNG CHỈ ĐỔI VÌ LẦN LƯU. `POST /reports/{id}/transition` cũng là một lệnh ghi và
+//    cũng trả `version` mới. Không nhận lấy thì cú Lưu ĐẦU TIÊN sau một lượt "Trả lại" gửi số cũ
+//    và ăn 409 với chính mình — `datPhienBan` là cửa để form đẩy số đó vào đây.
 import { useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 
@@ -79,6 +91,13 @@ export interface KetQuaLuu {
   /** Giá trị server trả về sau lần lưu thành công gần nhất — C9. Object MỚI mỗi lần lưu. */
   giaTriMoi: PhanHoiLuu | null
   markDirty: (ma: string, o: ODoi) => void
+  /** Đánh dấu một Ô CHỮ nhóm C đã đổi. Tách khỏi `markDirty` vì hai thứ đi vào hai khoá khác nhau
+   * của cùng một request (`values[]` và `texts{}`), và mã ô chữ (C1..C3) KHÔNG phải mã chỉ tiêu —
+   * gộp một bảng là để chúng đá nhau khi trùng mã. */
+  markDirtyChu: (ma: string, noiDung: string) => void
+  /** Ghi nhận `version` do một lệnh ghi KHÁC vừa trả về (chuyển trạng thái). Không có cửa này thì
+   * cú Lưu đầu tiên sau một lượt "Trả lại" gửi số cũ và ăn 409 với chính mình. */
+  datPhienBan: (v: number) => void
   /** `true` khi server đã nhận (hoặc không có gì để gửi); `false` khi lượt gửi hỏng. "Nộp" đọc
    * giá trị này để không chuyển trạng thái bằng số chưa lên tới server. */
   saveNow: () => Promise<boolean>
@@ -87,9 +106,10 @@ export interface KetQuaLuu {
 /** Thiết kế dòng 681: 1,5 giây. */
 const DO_TRE = 1500
 
-/** Đếm Ô, không đếm DÒNG: sửa cả "Tháng này" lẫn "Cộng dồn" của một chỉ tiêu là 2 ô chưa lưu. */
-function demO(hangCho: Map<string, ODoi>): number {
-  let n = 0
+/** Đếm Ô, không đếm DÒNG: sửa cả "Tháng này" lẫn "Cộng dồn" của một chỉ tiêu là 2 ô chưa lưu.
+ * Mỗi ô chữ nhóm C là MỘT ô — nó cũng là thứ đóng tab sẽ mất. */
+function demO(hangCho: Map<string, ODoi>, hangChoChu: Map<string, string>): number {
+  let n = hangChoChu.size
   for (const o of hangCho.values()) n += Object.keys(o).length
   return n
 }
@@ -121,6 +141,9 @@ export function useSaveValues(reportId: number, phienBanDau: number): KetQuaLuu 
   // phải đọc bản MỚI NHẤT, không phải bản đóng băng trong closure của lần render đã hẹn giờ.
   // `dirtyCount` là bản sao chỉ để VẼ.
   const hangCho = useRef(new Map<string, ODoi>())
+  /** Hàng chờ RIÊNG của ba ô chữ nhóm C: mã C1..C3 không phải mã chỉ tiêu và nội dung là một
+   * CHUỖI chứ không phải bộ ba khoá của `ODoi`. */
+  const hangChoChu = useRef(new Map<string, string>())
   // `phienBanDau` chỉ dùng cho lần khởi tạo: từ lúc form mở, `version` đi theo phản hồi PUT/409,
   // không đi theo prop — nếu không, một lượt refetch của TanStack Query (invalidate sau mỗi lần
   // lưu) sẽ đẩy ngược số cũ vào đây giữa hai lần gõ.
@@ -145,15 +168,20 @@ export function useSaveValues(reportId: number, phienBanDau: number): KetQuaLuu 
 
   /** Trả ô đã gửi hỏng về hàng chờ. Ô nào người dùng đã gõ ĐÈ trong lúc request bay thì giữ bản
    * mới — trả nguyên si bản cũ về là xoá đúng thứ vừa gõ dưới tay họ. */
-  function traLaiHangCho(daGui: Map<string, ODoi>) {
+  function traLaiHangCho(daGui: Map<string, ODoi>, daGuiChu: Map<string, string>) {
     for (const [ma, o] of daGui) hangCho.current.set(ma, { ...o, ...hangCho.current.get(ma) })
-    setDirtyCount(demO(hangCho.current))
+    for (const [ma, chu] of daGuiChu) {
+      if (!hangChoChu.current.has(ma)) hangChoChu.current.set(ma, chu)
+    }
+    setDirtyCount(demO(hangCho.current, hangChoChu.current))
   }
 
   async function gui(): Promise<boolean> {
     // Nhấc hết ô ra khỏi hàng chờ TRƯỚC khi gửi: ô gõ trong lúc request bay thuộc về lượt sau.
     const daGui = hangCho.current
+    const daGuiChu = hangChoChu.current
     hangCho.current = new Map()
+    hangChoChu.current = new Map()
     setDirtyCount(0)
     setStatus('saving')
     setLoiLuu(null)
@@ -162,17 +190,21 @@ export function useSaveValues(reportId: number, phienBanDau: number): KetQuaLuu 
       const kq = await api.put<PhanHoiLuu>(`/reports/${reportId}/values`, {
         version: phienBan.current,
         values: thanGui(daGui),
+        // Khoá `texts` chỉ có mặt khi thật sự có ô chữ vừa đổi: `PutValuesIn.texts` vắng mặt
+        // nghĩa là "lượt ghi này không đụng `report_text`", còn gửi `{}` là một lượt ghi rỗng
+        // vào bảng đó — hai chuyện khác nhau trong audit.
+        ...(daGuiChu.size > 0 ? { texts: Object.fromEntries(daGuiChu) } : {}),
       })
       phienBan.current = kq.version
       setGiaTriMoi({ version: kq.version, values: kq.values })
       setSavedAt(formatTime(new Date().toISOString()))
       setOffline(false)
       // Gõ tiếp trong lúc request bay thì vẫn còn ô chưa lưu — "Đã lưu 14:02" lúc đó là nói dối.
-      setStatus(hangCho.current.size > 0 ? 'dirty' : 'saved')
+      setStatus(hangCho.current.size > 0 || hangChoChu.current.size > 0 ? 'dirty' : 'saved')
       invalidateReportQueries(qc, reportId)
       return true
     } catch (loi) {
-      traLaiHangCho(daGui)
+      traLaiHangCho(daGui, daGuiChu)
       setStatus('error')
       if (loi instanceof ApiError) {
         // Cả hai loại 409 đều mang `version` mới: nhận lấy để lần gửi sau không đụng lại chính
@@ -203,7 +235,7 @@ export function useSaveValues(reportId: number, phienBanDau: number): KetQuaLuu 
     // chính mình, vì `version` mới chỉ có trong phản hồi chưa về.
     const dang = dangBay.current
     if (dang) await dang
-    if (hangCho.current.size === 0) return true
+    if (hangCho.current.size === 0 && hangChoChu.current.size === 0) return true
     const p = gui()
     dangBay.current = p
     return p
@@ -211,16 +243,27 @@ export function useSaveValues(reportId: number, phienBanDau: number): KetQuaLuu 
 
   function markDirty(ma: string, o: ODoi) {
     hangCho.current.set(ma, { ...hangCho.current.get(ma), ...o })
-    setDirtyCount(demO(hangCho.current))
+    setDirtyCount(demO(hangCho.current, hangChoChu.current))
     setStatus('dirty')
     datHen()
+  }
+
+  function markDirtyChu(ma: string, noiDung: string) {
+    hangChoChu.current.set(ma, noiDung)
+    setDirtyCount(demO(hangCho.current, hangChoChu.current))
+    setStatus('dirty')
+    datHen()
+  }
+
+  function datPhienBan(v: number) {
+    phienBan.current = v
   }
 
   useEffect(() => {
     function chanDongTab(e: BeforeUnloadEvent) {
       // `dangBay` cũng tính: ô đã rời hàng chờ nhưng chưa có xác nhận nào từ server, đóng tab lúc
       // này vẫn là mất số.
-      if (hangCho.current.size === 0 && dangBay.current === null) return
+      if (hangCho.current.size === 0 && hangChoChu.current.size === 0 && dangBay.current === null) return
       // Trình duyệt hiện hộp thoại CHUẨN CỦA NÓ, không nhận câu chữ riêng (Chrome bỏ từ 2016).
       // `preventDefault` là cách đúng chuẩn hiện nay; `returnValue` cho trình duyệt cũ.
       e.preventDefault()
@@ -255,6 +298,8 @@ export function useSaveValues(reportId: number, phienBanDau: number): KetQuaLuu 
     xungDot,
     giaTriMoi,
     markDirty,
+    markDirtyChu,
+    datPhienBan,
     saveNow,
   }
 }

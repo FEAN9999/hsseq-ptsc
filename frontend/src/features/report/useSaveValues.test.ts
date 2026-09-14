@@ -49,6 +49,7 @@ function ren(phienBanDau = 8) {
 interface ThanPut {
   version: number
   values: Record<string, unknown>[]
+  texts?: Record<string, string | null>
 }
 
 /** Thân của lần `api.put` thứ `lan` — `mock.calls[lan]` là `[path, body]`. */
@@ -302,6 +303,137 @@ describe('useSaveValues — gửi gì, khi nào', () => {
   })
 })
 
+// Ba ô chữ nhóm C đi CHUNG `PUT .../values` (`PutValuesIn.texts`, Task 23b): một lượt lưu là MỘT
+// `version`, MỘT dòng audit. Trước vòng sửa 1 của Task 24 hook này không có một chữ `texts` nào —
+// gõ phần nhận xét, dải đầu báo "Đã lưu 14:02", đóng tab là mất sạch.
+describe('useSaveValues — ô chữ nhóm C', () => {
+  it('markDirtyChu gửi texts của đúng mã đó, kèm version, values rỗng', async () => {
+    const h = ren()
+    act(() => {
+      h.current.markDirtyChu('C1', 'Diễn tập PCCC ngày 12/08')
+    })
+    await tick(1600)
+    expect(than(0)).toEqual({ version: 8, values: [], texts: { C1: 'Diễn tập PCCC ngày 12/08' } })
+  })
+
+  it('ô số và ô chữ đổi cùng lúc đi CHUNG một request', async () => {
+    const h = ren()
+    act(() => {
+      h.current.markDirty('B-2.1', { thisPeriod: 3 })
+      h.current.markDirtyChu('C2', 'Không có sự cố')
+    })
+    await tick(1600)
+    expect(putSpy).toHaveBeenCalledTimes(1)
+    expect(than(0)).toEqual({
+      version: 8,
+      values: [{ indicator_code: 'B-2.1', this_period: 3 }],
+      texts: { C2: 'Không có sự cố' },
+    })
+  })
+
+  // `texts` VẮNG MẶT = "lượt ghi này không đụng `report_text`"; `{}` là một lượt ghi RỖNG vào bảng
+  // đó. Hai chuyện khác nhau trong audit, nên khoá chỉ xuất hiện khi thật sự có ô chữ vừa đổi.
+  it('không đổi ô chữ nào thì thân request KHÔNG có khoá texts', async () => {
+    const h = ren()
+    act(() => {
+      h.current.markDirty('B-2.1', { thisPeriod: 3 })
+    })
+    await tick(1600)
+    expect('texts' in than(0)).toBe(false)
+  })
+
+  it('ô chữ cũng tính vào dirtyCount — nó cũng là thứ đóng tab sẽ mất', async () => {
+    const h = ren()
+    act(() => {
+      h.current.markDirty('B-2.1', { thisPeriod: 3 })
+    })
+    expect(h.current.dirtyCount).toBe(1)
+    act(() => {
+      h.current.markDirtyChu('C1', 'Có diễn tập')
+    })
+    expect(h.current.dirtyCount).toBe(2)
+    await tick(1600)
+    expect(h.current.dirtyCount).toBe(0)
+  })
+
+  it('còn ô chữ chưa lưu thì beforeunload cũng chặn đóng tab', () => {
+    const h = ren()
+    act(() => {
+      h.current.markDirtyChu('C1', 'Có diễn tập')
+    })
+    const e = new Event('beforeunload', { cancelable: true })
+    window.dispatchEvent(e)
+    expect(e.defaultPrevented).toBe(true)
+  })
+
+  it('gửi hỏng thì ô chữ quay lại hàng chờ, không mất', async () => {
+    putSpy.mockRejectedValueOnce(new TypeError('Failed to fetch'))
+    const h = ren()
+    act(() => {
+      h.current.markDirtyChu('C1', 'Có diễn tập')
+    })
+    await tick(1600)
+    expect(h.current.dirtyCount).toBe(1)
+    await act(async () => {
+      await h.current.saveNow()
+    })
+    expect(than(1).texts).toEqual({ C1: 'Có diễn tập' })
+  })
+
+  // Cùng luật với hàng chờ số: bản người dùng gõ ĐÈ trong lúc request bay là bản mới hơn, trả
+  // nguyên si bản cũ về là xoá đúng thứ vừa gõ dưới tay họ.
+  it('gửi hỏng nhưng người dùng đã gõ đè: giữ bản MỚI, không đè bản cũ lên', async () => {
+    const t = treo<{ version: number; values: GiaTriBaoCao[] }>()
+    putSpy.mockReturnValueOnce(t.p)
+    const h = ren()
+    act(() => {
+      h.current.markDirtyChu('C1', 'Bản cũ')
+    })
+    await tick(1600)
+    act(() => {
+      h.current.markDirtyChu('C1', 'Bản mới người dùng vừa gõ')
+    })
+    await act(async () => {
+      t.hong(new TypeError('Failed to fetch'))
+    })
+    await act(async () => {
+      await h.current.saveNow()
+    })
+    expect(than(1).texts).toEqual({ C1: 'Bản mới người dùng vừa gõ' })
+  })
+
+  // Gõ tiếp TRONG LÚC request bay thì vẫn còn ô chưa lưu — "Đã lưu 14:02" lúc đó là nói dối, và
+  // nó nói dối về đúng ô chữ mà người dùng vừa gõ xong phần nhận xét dài nhất của báo cáo.
+  it('gõ ô chữ trong lúc request đang bay: lưu xong vẫn là "chưa lưu", không phải "đã lưu"', async () => {
+    const t = treo<{ version: number; values: GiaTriBaoCao[] }>()
+    putSpy.mockReturnValueOnce(t.p)
+    const h = ren()
+    act(() => {
+      h.current.markDirty('B-2.1', { thisPeriod: 3 })
+    })
+    await tick(1600)
+    act(() => {
+      h.current.markDirtyChu('C1', 'Gõ trong lúc request còn bay')
+    })
+    await act(async () => {
+      t.xong({ version: 9, values: [] })
+    })
+    expect(h.current.status).toBe('dirty')
+    expect(h.current.dirtyCount).toBe(1)
+  })
+
+  it('chỉ có ô chữ trong hàng chờ thì saveNow VẪN gửi, không về sớm', async () => {
+    const h = ren()
+    act(() => {
+      h.current.markDirtyChu('C1', 'Có diễn tập')
+    })
+    await act(async () => {
+      await h.current.saveNow()
+    })
+    expect(putSpy).toHaveBeenCalledTimes(1)
+  })
+})
+
 describe('useSaveValues — version (khoá lạc quan)', () => {
   it('version của lần lưu kế tiếp lấy từ PHẢN HỒI, không phải tự cộng 1', async () => {
     putSpy.mockResolvedValueOnce({ version: 20, values: [] })
@@ -379,6 +511,18 @@ describe('useSaveValues — version (khoá lạc quan)', () => {
       await dang
     })
     expect(thuTu).toEqual(['PUT xong', 'saveNow xong'])
+  })
+  // `version` không chỉ đổi vì lần lưu: `POST .../transition` cũng là một lệnh ghi và cũng trả về
+  // số mới. Không có cửa này thì cú Lưu ĐẦU TIÊN sau một lượt "Trả lại" gửi số cũ và dựng một
+  // banner 409 sai sự thật (người soát đo được — S3).
+  it('datPhienBan: lần lưu sau dùng số của lệnh ghi KHÁC vừa trả về', async () => {
+    const h = ren(8)
+    act(() => {
+      h.current.datPhienBan(9)
+      h.current.markDirty('B-2.1', { thisPeriod: 3 })
+    })
+    await tick(1600)
+    expect(than(0).version).toBe(9)
   })
 })
 

@@ -135,7 +135,15 @@ describe('useChuyenTrangThai — mở và đóng hộp thoại', () => {
     await act(async () => {
       await result.current.xacNhan(DUYET, 'submitted', 8, '')
     })
-    expect(onLoi).toHaveBeenCalledWith({ detail: 'Không thể "Duyệt" ở trạng thái hiện tại', errors: null })
+    // `state`/`version` đi kèm: CẢ HAI loại 409 của transition đều mang chúng
+    // (`services/workflow.py:198,218`) và đó là số MỚI NHẤT server đang giữ. Vứt đi thì lần bấm
+    // sau gửi lại đúng con số vừa bị từ chối.
+    expect(onLoi).toHaveBeenCalledWith({
+      detail: 'Không thể "Duyệt" ở trạng thái hiện tại',
+      errors: null,
+      state: 'draft',
+      version: 9,
+    })
     expect(result.current.dialogMo).toBe(false)
   })
 
@@ -246,6 +254,7 @@ describe('useChuyenTrangThai — sau khi thành công', () => {
       await result.current.xacNhan(TRA_LAI, 'submitted', 8, 'Thiếu số B-8.1')
     })
     expect(screen.getByRole('status').textContent).toBe('Đã trả lại')
+    expect(screen.queryByRole('link')).toBeNull()
     unmount()
 
     const t2 = ren()
@@ -253,6 +262,7 @@ describe('useChuyenTrangThai — sau khi thành công', () => {
       await t2.result.current.xacNhan(MO_LAI, 'approved', 8, 'Sai số giờ công')
     })
     expect(screen.getByRole('status').textContent).toBe('Đã mở lại')
+    expect(screen.queryByRole('link')).toBeNull()
   })
 
   // Câu toast dựng từ `name_vi` của DỮ LIỆU, không tra bảng chuỗi viết cứng: mẫu báo cáo thứ hai
@@ -296,9 +306,13 @@ describe('useChuyenTrangThai — hình dạng lỗi đẩy lên form', () => {
     await act(async () => {
       await result.current.xacNhan(NOP, 'draft', 8, '')
     })
+    // 400 KHÔNG mang `state`/`version` (`services/workflow.py:229`) — hai trường đó phải là `null`
+    // chứ không phải một số đoán ra, nếu không form sẽ vá `version` bằng thứ server chưa từng nói.
     expect(onLoi).toHaveBeenCalledWith({
       detail: 'Dữ liệu không hợp lệ',
       errors: [{ indicator_code: 'B-8.1', message: 'Chỉ tiêu bắt buộc' }],
+      state: null,
+      version: null,
     })
   })
 
@@ -312,7 +326,44 @@ describe('useChuyenTrangThai — hình dạng lỗi đẩy lên form', () => {
     expect(onLoi).toHaveBeenCalledWith({
       detail: 'Mất kết nối, chưa gửi được. Thử lại khi có mạng.',
       errors: null,
+      state: null,
+      version: null,
     })
+  })
+})
+
+// `TransitionOut` (backend/app/api/reports.py:164) trả `{state, version}` — dữ liệu MỚI NHẤT đang
+// có sau một lệnh ghi. Người soát đo được ba hậu quả khi nó bị vứt (S1/S2/S3): nút kế tiếp gửi
+// `version` cũ, lượt bấm lại sau 409 lặp đúng số vừa bị từ chối, và cú Lưu đầu tiên sau transition
+// dựng một banner 409 sai sự thật.
+describe('useChuyenTrangThai — phản hồi của lệnh ghi', () => {
+  it('thành công: đẩy NGUYÊN {state, version} của phản hồi lên nơi gọi', async () => {
+    postSpy.mockResolvedValueOnce({ state: 'approved', version: 9 })
+    const onXong = vi.fn()
+    const { result } = ren({ onXong })
+    await act(async () => {
+      await result.current.xacNhan(DUYET, 'submitted', 8, '')
+    })
+    expect(onXong).toHaveBeenCalledWith({ state: 'approved', version: 9 })
+  })
+
+  it('đẩy phản hồi lên TRƯỚC khi dọn cache — lượt GET của invalidate còn phải đi hết một vòng mạng', async () => {
+    const onXong = vi.fn()
+    const { result } = ren({ onXong })
+    await act(async () => {
+      await result.current.xacNhan(DUYET, 'submitted', 8, '')
+    })
+    expect(onXong.mock.invocationCallOrder[0]).toBeLessThan(invalidateSpy.mock.invocationCallOrder[0])
+  })
+
+  it('gửi hỏng thì KHÔNG gọi onXong — chưa có lệnh ghi nào thành công để mà nhận số mới', async () => {
+    postSpy.mockRejectedValueOnce(new ApiError(409, { detail: 'Người khác vừa sửa báo cáo này', state: 'submitted', version: 11 }))
+    const onXong = vi.fn()
+    const { result } = ren({ onXong })
+    await act(async () => {
+      await result.current.xacNhan(DUYET, 'submitted', 8, '')
+    })
+    expect(onXong).not.toHaveBeenCalled()
   })
 })
 

@@ -22,14 +22,13 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
 import { Dialog, TOI_THIEU_GHI_CHU } from './Dialog'
-import { resolveCascadeWinner } from './cascade'
+import { resolveCascadeWinner, resolveDeclaredValue } from './cascade'
 
 function ve(p: Partial<React.ComponentProps<typeof Dialog>> = {}) {
   const onConfirm = vi.fn()
   const onCancel = vi.fn()
   const r = render(
     <Dialog
-      open
       title="Trả lại báo cáo"
       confirmLabel="Trả lại"
       onConfirm={onConfirm}
@@ -53,12 +52,6 @@ describe('Dialog — câu chữ và nút', () => {
     })
     expect(screen.getByText(/không sửa được cho tới khi Ban ATCL trả lại/)).toBeTruthy()
     expect(screen.queryByRole('textbox')).toBeNull()
-  })
-
-  it('open=false thì không vẽ gì ra DOM', () => {
-    ve({ open: false, body: 'Sau khi nộp bạn không sửa được.' })
-    expect(screen.queryByRole('dialog')).toBeNull()
-    expect(screen.queryByText(/Sau khi nộp/)).toBeNull()
   })
 
   it('không truyền body thì không dựng khe trống nào', () => {
@@ -94,6 +87,41 @@ describe('Dialog — câu chữ và nút', () => {
     const hangNut = nutChinh('Huỷ').parentElement!
     expect(resolveCascadeWinner(hangNut.className, 'flex-direction')).toBeNull()
     expect(resolveCascadeWinner(hangNut.className, 'justify-content')).toBe('justify-end')
+  })
+})
+
+// `Dialog` cố ý KHÔNG gọi `showModal()` (lý do ở đầu Dialog.tsx), nên ba thứ dưới đây là TẤT CẢ
+// những gì thay cho top-layer của trình duyệt. Bỏ bất kỳ cái nào thì hộp thoại rơi xuống cuối
+// trang dưới 53 dòng bảng, hoặc chui xuống dưới header cột dính (`z-20`) — bấm "Nộp báo cáo" xong
+// màn hình không đổi gì. Đo trên CSS THẬT đã build, không hỏi `className.includes`.
+describe('Dialog — lớp phủ thay cho top-layer', () => {
+  function lopPhu(): HTMLElement {
+    return screen.getByRole('dialog').parentElement!
+  }
+
+  it('lớp phủ bám khung nhìn (position: fixed), không trôi theo dòng chảy trang', () => {
+    ve({ title: 'Duyệt báo cáo này?', confirmLabel: 'Duyệt' })
+    expect(resolveCascadeWinner(lopPhu().className, 'position')).toBe('fixed')
+  })
+
+  it('lớp phủ phủ KÍN bốn cạnh (inset: 0), không chỉ là một khối giữa trang', () => {
+    ve({ title: 'Duyệt báo cáo này?', confirmLabel: 'Duyệt' })
+    expect(resolveDeclaredValue(lopPhu().className, 'inset')).toBe('0')
+  })
+
+  it('z-index của lớp phủ là 50 — cao hơn 20 của header cột dính trong form', () => {
+    ve({ title: 'Duyệt báo cáo này?', confirmLabel: 'Duyệt' })
+    // So GIÁ TRỊ chứ không so tên lớp: `z-20` của `features/report/ReportForm.tsx` được đọc ra từ
+    // cùng file CSS này, nên phép so dưới đây là phép so hai con số thật.
+    const cuaPhu = Number(resolveDeclaredValue(lopPhu().className, 'z-index'))
+    const cuaHeaderBang = Number(resolveDeclaredValue('z-20', 'z-index'))
+    expect(cuaPhu).toBe(50)
+    expect(cuaPhu).toBeGreaterThan(cuaHeaderBang)
+  })
+
+  it('hộp thoại tự khai là hộp CHẶN (aria-modal), không phải một khối chữ giữa trang', () => {
+    ve({ title: 'Duyệt báo cáo này?', confirmLabel: 'Duyệt' })
+    expect(screen.getByRole('dialog').getAttribute('aria-modal')).toBe('true')
   })
 })
 
@@ -172,14 +200,15 @@ describe('Dialog — ghi chú bắt buộc', () => {
           <button type="button" onClick={() => setMo(true)}>
             mở lại
           </button>
-          <Dialog
-            open={mo}
-            title="Trả lại báo cáo"
-            confirmLabel="Trả lại"
-            requireNote
-            onConfirm={vi.fn()}
-            onCancel={() => setMo(false)}
-          />
+          {mo && (
+            <Dialog
+              title="Trả lại báo cáo"
+              confirmLabel="Trả lại"
+              requireNote
+              onConfirm={vi.fn()}
+              onCancel={() => setMo(false)}
+            />
+          )}
         </>
       )
     }
@@ -215,6 +244,51 @@ describe('Dialog — đang gửi', () => {
     await u.click(nutChinh('Đang gửi…'))
     expect(t.onConfirm).not.toHaveBeenCalled()
   })
+
+  // Một request đã bay không rút lại được. Nút "Huỷ" bấm được ở đây là lời hứa sai: người dùng bấm
+  // Huỷ, hộp thoại đóng, rồi vẫn thấy toast "Đã nộp báo cáo 08/2026".
+  it('đang gửi: bấm Huỷ KHÔNG đóng hộp thoại', async () => {
+    const u = userEvent.setup()
+    const t = ve({ title: 'Duyệt báo cáo này?', confirmLabel: 'Duyệt', pending: true })
+    await u.click(nutChinh('Huỷ'))
+    expect(t.onCancel).not.toHaveBeenCalled()
+  })
+
+  it('đang gửi: Esc cũng KHÔNG đóng hộp thoại', async () => {
+    const u = userEvent.setup()
+    const t = ve({ title: 'Duyệt báo cáo này?', confirmLabel: 'Duyệt', pending: true })
+    await u.keyboard('{Escape}')
+    expect(t.onCancel).not.toHaveBeenCalled()
+  })
+
+  // Lúc này CẢ HAI nút đều khoá nên không còn phần tử nào nhận focus — không giữ lại thì Tab đi
+  // thẳng ra bảng 53 dòng phía sau, đúng lúc người dùng đang chờ một câu trả lời.
+  it('đang gửi: Tab vẫn không thoát ra ngoài hộp thoại', async () => {
+    const u = userEvent.setup()
+    // Đi đúng đường thật: mở ra lúc chưa gửi (focus vào "Huỷ"), bấm nút chính, `pending` bật lên
+    // và khoá cả hai nút. Dựng sẵn `pending` là dựng một cảnh app không bao giờ tới.
+    function Khung() {
+      const [dangGui, setDangGui] = useState(false)
+      return (
+        <>
+          <button type="button">Nút ngoài</button>
+          <Dialog
+            title="Duyệt báo cáo này?"
+            confirmLabel="Duyệt"
+            pending={dangGui}
+            onConfirm={() => setDangGui(true)}
+            onCancel={vi.fn()}
+          />
+        </>
+      )
+    }
+    render(<Khung />)
+    await u.click(nutChinh('Duyệt'))
+    expect(nutChinh('Đang gửi…').hasAttribute('disabled')).toBe(true)
+    await u.tab()
+    expect(document.activeElement).not.toBe(screen.getByRole('button', { name: 'Nút ngoài' }))
+    expect(screen.getByRole('dialog').contains(document.activeElement)).toBe(true)
+  })
 })
 
 describe('Dialog — bàn phím và focus', () => {
@@ -225,7 +299,38 @@ describe('Dialog — bàn phím và focus', () => {
     expect(t.onCancel).toHaveBeenCalled()
   })
 
-  it('mở ra thì focus nằm SẴN trong hộp thoại — điều kiện để Esc tới được nơi', () => {
+  // Esc phải CHẶN hành vi mặc định của trình duyệt, không chỉ gọi `onCancel`: Firefox từng gắn
+  // "dừng tải trang" vào phím này, bấm Esc giữa một lượt lưu đang bay là huỷ chính request đó.
+  it('Esc chặn luôn hành vi mặc định của trình duyệt', async () => {
+    const u = userEvent.setup()
+    let daChan: boolean | null = null
+    function nghe(e: KeyboardEvent) {
+      if (e.key === 'Escape') daChan = e.defaultPrevented
+    }
+    document.addEventListener('keydown', nghe)
+    try {
+      ve({ title: 'x', confirmLabel: 'ok' })
+      await u.keyboard('{Escape}')
+    } finally {
+      document.removeEventListener('keydown', nghe)
+    }
+    expect(daChan).toBe(true)
+  })
+
+  // Đo được: một cú bấm vào NỀN MỜ từng đẩy focus về `<body>`, và vì Esc bắt bằng `keydown` CỦA
+  // hộp thoại nên Esc chết theo — người dùng bàn phím còn đúng một đường thoát là rê chuột tới
+  // nút "Huỷ". Bấm nền KHÔNG đóng (đây là câu hỏi "có chắc không"), nhưng cũng không được cướp
+  // mất focus.
+  it('bấm nền mờ rồi bấm Esc: hộp thoại VẪN đóng được', async () => {
+    const u = userEvent.setup()
+    const t = ve({ title: 'Duyệt báo cáo này?', confirmLabel: 'Duyệt' })
+    await u.click(screen.getByRole('dialog').parentElement!)
+    expect(t.onCancel).not.toHaveBeenCalled()
+    await u.keyboard('{Escape}')
+    expect(t.onCancel).toHaveBeenCalledTimes(1)
+  })
+
+  it('mở ra thì focus nằm SẴN trong hộp thoại', () => {
     const { container } = ve({ title: 'Duyệt báo cáo này?', confirmLabel: 'Duyệt' })
     const hop = container.querySelector('dialog')!
     expect(hop.contains(document.activeElement)).toBe(true)
@@ -258,7 +363,7 @@ describe('Dialog — bàn phím và focus', () => {
     render(
       <>
         <button type="button">Nút ngoài</button>
-        <Dialog open title="Duyệt báo cáo này?" confirmLabel="Duyệt" onConfirm={vi.fn()} onCancel={vi.fn()} />
+        <Dialog title="Duyệt báo cáo này?" confirmLabel="Duyệt" onConfirm={vi.fn()} onCancel={vi.fn()} />
       </>,
     )
     const ngoai = screen.getByRole('button', { name: 'Nút ngoài' })
@@ -266,6 +371,53 @@ describe('Dialog — bàn phím và focus', () => {
     await u.tab()
     await u.tab()
     expect(document.activeElement).not.toBe(ngoai)
+  })
+
+  // Bẫy focus ở cấu hình CÓ ô lý do: lúc chưa đủ 10 ký tự, nút chính đang `disabled`. Nếu bộ chọn
+  // phần tử nhận focus không loại `[disabled]` thì nút khoá đó thành "mốc cuối" mà Tab không bao
+  // giờ đứng lên được — bẫy hở đúng ở hai hộp thoại "Trả lại"/"Mở lại".
+  it('có ô lý do (nút chính đang khoá): Tab vẫn quay vòng trong hộp thoại', async () => {
+    const u = userEvent.setup()
+    render(
+      <>
+        <button type="button">Nút ngoài</button>
+        <Dialog
+          title="Trả lại báo cáo"
+          confirmLabel="Trả lại"
+          requireNote
+          noteLabel="Lý do trả lại (người nộp sẽ thấy nguyên văn)"
+          onConfirm={vi.fn()}
+          onCancel={vi.fn()}
+        />
+      </>,
+    )
+    const ngoai = screen.getByRole('button', { name: 'Nút ngoài' })
+    expect(document.activeElement).toBe(screen.getByRole('textbox'))
+    await u.tab()
+    expect(document.activeElement).toBe(nutChinh('Huỷ'))
+    await u.tab()
+    expect(document.activeElement).not.toBe(ngoai)
+    expect(document.activeElement).toBe(screen.getByRole('textbox'))
+  })
+
+  // Hiệu ứng đưa focus vào chỉ được chạy MỘT LẦN lúc mở (mảng phụ thuộc rỗng). Cho nó chạy lại
+  // mỗi lần render thì mỗi phím gõ vào ô lý do, mỗi lần `pending` lật, focus lại bị giật về phần
+  // tử đầu — người dùng bàn phím không đứng yên được ở đâu.
+  it('render lại KHÔNG giật focus về phần tử đầu', async () => {
+    const u = userEvent.setup()
+    const chung = {
+      title: 'Trả lại báo cáo',
+      confirmLabel: 'Trả lại',
+      requireNote: true,
+      onConfirm: vi.fn(),
+      onCancel: vi.fn(),
+    }
+    const { rerender } = render(<Dialog {...chung} />)
+    expect(document.activeElement).toBe(screen.getByRole('textbox'))
+    await u.tab()
+    expect(document.activeElement).toBe(nutChinh('Huỷ'))
+    rerender(<Dialog {...chung} />)
+    expect(document.activeElement).toBe(nutChinh('Huỷ'))
   })
 
   it('đóng lại thì trả focus về đúng chỗ vừa rời', async () => {
@@ -277,13 +429,14 @@ describe('Dialog — bàn phím và focus', () => {
           <button type="button" onClick={() => setMo(true)}>
             Trả lại…
           </button>
-          <Dialog
-            open={mo}
-            title="Trả lại báo cáo"
-            confirmLabel="Trả lại"
-            onConfirm={vi.fn()}
-            onCancel={() => setMo(false)}
-          />
+          {mo && (
+            <Dialog
+              title="Trả lại báo cáo"
+              confirmLabel="Trả lại"
+              onConfirm={vi.fn()}
+              onCancel={() => setMo(false)}
+            />
+          )}
         </>
       )
     }

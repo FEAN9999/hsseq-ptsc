@@ -123,7 +123,6 @@ interface VeOpts {
   values?: (Partial<GiaTriBaoCao> & { indicator_code: string })[]
   texts?: Record<string, string | null>
   mau?: MauBaoCao
-  onLuu?: () => void
 }
 
 /** Cây thật bọc form trong `QueryClientProvider` + router (app/routes.tsx): lớp lưu của Task 23
@@ -145,14 +144,12 @@ function veCay(ui: ReactElement) {
   return render(ui, { wrapper: BocQuery })
 }
 
-function ve(opts: VeOpts = {}) {
+/** Dữ liệu `GET /reports/{id}` dựng sẵn. Tách riêng khỏi `ve()` để ca nào cần RERENDER bằng một
+ * bản mới (mô phỏng lượt làm mới nền sau khi người KHÁC vừa ghi) dựng được hai bản. */
+function duLieu(opts: VeOpts = {}): ChiTietBaoCao {
   const mau = opts.mau ?? MAU_FM01
-  const quyen =
-    opts.vai === 'admin' ? QUYEN_ADMIN : opts.vai === 'viewer' ? QUYEN_VIEWER : QUYEN_REPORTER
-  useSession.getState().login('tok-test', NGUOI_DUNG, DON_VI, quyen)
-
   const deGhiDe = new Map((opts.values ?? []).map((v) => [v.indicator_code, v]))
-  const chiTiet: ChiTietBaoCao = {
+  return {
     id: opts.id ?? 12,
     version: opts.version ?? 8,
     state: opts.state ?? 'draft',
@@ -176,8 +173,15 @@ function ve(opts: VeOpts = {}) {
     values: mau.indicators.map((ct) => giaTri({ indicator_code: ct.code, ...deGhiDe.get(ct.code) })),
     texts: opts.texts ?? Object.fromEntries(mau.text_fields.map((t) => [t.code, null])),
   }
+}
 
-  const props = { mau, chiTiet, onLuu: opts.onLuu }
+function ve(opts: VeOpts = {}) {
+  const mau = opts.mau ?? MAU_FM01
+  const quyen =
+    opts.vai === 'admin' ? QUYEN_ADMIN : opts.vai === 'viewer' ? QUYEN_VIEWER : QUYEN_REPORTER
+  useSession.getState().login('tok-test', NGUOI_DUNG, DON_VI, quyen)
+
+  const props = { mau, chiTiet: duLieu(opts) }
   const r = veCay(<ReportForm {...props} />)
   return {
     ...r,
@@ -204,6 +208,15 @@ async function bat409(
   await u.click(o(ma, 'Tháng này'))
   await u.keyboard(so)
   await u.click(screen.getByRole('button', { name: 'Lưu' }))
+}
+
+/** Gõ một số vào ô rồi RỜI ô — `NumberCell` chỉ chốt ô lúc rời, nên không có bước này thì hàng
+ * chờ của lớp lưu rỗng và `saveNow()` về ngay, không sinh `PUT` nào. Đây là cách quan sát hành
+ * động "Lưu" bằng đường THẬT (`api.put`) thay vì bằng một prop `onLuu` mà app không truyền. */
+async function lamBanMotO(u: ReturnType<typeof nguoiDung>, ma = 'B-1.1', so = '12') {
+  await u.click(o(ma, 'Tháng này'))
+  await u.keyboard(so)
+  await u.tab()
 }
 
 /** Ô của một dòng theo nhãn đầy đủ "<mã> <tên>, <cột>". Xem ghi chú đầu file về việc neo hai đầu. */
@@ -259,8 +272,16 @@ function nutHop(ten: string): HTMLElement {
 }
 
 /** Thân của lần `api.put` thứ `lan` (`mock.calls[lan]` là `[path, body]`). */
-function thanPut(lan: number): { version: number; values: Record<string, unknown>[] } {
-  return putSpy.mock.calls[lan][1] as { version: number; values: Record<string, unknown>[] }
+function thanPut(lan: number): {
+  version: number
+  values: Record<string, unknown>[]
+  texts?: Record<string, string | null>
+} {
+  return putSpy.mock.calls[lan][1] as {
+    version: number
+    values: Record<string, unknown>[]
+    texts?: Record<string, string | null>
+  }
 }
 
 beforeEach(() => {
@@ -914,104 +935,114 @@ describe('bàn phím kiểu Excel', () => {
   })
 
   it('Ctrl+S khi đang đứng trong ô nhập: gọi Lưu ĐÚNG MỘT lần và chặn hộp thoại lưu trang', async () => {
-    const onLuu = vi.fn()
-    ve({ state: 'draft', vai: 'reporter', onLuu })
+    const u = userEvent.setup()
+    ve({ state: 'draft', vai: 'reporter' })
+    await lamBanMotO(u)
     const theoDoi = theoDoiChan('s')
-    o('B-1.1', 'Tháng này').focus()
-    await userEvent.keyboard('{Control>}s{/Control}')
+    await u.click(o('B-1.2', 'Tháng này'))
+    await u.keyboard('{Control>}s{/Control}')
     // Đúng MỘT lần: listener nằm ở window, phím gõ trong ô bọt lên tới đó — nếu ai gắn thêm một
     // bản ở cấp lưới nữa thì con số này thành 2.
-    expect(onLuu).toHaveBeenCalledTimes(1)
+    expect(putSpy).toHaveBeenCalledTimes(1)
     expect(theoDoi.chan).toBe(true)
   })
 
   // fix-1 S2: ngay sau khi tải trang, và sau mỗi lần bấm vào vùng trống, focus nằm ở <body>.
   // Listener cấp lưới không nghe được phím ở đó → Ctrl+S rơi vào trình duyệt, mở hộp "Lưu trang".
   it('Ctrl+S khi focus đang ở <body> (chưa bấm vào ô nào): vẫn gọi Lưu và vẫn chặn', async () => {
-    const onLuu = vi.fn()
-    ve({ state: 'draft', vai: 'reporter', onLuu })
+    const u = userEvent.setup()
+    ve({ state: 'draft', vai: 'reporter' })
+    await lamBanMotO(u)
     const theoDoi = theoDoiChan('s')
     ;(document.activeElement as HTMLElement | null)?.blur()
     expect(document.activeElement).toBe(document.body)
-    await userEvent.keyboard('{Control>}s{/Control}')
-    expect(onLuu).toHaveBeenCalledTimes(1)
+    await u.keyboard('{Control>}s{/Control}')
+    expect(putSpy).toHaveBeenCalledTimes(1)
     expect(theoDoi.chan).toBe(true)
   })
 
   // fix-2 F4 (R8): 353 ca vòng trước không ca nào gõ phím `meta` — đổi `e.ctrlKey || e.metaKey`
   // thành `e.ctrlKey` là giết phím tắt trên toàn bộ máy Mac mà không test nào đỏ.
   it('Cmd+S (macOS) gọi Lưu và chặn hộp thoại lưu trang', async () => {
-    const onLuu = vi.fn()
-    ve({ state: 'draft', vai: 'reporter', onLuu })
+    const u = userEvent.setup()
+    ve({ state: 'draft', vai: 'reporter' })
+    await lamBanMotO(u)
     const theoDoi = theoDoiChan('s')
-    o('B-1.1', 'Tháng này').focus()
-    await userEvent.keyboard('{Meta>}s{/Meta}')
-    expect(onLuu).toHaveBeenCalledTimes(1)
+    await u.keyboard('{Meta>}s{/Meta}')
+    expect(putSpy).toHaveBeenCalledTimes(1)
     expect(theoDoi.chan).toBe(true)
   })
 
   // fix-2 F5 (R9): CapsLock bật (hoặc Ctrl+Shift+S) cho `e.key === 'S'`. Bỏ `toLowerCase()` là
   // phím tắt chết và trình duyệt mở hộp "Lưu trang" đúng lúc người dùng tưởng mình vừa lưu.
   it('Ctrl+S khi CapsLock bật (phím báo "S" hoa) vẫn gọi Lưu và vẫn chặn', async () => {
-    const onLuu = vi.fn()
-    ve({ state: 'draft', vai: 'reporter', onLuu })
+    const u = userEvent.setup()
+    ve({ state: 'draft', vai: 'reporter' })
+    await lamBanMotO(u)
     const theoDoi = theoDoiChan('S')
-    o('B-1.1', 'Tháng này').focus()
-    await userEvent.keyboard('{Control>}S{/Control}')
-    expect(onLuu).toHaveBeenCalledTimes(1)
+    await u.keyboard('{Control>}S{/Control}')
+    expect(putSpy).toHaveBeenCalledTimes(1)
     expect(theoDoi.chan).toBe(true)
   })
 
   // fix-3 G7 (M27): `luuRef.current()` chứ không phải closure `onLuu` của lần render đầu. Hôm nay
   // vô hại vì `onLuu` không mang dữ liệu, nhưng Task 23 sẽ cho nó gói giá trị form — lúc đó một
   // closure cũ sinh ra lỗi "lưu bằng dữ liệu cũ" rất khó truy.
-  it('Ctrl+S gọi bản onLuu MỚI NHẤT, không phải closure của lần render đầu', async () => {
-    const cu = vi.fn()
-    const moi = vi.fn()
+  it('Ctrl+S gọi bản Lưu MỚI NHẤT, không phải closure của lần render đầu', async () => {
+    const u = userEvent.setup()
     const mau = mauNho([chiTieu({ code: 'B-1.1' })])
-    const chiTiet = {
-      id: 12, version: 8, state: 'draft', source: 'live', is_late: false,
-      header: {
-        org_unit: { code: DON_VI.code, name: DON_VI.name }, template_code: 'FM01',
-        period_key: '2026-08', due_at: '2026-10-05T16:59:59Z', report_no: null, location: null,
-        report_date: null, reporter_name: null, reporter_position: null, submitted_at: null,
-        decided_at: null, decision_note: null,
-      },
-      missing_periods: [], values: [giaTri({ indicator_code: 'B-1.1' })], texts: { C1: null },
-    } as ChiTietBaoCao
+    const dung = (id: number) =>
+      ({
+        id, version: 8, state: 'draft', source: 'live', is_late: false,
+        header: {
+          org_unit: { code: DON_VI.code, name: DON_VI.name }, template_code: 'FM01',
+          period_key: '2026-08', due_at: '2026-10-05T16:59:59Z', report_no: null, location: null,
+          report_date: null, reporter_name: null, reporter_position: null, submitted_at: null,
+          decided_at: null, decision_note: null,
+        },
+        missing_periods: [], values: [giaTri({ indicator_code: 'B-1.1' })], texts: { C1: null },
+      }) as ChiTietBaoCao
     useSession.getState().login('tok-test', NGUOI_DUNG, DON_VI, QUYEN_REPORTER)
-    const r = veCay(<ReportForm mau={mau} chiTiet={chiTiet} onLuu={cu} />)
-    r.rerender(<ReportForm mau={mau} chiTiet={chiTiet} onLuu={moi} />)
-
-    await userEvent.keyboard('{Control>}s{/Control}')
-    expect(moi).toHaveBeenCalledTimes(1)
-    expect(cu).not.toHaveBeenCalled()
+    const r = veCay(<ReportForm mau={mau} chiTiet={dung(12)} />)
+    await lamBanMotO(u)
+    // Báo cáo KHÁC ở lần render sau: `reportId` nằm trong closure của `saveNow`, nên bản cũ gửi
+    // tới /reports/12 còn bản mới gửi tới /reports/13 — đó là chỗ phân biệt duy nhất quan sát được.
+    r.rerender(<ReportForm mau={mau} chiTiet={dung(13)} />)
+    await u.keyboard('{Control>}s{/Control}')
+    expect(putSpy).toHaveBeenCalledTimes(1)
+    expect(putSpy.mock.calls[0][0]).toBe('/reports/13/values')
   })
 
   // fix-2 F6 (R10): listener nằm ở `window` nên nó sống lâu hơn component nếu cleanup quên gỡ —
   // rời màn báo cáo rồi bấm Ctrl+S vẫn bắn `onLuu` của form đã chết, và mỗi lần mở một báo cáo
   // lại cộng thêm một listener.
   it('rời màn hình (unmount) rồi bấm Ctrl+S: KHÔNG còn gọi Lưu nữa', async () => {
-    const onLuu = vi.fn()
-    const { unmount } = ve({ state: 'draft', vai: 'reporter', onLuu })
+    const u = userEvent.setup()
+    const { unmount } = ve({ state: 'draft', vai: 'reporter' })
+    await lamBanMotO(u)
     unmount()
-    await userEvent.keyboard('{Control>}s{/Control}')
-    expect(onLuu).not.toHaveBeenCalled()
+    await u.keyboard('{Control>}s{/Control}')
+    expect(putSpy).not.toHaveBeenCalled()
   })
 
-  it('Ctrl+S khi đang gõ trong textarea nhóm C cũng gọi Lưu', async () => {
-    const onLuu = vi.fn()
-    ve({ state: 'draft', vai: 'reporter', onLuu })
-    screen.getByLabelText('C1. Hoạt động nổi bật trong tháng').focus()
-    await userEvent.keyboard('{Control>}s{/Control}')
-    expect(onLuu).toHaveBeenCalledTimes(1)
+  it('Ctrl+S khi con trỏ đang trong textarea nhóm C cũng gọi Lưu', async () => {
+    const u = userEvent.setup()
+    ve({ state: 'draft', vai: 'reporter' })
+    await lamBanMotO(u)
+    await u.click(screen.getByLabelText('C1. Hoạt động nổi bật trong tháng'))
+    await u.keyboard('{Control>}s{/Control}')
+    expect(putSpy).toHaveBeenCalledTimes(1)
   })
 
-  it('nút Lưu gọi đúng cùng một hành động với Ctrl+S', async () => {
-    const onLuu = vi.fn()
-    ve({ state: 'draft', vai: 'reporter', onLuu })
-    await userEvent.click(screen.getByRole('button', { name: 'Lưu' }))
-    expect(onLuu).toHaveBeenCalledTimes(1)
+  it('nút Lưu gửi đúng cùng một request với Ctrl+S', async () => {
+    const u = userEvent.setup()
+    ve({ state: 'draft', vai: 'reporter' })
+    await lamBanMotO(u)
+    await u.click(screen.getByRole('button', { name: 'Lưu' }))
+    await lamBanMotO(u, 'B-1.2', '34')
+    await u.keyboard('{Control>}s{/Control}')
+    expect(putSpy).toHaveBeenCalledTimes(2)
+    expect(putSpy.mock.calls[0][0]).toBe(putSpy.mock.calls[1][0])
   })
 
   it('Enter trong textarea nhóm C giữ mặc định (xuống dòng), không nhảy ô', async () => {
@@ -1925,6 +1956,58 @@ describe('lưu khi rời ô', () => {
     expect(thanPut(0).values).toEqual([{ indicator_code: 'B-1.1', note: '  Nghỉ lễ 02/09  ' }])
   })
 
+  // Trước vòng sửa 1 của Task 24, ba ô chữ nhóm C KHÔNG có đường nào lên tới server: gõ xong, dải
+  // đầu báo "Đã lưu 14:02", đóng tab là mất sạch. Backend nhận `texts` trong CHÍNH endpoint này từ
+  // Task 23b (`PutValuesIn.texts`) đúng để một lượt lưu là MỘT version, MỘT dòng audit.
+  it('gõ ô chữ nhóm C rồi rời ô: 1,5 giây sau gửi texts của đúng mã đó', async () => {
+    const u = nguoiDung()
+    ve({ state: 'draft', vai: 'reporter', mau: MAU_HAI_DONG() })
+    await u.click(screen.getByLabelText('C1. Hoạt động nổi bật trong tháng'))
+    await u.keyboard('Diễn tập PCCC ngày 12/08')
+    await u.tab()
+    await choDebounce()
+    expect(thanPut(0).texts).toEqual({ C1: 'Diễn tập PCCC ngày 12/08' })
+    expect(thanPut(0).values).toEqual([])
+  })
+
+  it('Tab ngang qua ô chữ mà không sửa gì thì không gửi request nào', async () => {
+    const u = nguoiDung()
+    ve({ state: 'draft', vai: 'reporter', mau: MAU_HAI_DONG(), texts: { C1: 'Câu đã lưu từ trước' } })
+    await u.click(screen.getByLabelText('C1. Hoạt động nổi bật trong tháng'))
+    await u.tab()
+    await choDebounce()
+    expect(putSpy).not.toHaveBeenCalled()
+  })
+
+  it('ô số và ô chữ đổi cùng lúc đi CHUNG một PUT, cùng một version', async () => {
+    const u = nguoiDung()
+    ve({ state: 'draft', vai: 'reporter', version: 8, mau: MAU_HAI_DONG() })
+    await u.click(o('B-1.1', 'Tháng này'))
+    await u.keyboard('12')
+    await u.click(screen.getByLabelText('C1. Hoạt động nổi bật trong tháng'))
+    await u.keyboard('Có diễn tập')
+    await u.tab()
+    await choDebounce()
+    expect(putSpy).toHaveBeenCalledTimes(1)
+    expect(thanPut(0)).toEqual({
+      version: 8,
+      values: [{ indicator_code: 'B-1.1', this_period: 12 }],
+      texts: { C1: 'Có diễn tập' },
+    })
+  })
+
+  // `texts` VẮNG MẶT nghĩa là "lượt ghi này không đụng `report_text`" (PutValuesIn); gửi `{}` là
+  // một lượt ghi rỗng vào bảng đó — hai chuyện khác nhau trong audit.
+  it('không đụng ô chữ nào thì thân request KHÔNG có khoá texts', async () => {
+    const u = nguoiDung()
+    ve({ state: 'draft', vai: 'reporter', mau: MAU_HAI_DONG() })
+    await u.click(o('B-1.1', 'Tháng này'))
+    await u.keyboard('12')
+    await u.tab()
+    await choDebounce()
+    expect('texts' in thanPut(0)).toBe(false)
+  })
+
   it('Ctrl+S (không có onLuu) gửi NGAY và huỷ luôn lượt hẹn đang chờ', async () => {
     const u = nguoiDung()
     ve({ state: 'draft', vai: 'reporter', mau: MAU_HAI_DONG() })
@@ -1977,6 +2060,19 @@ describe('dải đầu — trạng thái lưu', () => {
     // Đột biến N9 của người soát (bỏ `role="status"`) sống ở vòng soát: người đọc màn hình không
     // bao giờ nghe "Đang lưu…"/"Đã lưu 14:02" — mà chính chú thích tại chỗ khai đó là lý do đặt role.
     expect(screen.getByRole('status').textContent).toBe('Chưa lưu (3 ô)')
+  })
+
+  // Ô chữ nhóm C cũng là thứ đóng tab sẽ mất, nên nó phải được ĐẾM — không đếm thì dải đầu nói
+  // "Đã lưu 14:02" trong lúc phần nhận xét vừa gõ còn nằm nguyên trong trình duyệt.
+  it('ô chữ nhóm C cũng tính vào "Chưa lưu (n ô)"', async () => {
+    const u = nguoiDung()
+    ve({ state: 'draft', vai: 'reporter', mau: MAU_BA_DONG() })
+    await goVao(u, 'B-1.1', '1')
+    expect(screen.getByText('Chưa lưu (1 ô)')).toBeTruthy()
+    await u.click(screen.getByLabelText('C1. Hoạt động nổi bật trong tháng'))
+    await u.keyboard('Có diễn tập')
+    await u.tab()
+    expect(screen.getByText('Chưa lưu (2 ô)')).toBeTruthy()
   })
 
   it('đang gửi thì hiện "Đang lưu…"', async () => {
@@ -2234,14 +2330,48 @@ describe('Nộp luôn lưu trước rồi mới chuyển trạng thái', () => {
   // bạn không sửa được" thì số của họ đã lên tới server rồi. Nếu lượt lưu đó hỏng thì hộp thoại
   // KHÔNG được mở ra (ca "lưu hỏng" ngay dưới).
   it('PUT chạy ngay lúc bấm nút, TRƯỚC khi hộp thoại xác nhận mở ra', async () => {
+    // Giữ PUT TREO rồi mới đo: đây là thứ phân biệt "lưu xong mới hỏi" với "hỏi trước, lưu sau".
+    // Bản cũ của ca này chỉ đọc trạng thái cuối (hộp thoại có, PUT 1 lần, POST chưa gọi) — đúng ở
+    // CẢ HAI thứ tự, nên nó mù đúng với đột biến mang tên nó (người soát, S15).
+    let traLoi: (v: unknown) => void = () => {}
+    putSpy.mockImplementationOnce(() => new Promise((res) => { traLoi = res }))
     const u = nguoiDung()
     ve({ state: 'draft', vai: 'reporter', mau: mauNho([chiTieu({ code: 'B-1.1' })]) })
     await u.click(o('B-1.1', 'Tháng này'))
     await u.keyboard('12')
     await u.click(screen.getByRole('button', { name: 'Nộp báo cáo' }))
-    expect(await screen.findByRole('dialog')).toBeTruthy()
+
     expect(putSpy).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole('dialog')).toBeNull()
+
+    await act(async () => {
+      traLoi({ version: 9, values: [] })
+    })
+    expect(await screen.findByRole('dialog')).toBeTruthy()
     expect(postSpy).not.toHaveBeenCalled()
+  })
+
+  // task-24-carry.md C-T23a nói "409 HOẶC mạng", nhưng vòng 1 chỉ có ca cho nhánh mạng — đột biến
+  // "409 lúc lưu vẫn coi là lưu xong" của người soát (N28) SỐNG. Nếu nó sống thật: người nộp gõ ô
+  // cuối, lượt lưu bị 409, và báo cáo VẪN được nộp bằng số chưa lên tới server.
+  it('lượt lưu bị 409 thì KHÔNG mở hộp thoại và KHÔNG nộp', async () => {
+    putSpy.mockRejectedValueOnce(
+      new ApiError(409, {
+        detail: 'Người khác vừa sửa báo cáo này',
+        state: 'draft',
+        version: 11,
+        values: [],
+      }),
+    )
+    const u = nguoiDung()
+    ve({ state: 'draft', vai: 'reporter', mau: mauNho([chiTieu({ code: 'B-1.1' })]) })
+    await u.click(o('B-1.1', 'Tháng này'))
+    await u.keyboard('12')
+    await u.click(screen.getByRole('button', { name: 'Nộp báo cáo' }))
+    expect(putSpy).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(postSpy).not.toHaveBeenCalled()
+    expect(screen.getByText(/Người khác vừa sửa báo cáo này/)).toBeTruthy()
   })
 
   // N8 của người soát: thu hẹp "lưu trước" về riêng `submit` vẫn xanh. Danh sách chuyển trạng thái
@@ -2381,14 +2511,159 @@ describe('hộp thoại chuyển trạng thái', () => {
     ve({ state: 'submitted', vai: 'admin', mau: MOT_DONG(), values: DA_DIEN })
     const hop = await moHop(u, 'Trả lại…')
     await u.click(within(hop).getByRole('textbox'))
-    await u.keyboard('Thiếu số B-8.1 và B-8.2')
+    // Khoảng trắng hai đầu CÓ trong chuỗi gõ vào: không có nó thì một `.trim()` lén trên đường
+    // gửi đi vẫn xanh (đột biến N14 của người soát) — bất biến "nguyên văn" chỉ được canh ở biên
+    // `Dialog`, không ở thân request.
+    await u.keyboard('  Thiếu số B-8.1 và B-8.2  ')
     await u.click(nutHop('Trả lại'))
     expect(thanPost(0)).toEqual({
       action: 'return',
       expected_state: 'submitted',
       version: 8,
-      note: 'Thiếu số B-8.1 và B-8.2',
+      note: '  Thiếu số B-8.1 và B-8.2  ',
     })
+  })
+
+  // I11 / N25: `bam-nop` chỉ được chạy cho `submit`. Nới ra cho mọi thao tác thì người duyệt bấm
+  // "Trả lại…" sẽ thấy thanh dưới đỏ "Thiếu n ô bắt buộc" trên một form CHỈ ĐỌC họ không sửa được
+  // — một câu báo động vô nghĩa đúng lúc họ đang quyết định.
+  it('bấm thao tác KHÁC "Nộp" không bật câu "Thiếu n ô bắt buộc" của thanh dưới', async () => {
+    const u = nguoiDung()
+    ve({ state: 'submitted', vai: 'admin', mau: MOT_DONG() })
+    await moHop(u, 'Trả lại…')
+    expect(screen.queryByText(/Thiếu \d+ ô bắt buộc/)).toBeNull()
+  })
+
+  // ---------------------------------------------------------------- version đi theo transition
+  //
+  // `TransitionOut` trả `{state, version}`. Ba ca dưới đây là ba hậu quả người soát ĐO ĐƯỢC khi
+  // phản hồi đó bị vứt đi (S1/S2/S3) — cùng lớp lỗi với C9 của Task 23 ở phía `PUT .../values`.
+
+  it('Duyệt xong bấm "Mở lại…" ngay trong cùng phiên: gửi version MỚI, không phải version lúc mở form', async () => {
+    postSpy.mockResolvedValueOnce({ state: 'approved', version: 9 })
+    const u = nguoiDung()
+    ve({ state: 'submitted', vai: 'admin', version: 8, mau: MOT_DONG(), values: DA_DIEN })
+    await moHop(u, 'Duyệt')
+    await u.click(nutHop('Duyệt'))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+
+    // Nút đổi theo trạng thái server VỪA XÁC NHẬN, không chờ lượt `GET` nền nào về.
+    const hop = await moHop(u, 'Mở lại…')
+    await u.click(within(hop).getByRole('textbox'))
+    await u.keyboard('Sai số liệu cột B-8')
+    await u.click(nutHop('Mở lại'))
+    expect(thanPost(1)).toEqual({
+      action: 'reopen',
+      expected_state: 'approved',
+      version: 9,
+      note: 'Sai số liệu cột B-8',
+    })
+  })
+
+  it('409 của transition: lần bấm sau gửi version server VỪA NÓI, không lặp lại số vừa bị từ chối', async () => {
+    postSpy.mockRejectedValueOnce(
+      new ApiError(409, {
+        detail: 'Người khác vừa sửa báo cáo này',
+        state: 'submitted',
+        version: 11,
+      }),
+    )
+    const u = nguoiDung()
+    ve({ state: 'submitted', vai: 'admin', version: 8, mau: MOT_DONG(), values: DA_DIEN })
+    await moHop(u, 'Duyệt')
+    await u.click(nutHop('Duyệt'))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(thanPost(0).version).toBe(8)
+
+    await moHop(u, 'Duyệt')
+    await u.click(nutHop('Duyệt'))
+    expect(thanPost(1).version).toBe(11)
+  })
+
+  // 409 mang CẢ `state`: nếu người khác đã duyệt trước, câu trả lời của server nói ra điều đó.
+  // Không nhận lấy thì nút trên thanh dính vẫn là nút của trạng thái cũ — người duyệt bấm tiếp và
+  // ăn đúng câu lỗi ấy lần nữa.
+  it('409 nói trạng thái ĐÃ KHÁC: nút trên thanh dính đổi theo trạng thái server vừa nói', async () => {
+    postSpy.mockRejectedValueOnce(
+      new ApiError(409, {
+        detail: 'Không thể "Duyệt" ở trạng thái hiện tại',
+        state: 'approved',
+        version: 11,
+      }),
+    )
+    const u = nguoiDung()
+    ve({ state: 'submitted', vai: 'admin', version: 8, mau: MOT_DONG(), values: DA_DIEN })
+    await moHop(u, 'Duyệt')
+    await u.click(nutHop('Duyệt'))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(screen.queryByRole('button', { name: 'Duyệt' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Mở lại…' })).toBeTruthy()
+  })
+
+  it('sau 409 của transition, cú Lưu tiếp theo cũng dùng version server vừa nói', async () => {
+    postSpy.mockRejectedValueOnce(
+      new ApiError(409, {
+        detail: 'Người khác vừa sửa báo cáo này',
+        state: 'returned',
+        version: 11,
+      }),
+    )
+    const u = nguoiDung()
+    ve({ state: 'submitted', vai: 'admin', version: 8, mau: MOT_DONG(), values: DA_DIEN })
+    await moHop(u, 'Duyệt')
+    await u.click(nutHop('Duyệt'))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+
+    await u.click(o('B-1.1', 'Tháng này'))
+    await u.keyboard('12')
+    await u.click(screen.getByRole('button', { name: 'Lưu' }))
+    expect(thanPut(0).version).toBe(11)
+  })
+
+  it('duyệt xong thì chip trạng thái ở dải đầu đổi ngay, không chờ lượt làm mới nền', async () => {
+    postSpy.mockResolvedValueOnce({ state: 'approved', version: 9 })
+    const u = nguoiDung()
+    ve({ state: 'submitted', vai: 'admin', version: 8, mau: MOT_DONG(), values: DA_DIEN })
+    expect(screen.getByText('Đã nộp')).toBeTruthy()
+    await moHop(u, 'Duyệt')
+    await u.click(nutHop('Duyệt'))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(screen.getByText('Đã duyệt')).toBeTruthy()
+    expect(screen.queryByText('Đã nộp')).toBeNull()
+  })
+
+  // Chiều NGƯỢC LẠI: người KHÁC vừa duyệt, lượt `GET` nền mang trạng thái mới về. Bản trong form
+  // phải NHƯỜNG — nếu không, màn hình đứng mãi ở trạng thái cũ cho tới khi tải lại trang.
+  it('lượt làm mới nền mang trạng thái MỚI của người khác: form đi theo nó', () => {
+    useSession.getState().login('tok-test', NGUOI_DUNG, DON_VI, QUYEN_ADMIN)
+    const mau = MOT_DONG()
+    const r = veCay(
+      <ReportForm mau={mau} chiTiet={duLieu({ state: 'submitted', version: 8, mau, values: DA_DIEN })} />,
+    )
+    expect(screen.getByRole('button', { name: 'Duyệt' })).toBeTruthy()
+
+    r.rerender(
+      <ReportForm mau={mau} chiTiet={duLieu({ state: 'approved', version: 9, mau, values: DA_DIEN })} />,
+    )
+    expect(screen.queryByRole('button', { name: 'Duyệt' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Mở lại…' })).toBeTruthy()
+  })
+
+  it('sau một transition thành công, cú Lưu ĐẦU TIÊN gửi version mới chứ không phải số cũ', async () => {
+    postSpy.mockResolvedValueOnce({ state: 'returned', version: 9 })
+    const u = nguoiDung()
+    ve({ state: 'submitted', vai: 'admin', version: 8, mau: MOT_DONG(), values: DA_DIEN })
+    const hop = await moHop(u, 'Trả lại…')
+    await u.click(within(hop).getByRole('textbox'))
+    await u.keyboard('Thiếu số B-8.1 và B-8.2')
+    await u.click(nutHop('Trả lại'))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+
+    // `returned` là trạng thái SỬA ĐƯỢC: form mở ra ngay, không chờ lượt `GET` nền.
+    await u.click(o('B-1.1', 'Tháng này'))
+    await u.keyboard('12')
+    await u.click(screen.getByRole('button', { name: 'Lưu' }))
+    expect(thanPut(0).version).toBe(9)
   })
 
   it('Huỷ đóng hộp thoại và KHÔNG gửi gì', async () => {
@@ -2483,6 +2758,10 @@ describe('hộp thoại chuyển trạng thái', () => {
     await u.click(nutHop('Nộp'))
     const bao = await screen.findByRole('alert')
     expect(bao.textContent).toContain('Mất kết nối, chưa gửi được')
+    // Phần "không hiện JSON" của tên ca: `String(TypeError)` và `JSON.stringify` của lỗi đều lọt
+    // ra màn hình nếu ai đó đổi nhánh này thành phun lỗi thô.
+    expect(bao.textContent).not.toContain('TypeError')
+    expect(bao.textContent).not.toContain('Failed to fetch')
   })
 
   it('bấm lại lần sau xoá banner lỗi của lần trước', async () => {

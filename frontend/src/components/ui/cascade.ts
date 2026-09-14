@@ -108,7 +108,7 @@ function lastOffsetDeclaring(
   className: string,
   cssProperty: string,
   interactiveRanges: Array<[number, number]>,
-): number | null {
+): { offset: number; value: string } | null {
   const selector = escapeForRegex(toCssSelector(className))
   // Lookbehind (vòng sửa 3 — P3 nguyên nhân 1): thêm `{` — CSS build ra bị minify hoàn toàn,
   // không có khoảng trắng sau dấu { mở khối (`@media (hover:hover){.foo{...}`), nên rule ĐẦU TIÊN
@@ -124,7 +124,7 @@ function lastOffsetDeclaring(
   const propPattern = new RegExp(`(?:^|;)\\s*${cssProperty}\\s*:`)
 
   let match: RegExpExecArray | null
-  let last: number | null = null
+  let last: { offset: number; value: string } | null = null
   while ((match = pattern.exec(css)) !== null) {
     const matchEnd = match.index + match[0].length
     // (a) Pseudo-class ngay sau tên lớp (:hover, :focus, ...) — chỉ áp dụng lúc tương tác. Loại
@@ -138,8 +138,14 @@ function lastOffsetDeclaring(
     const braceEnd = braceStart === -1 ? -1 : css.indexOf('}', braceStart)
     if (braceStart === -1 || braceEnd === -1) continue
     const declarations = css.slice(braceStart + 1, braceEnd)
-    if (propPattern.test(declarations)) {
-      last = match.index
+    const khai = propPattern.exec(declarations)
+    if (khai !== null) {
+      // Giá trị = từ sau dấu `:` tới dấu `;` kế tiếp (hoặc hết khối). Giữ nguyên văn, chỉ cắt
+      // khoảng trắng hai đầu — nơi gọi tự quyết so số hay so chuỗi.
+      const sauDauHai = khai.index + khai[0].length
+      const dauCham = declarations.indexOf(';', sauDauHai)
+      const value = declarations.slice(sauDauHai, dauCham === -1 ? undefined : dauCham).trim()
+      last = { offset: match.index, value }
     }
   }
   return last
@@ -157,24 +163,32 @@ function lastOffsetDeclaring(
  * này tại một rule không-tương-tác, và đứng SAU CÙNG trong CSS. Trả `null` nếu không có lớp nào
  * trong className khai báo thuộc tính này ở trạng thái nghỉ.
  */
-export function resolveCascadeWinnerFromCss(css: string, className: string, cssProperty: string): string | null {
+function thangCascade(
+  css: string,
+  className: string,
+  cssProperty: string,
+): { cls: string; value: string } | null {
   const interactiveRanges = findInteractiveMediaRanges(css)
-  let winnerClass: string | null = null
+  let winner: { cls: string; value: string } | null = null
   let winnerOffset = -1
 
   for (const cls of className.split(/\s+/).filter(Boolean)) {
-    const offset = lastOffsetDeclaring(css, cls, cssProperty, interactiveRanges)
+    const kq = lastOffsetDeclaring(css, cls, cssProperty, interactiveRanges)
     // Đây là quy tắc LÕI của cả resolver: giữa nhiều lớp CÙNG có mặt trong className và CÙNG khai
     // báo thuộc tính đang hỏi, lớp có vị trí byte LỚN HƠN (đứng sau trong CSS) thắng — đúng cách
     // trình duyệt thật xử lý cascade khi độ đặc hiệu bằng nhau. `cascade.test.ts` khoá đúng dòng
     // so sánh `>` này bằng một cuộc đua tự dựng: đảo chiều thành `<` phải làm test đó đỏ.
-    if (offset !== null && offset > winnerOffset) {
-      winnerOffset = offset
-      winnerClass = cls
+    if (kq !== null && kq.offset > winnerOffset) {
+      winnerOffset = kq.offset
+      winner = { cls, value: kq.value }
     }
   }
 
-  return winnerClass
+  return winner
+}
+
+export function resolveCascadeWinnerFromCss(css: string, className: string, cssProperty: string): string | null {
+  return thangCascade(css, className, cssProperty)?.cls ?? null
 }
 
 /**
@@ -183,4 +197,15 @@ export function resolveCascadeWinnerFromCss(css: string, className: string, cssP
  */
 export function resolveCascadeWinner(className: string, cssProperty: string): string | null {
   return resolveCascadeWinnerFromCss(loadBuiltCss(), className, cssProperty)
+}
+
+/**
+ * GIÁ TRỊ mà lớp thắng cascade khai báo, nguyên văn như trong CSS đã build ("50", "fixed", "0").
+ * `resolveCascadeWinner` chỉ trả về TÊN lớp, đủ để khoá "lớp nào thắng" nhưng không nói được
+ * những bất biến SO SÁNH HAI PHẦN TỬ khác nhau — vd. "lớp phủ hộp thoại phải nằm TRÊN header cột
+ * dính", thứ duy nhất bù cho việc `Dialog` không gọi `showModal()` (components/ui/Dialog.tsx).
+ * So tên lớp ở đó là tautology; so hai con số mới là đo thật.
+ */
+export function resolveDeclaredValue(className: string, cssProperty: string): string | null {
+  return thangCascade(loadBuiltCss(), className, cssProperty)?.value ?? null
 }

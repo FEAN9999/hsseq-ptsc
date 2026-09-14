@@ -10,11 +10,16 @@
 //    backend/app/api/reports.py:155). `expected_state` + `version` là khoá lạc quan — gửi sai một
 //    trong hai là 409 (`services/workflow.py:198`).
 //
-// 2. HÀNH ĐỘNG ĐI TỪ DỮ LIỆU, KHÔNG TỪ CHUỖI VIẾT CỨNG. `action_code`/`requires_note` lấy nguyên
-//    từ `GET /templates/{code}` — mẫu báo cáo thứ hai phải chạy được mà không sửa file này
-//    (CONTEXT.md). Riêng CÂU CHỮ của bốn hộp thoại thì spec dòng 682 chốt nguyên văn theo từng
-//    thao tác, nên bảng `CAU_CHU` dưới đây tra theo `action_code` — và có nhánh rơi về `name_vi`
-//    cho mọi mã lạ, chứ không phải một phép rẽ nhánh đóng.
+// 2. HÀNH ĐỘNG ĐI TỪ DỮ LIỆU, CÂU CHỮ ĐI TỪ `action_code`. `action_code`/`requires_note` lấy
+//    nguyên từ `GET /templates/{code}` — nút nào tồn tại, thao tác nào bắt nhập lý do, gửi gì lên
+//    server: tất cả từ dữ liệu, nên mẫu báo cáo thứ hai chạy được mà không sửa file này
+//    (CONTEXT.md, và ca N8 của `ReportForm.test.tsx` canh đúng điều đó).
+//    NHƯNG nói cho sòng phẳng: CÂU CHỮ thì CÓ tra theo `action_code` ở hai chỗ — bảng `CAU_CHU`
+//    (spec dòng 682 chốt nguyên văn từng câu hộp thoại) và hai nhánh toast dưới đây (spec dòng 635
+//    bắt câu "Đã nộp" mang KỲ, còn "Đã duyệt" mang link dashboard). Cả hai đều có nhánh rơi về
+//    `name_vi` cho mã lạ, nên mẫu thứ hai không vỡ — nó chỉ nhận câu chung thay vì câu riêng.
+//    Chỗ hở đã biết: mẫu thứ hai dùng LẠI mã `approve` với nghĩa khác sẽ nhận nhầm link "Xem
+//    dashboard". Chấp nhận, vì `approve` là mã của chính khung workflow chứ không phải của mẫu.
 //
 // 3. LỖI NÀO CŨNG ĐÓNG HỘP THOẠI rồi đẩy lên cho form hiện banner (spec dòng 682: "409 trong
 //    dialog → đóng dialog, banner 409 của form"). Callback tên `onLoi` chứ không phải `onConflict`
@@ -46,6 +51,20 @@ import type { ChuyenTrangThai, DauBaoCao } from './ReportForm'
 export interface LoiChuyen {
   detail: string
   errors: ApiErrorItem[] | null
+  /** CẢ HAI loại 409 của transition đều mang `{state, version}` (`services/workflow.py:198,218`
+   * — hop-dong-loi-backend.md). Đây là số MỚI NHẤT server đang giữ: không nhận lấy thì lần bấm
+   * sau gửi lại đúng con số vừa bị từ chối và người dùng kẹt cho tới khi tải lại trang. 400/403
+   * không mang hai trường này nên chúng là `null`. */
+  state: string | null
+  version: number | null
+}
+
+/** Thân phản hồi của `POST /reports/{id}/transition` — `TransitionOut`, backend/app/api/
+ * reports.py:164. Đây là dữ liệu MỚI NHẤT đang có sau một lệnh ghi; vứt nó đi là tự chuốc lấy
+ * lượt 409 kế tiếp (cùng lớp lỗi với task-23-carry.md C9 ở phía `PUT .../values`). */
+export interface KetQuaChuyen {
+  state: string
+  version: number
 }
 
 /** Câu chữ của một hộp thoại xác nhận — đúng bộ prop mà `Dialog` nhận. */
@@ -105,7 +124,7 @@ export function noiDungDialog(c: ChuyenTrangThai, dau: DauBaoCao): NoiDungDialog
     confirmLabel: cau?.confirmLabel ?? c.name_vi,
     danger: cau?.danger ?? false,
     requireNote: c.requires_note,
-    noteLabel: cau?.noteLabel ?? `Lý do (người nộp sẽ thấy nguyên văn)`,
+    noteLabel: cau?.noteLabel ?? 'Lý do (người nộp sẽ thấy nguyên văn)',
   }
 }
 
@@ -139,7 +158,7 @@ export interface KetQuaChuyenTrangThai {
 export function useChuyenTrangThai(
   reportId: number,
   dau: DauBaoCao,
-  opts: { onLoi?: (loi: LoiChuyen) => void } = {},
+  opts: { onXong?: (kq: KetQuaChuyen) => void; onLoi?: (loi: LoiChuyen) => void } = {},
 ): KetQuaChuyenTrangThai {
   const qc = useQueryClient()
   const navigate = useNavigate()
@@ -150,7 +169,7 @@ export function useChuyenTrangThai(
   async function xacNhan(c: ChuyenTrangThai, expectedState: string, version: number, ghiChu: string) {
     setPending(true)
     try {
-      await api.post(`/reports/${reportId}/transition`, {
+      const kq = await api.post<KetQuaChuyen>(`/reports/${reportId}/transition`, {
         action: c.action_code,
         expected_state: expectedState,
         version,
@@ -159,6 +178,11 @@ export function useChuyenTrangThai(
         ...(c.requires_note ? { note: ghiChu } : {}),
       })
       setDangHoi(null)
+      // TRƯỚC cả invalidate: `{state, version}` trong phản hồi là số mới nhất đang có, còn lượt
+      // `GET` do invalidate bắn ra thì phải đi hết một vòng mạng mới về. Trong khoảng giữa hai
+      // mốc đó người dùng bấm được nút tiếp theo — không đẩy số này lên form thì lượt bấm ấy gửi
+      // `version` cũ và ăn 409 với chính mình.
+      opts.onXong?.(kq)
       // Trước toast: câu "Đã duyệt · [Xem dashboard]" là lời hứa số đã đổi, mà số chỉ đổi khi cache
       // được dọn (task-24-carry.md C2 — chờ thêm không cứu được cache sai).
       invalidateReportQueries(qc, reportId)
@@ -178,9 +202,19 @@ export function useChuyenTrangThai(
       setDangHoi(null)
       opts.onLoi?.(
         loi instanceof ApiError
-          ? { detail: loi.detail, errors: loi.errors ?? null }
+          ? {
+              detail: loi.detail,
+              errors: loi.errors ?? null,
+              state: loi.state ?? null,
+              version: loi.version ?? null,
+            }
           : // Không phải `ApiError` = chưa từng có phản hồi nào (fetch ném TypeError): mất mạng.
-            { detail: 'Mất kết nối, chưa gửi được. Thử lại khi có mạng.', errors: null },
+            {
+              detail: 'Mất kết nối, chưa gửi được. Thử lại khi có mạng.',
+              errors: null,
+              state: null,
+              version: null,
+            },
       )
     } finally {
       setPending(false)

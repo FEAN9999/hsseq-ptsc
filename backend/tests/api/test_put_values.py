@@ -216,11 +216,7 @@ def test_so_am_bi_tu_choi_ke_ca_khi_lam_tron_ve_khong(client, db):
         assert r.json()["errors"] == [
             {"indicator_code": "B-2.1", "message": "Số không được âm"}], f"{so}"
 
-    # Xem chú thích dài về `db.flush()` ở
-    # test_texts_ma_ngoai_mau_bao_cao_tra_400_va_khong_ghi_gi: thiếu dòng này thì
-    # khẳng định ngay dưới KHÔNG bao giờ thấy dữ liệu đã ghi (autoflush=False +
-    # fixture `client` ghi đè `get_db`), tức ca này canh mà không canh gì cả.
-    db.flush()
+    db.flush()          # xem chú thích `db.flush()` ở ca mã trường chữ lạ
     assert _o(_xem(client, h, bc["id"]), "B-2.1") == truoc, \
         "payload bị từ chối mà ô vẫn đổi"
 
@@ -353,11 +349,7 @@ def test_so_qua_lon_tra_400_tieng_viet_khong_phai_500(client, db):
         assert r.json()["errors"] == [
             {"indicator_code": "B-2.1",
              "message": "Số quá lớn, tối đa 16 chữ số phần nguyên"}], f"{so}"
-    # Xem chú thích dài về `db.flush()` ở
-    # test_texts_ma_ngoai_mau_bao_cao_tra_400_va_khong_ghi_gi: thiếu dòng này thì
-    # khẳng định ngay dưới KHÔNG bao giờ thấy dữ liệu đã ghi (autoflush=False +
-    # fixture `client` ghi đè `get_db`), tức ca này canh mà không canh gì cả.
-    db.flush()
+    db.flush()          # xem chú thích `db.flush()` ở ca mã trường chữ lạ
     assert _o(_xem(client, h, bc["id"]), "B-2.1") == truoc
 
     # ngay dưới ngưỡng vẫn ghi được — chặn không được nới rộng thành chặn nhầm
@@ -392,11 +384,7 @@ def test_trung_ma_chi_tieu_trong_cung_payload_tra_400(client, db):
     assert r.json()["detail"] == "Dữ liệu không hợp lệ"
     assert r.json()["errors"] == [
         {"indicator_code": "B-2.1", "message": "Mã chỉ tiêu bị lặp trong cùng một payload"}]
-    # Xem chú thích dài về `db.flush()` ở
-    # test_texts_ma_ngoai_mau_bao_cao_tra_400_va_khong_ghi_gi: thiếu dòng này thì
-    # khẳng định ngay dưới KHÔNG bao giờ thấy dữ liệu đã ghi (autoflush=False +
-    # fixture `client` ghi đè `get_db`), tức ca này canh mà không canh gì cả.
-    db.flush()
+    db.flush()          # xem chú thích `db.flush()` ở ca mã trường chữ lạ
     assert _xem(client, h, bc_id)["version"] == 1, "payload bị từ chối mà version vẫn tăng"
 
 
@@ -426,11 +414,7 @@ def test_returned_ghi_duoc_con_submitted_thi_403(client, db):
     r = _ghi(client, h, bc["id"], v, [{"indicator_code": "B-2.1", "this_period": 6}])
     assert r.status_code == 403, r.text
     assert r.json()["detail"] == "Báo cáo ở trạng thái không cho sửa"
-    # Xem chú thích dài về `db.flush()` ở
-    # test_texts_ma_ngoai_mau_bao_cao_tra_400_va_khong_ghi_gi: thiếu dòng này thì
-    # khẳng định ngay dưới KHÔNG bao giờ thấy dữ liệu đã ghi (autoflush=False +
-    # fixture `client` ghi đè `get_db`), tức ca này canh mà không canh gì cả.
-    db.flush()
+    db.flush()          # xem chú thích `db.flush()` ở ca mã trường chữ lạ
     assert _o(_xem(client, h, bc["id"]), "B-2.1")["this_period"] == 5.0
 
 

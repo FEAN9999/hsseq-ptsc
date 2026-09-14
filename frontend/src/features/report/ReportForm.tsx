@@ -143,6 +143,11 @@ interface ONhap {
 
 interface TrangThaiForm {
   version: number
+  /** Trạng thái server XÁC NHẬN gần nhất qua một lệnh GHI (transition). Prop `chiTiet` đi theo
+   * `GET` nền nên nó mới hơn khi có người KHÁC sửa; trường này mới hơn trong khoảng giữa lúc
+   * transition trả lời và lúc `GET` về. Ai mới hơn thì so bằng `version` — xem `trangThaiHienTai`
+   * trong thân component. */
+  trangThai: string
   /** Chỉ hai cột NHẬP ĐƯỢC. Cột "Lũy kế tháng trước" không agg_type nào cho nhập (cellPolicy). */
   nhap: Record<string, ONhap>
   ghiChu: Record<string, string>
@@ -176,6 +181,7 @@ type HanhDongForm =
   | { type: 'chu'; ma: string; noiDung: string }
   | { type: 'bam-nop' }
   | { type: 'loi-chuyen'; loi: LoiChuyen | null }
+  | { type: 'chuyen-xong'; state: string; version: number }
   | { type: 'xung-dot'; loi: LoiXungDot }
   | { type: 'gia-tri-server'; phienBan: number; values: GiaTriBaoCao[] }
 
@@ -192,6 +198,7 @@ function khoiTao(chiTiet: ChiTietBaoCao): TrangThaiForm {
   for (const [ma, noiDung] of Object.entries(chiTiet.texts)) chu[ma] = noiDung ?? ''
   return {
     version: chiTiet.version,
+    trangThai: chiTiet.state,
     nhap,
     ghiChu,
     chu,
@@ -229,7 +236,20 @@ function rutGon(s: TrangThaiForm, h: HanhDongForm): TrangThaiForm {
     case 'bam-nop':
       return { ...s, daBamNop: true }
     case 'loi-chuyen':
-      return { ...s, loiChuyen: h.loi }
+      if (h.loi === null) return { ...s, loiChuyen: null }
+      // CẢ HAI loại 409 của transition mang `{state, version}` mới nhất của server. Nhận lấy, nếu
+      // không thì cú bấm sau gửi lại ĐÚNG con số vừa bị từ chối — người dùng bấm mãi không được và
+      // chỉ tải lại trang mới thoát. 400/403 không mang hai trường đó, lúc ấy giữ nguyên số cũ.
+      return {
+        ...s,
+        loiChuyen: h.loi,
+        version: h.loi.version ?? s.version,
+        trangThai: h.loi.state ?? s.trangThai,
+      }
+    case 'chuyen-xong':
+      // `TransitionOut` trả `{state, version}` — dữ liệu MỚI NHẤT đang có. Cùng lý lẽ với
+      // `gia-tri-server` ở dưới: phản hồi của một lệnh ghi không được phép vứt đi.
+      return { ...s, trangThai: h.state, version: h.version }
     case 'gia-tri-server': {
       // task-23-carry.md C9: phản hồi của `PUT /reports/{id}/values` mang `values` đã TÍNH LẠI
       // (dòng computed, lũy kế, cột Lệch, kiểm tra bộ đếm) — cùng đường tính với GET. Đây là con
@@ -406,23 +426,28 @@ export interface ReportFormProps {
    * hình: số trên bảng vẫn là số đọc được lần cuối, đã vá bằng phản hồi PUT (C9) — chỉ nói ra ở
    * dải đầu để người nhập biết màn hình có thể đang cũ (fix-1 F1). */
   loiLamMoi?: boolean
-  /** Thay hành động "Lưu" của Ctrl+S và nút Lưu. Từ Task 23 lớp lưu nằm ngay trong form nên app
-   * thật KHÔNG truyền prop này; nó ở lại vì Ctrl+S bấm trong lúc CON TRỎ CÒN TRONG Ô không sinh
-   * ra `PUT` nào (`NumberCell` chỉ chốt ô lúc rời ô), nên đó là seam DUY NHẤT đo được phần phím
-   * tắt: chặn hộp "Lưu trang", Cmd+S, CapsLock, gỡ listener lúc unmount, closure mới nhất. */
-  onLuu?: () => void
 }
 
-export function ReportForm({ mau, chiTiet, loiLamMoi = false, onLuu }: ReportFormProps) {
+export function ReportForm({ mau, chiTiet, loiLamMoi = false }: ReportFormProps) {
   const [s, dispatch] = useReducer(rutGon, chiTiet, khoiTao)
   const quyen = useSession((st) => st.permissions)
   const formRef = useRef<HTMLDivElement>(null)
   const luuGiaTri = useSaveValues(chiTiet.id, chiTiet.version)
   const chuyen = useChuyenTrangThai(chiTiet.id, chiTiet.header, {
-    onLoi: (loi) => dispatch({ type: 'loi-chuyen', loi }),
+    onXong: (kq) => {
+      dispatch({ type: 'chuyen-xong', state: kq.state, version: kq.version })
+      // Lớp lưu giữ `version` trong ref của RIÊNG nó (nó phải thế: một lượt refetch nền không
+      // được phép đẩy số cũ vào giữa hai lần gõ). Không đẩy số mới sang thì cú Lưu ĐẦU TIÊN sau
+      // một lượt "Trả lại" gửi số cũ và dựng một banner 409 sai sự thật.
+      luuGiaTri.datPhienBan(kq.version)
+    },
+    onLoi: (loi) => {
+      dispatch({ type: 'loi-chuyen', loi })
+      if (loi.version !== null) luuGiaTri.datPhienBan(loi.version)
+    },
   })
 
-  const luu = onLuu ?? (() => void luuGiaTri.saveNow())
+  const luu = () => void luuGiaTri.saveNow()
   // Gắn ở GỐC form chứ không ở riêng khung bảng: Ctrl+S phải chạy cả khi người dùng đang đứng
   // trong textarea nhóm C — vừa gõ xong phần nhận xét là lúc người ta bấm lưu nhiều nhất.
   useKeyboardNav(formRef, luu)
@@ -440,11 +465,16 @@ export function ReportForm({ mau, chiTiet, loiLamMoi = false, onLuu }: ReportFor
     if (giaTriMoi) dispatch({ type: 'gia-tri-server', phienBan: giaTriMoi.version, values: giaTriMoi.values })
   }, [giaTriMoi])
 
-  const trangThai = mau.states.find((t) => t.code === chiTiet.state)
-  const suaDuoc = (trangThai?.is_editable ?? false) && quyen.has('report.edit')
+  // Hai nguồn nói về trạng thái: prop `chiTiet` (đi theo `GET` nền — mới hơn khi NGƯỜI KHÁC vừa
+  // sửa) và reducer (đi theo phản hồi của các lệnh GHI của chính người này — mới hơn trong khoảng
+  // giữa lúc transition trả lời và lúc `GET` do invalidate về tới). `version` là thứ tự thời gian
+  // duy nhất cả hai cùng nói được, nên lấy nó làm trọng tài.
+  const trangThaiHienTai = chiTiet.version >= s.version ? chiTiet.state : s.trangThai
+  const moTaTrangThai = mau.states.find((t) => t.code === trangThaiHienTai)
+  const suaDuoc = (moTaTrangThai?.is_editable ?? false) && quyen.has('report.edit')
   const coCotLech = quyen.has('report.approve')
   const chuyenDuoc = mau.transitions.filter(
-    (c) => c.from_state === chiTiet.state && quyen.has(c.required_permission),
+    (c) => c.from_state === trangThaiHienTai && quyen.has(c.required_permission),
   )
 
   const nhomCoDong = useMemo(
@@ -533,7 +563,7 @@ export function ReportForm({ mau, chiTiet, loiLamMoi = false, onLuu }: ReportFor
     <div ref={formRef}>
       <FormHeader
         dau={chiTiet.header}
-        state={chiTiet.state}
+        state={trangThaiHienTai}
         source={chiTiet.source}
         isLate={chiTiet.is_late}
         kyThieu={chiTiet.missing_periods}
@@ -546,7 +576,7 @@ export function ReportForm({ mau, chiTiet, loiLamMoi = false, onLuu }: ReportFor
           ghi chú của lượt trả lại trước (fix-1 S4).
           `role="status"` chứ không phải `alert`: banner này có mặt ngay lúc tải trang, không phải
           một sự kiện — `alert` sẽ cắt ngang trình đọc màn hình trước cả tiêu đề trang (fix-1 S12). */}
-      {chiTiet.state === 'returned' && chiTiet.header.decision_note && (
+      {trangThaiHienTai === 'returned' && chiTiet.header.decision_note && (
         <Banner kind="danger">
           <span role="status">
             <b className="font-medium">
@@ -688,6 +718,14 @@ export function ReportForm({ mau, chiTiet, loiLamMoi = false, onLuu }: ReportFor
             noiDung={s.chu[tf.code] ?? ''}
             suaDuoc={suaDuoc}
             onDoi={(noiDung) => dispatch({ type: 'chu', ma: tf.code, noiDung })}
+            // Cùng cơ chế với ô "Ghi chú" của từng chỉ tiêu: chốt lúc RỜI Ô, và chỉ khi khác bản
+            // server đang giữ — Tab ngang qua một ô chữ không được sinh ra `PUT` nào. Bản server
+            // đọc từ `chiTiet.texts` (làm mới sau mỗi lần lưu nhờ `invalidateReportQueries`);
+            // `PutValuesOut` không trả `texts` nên đây là nguồn duy nhất.
+            onRoiO={() => {
+              const dangGo = s.chu[tf.code] ?? ''
+              if (dangGo !== (chiTiet.texts[tf.code] ?? '')) luuGiaTri.markDirtyChu(tf.code, dangGo)
+            }}
           />
         ))}
       </div>
@@ -703,17 +741,19 @@ export function ReportForm({ mau, chiTiet, loiLamMoi = false, onLuu }: ReportFor
         onChuyenTrangThai={bamChuyenTrangThai}
       />
 
-      {/* `dangHoi` gán ra một `const` TRƯỚC khi dựng hộp thoại: TypeScript chỉ giữ được phép thu
-          hẹp "khác null" bên trong closure `onConfirm` khi nó nhìn vào một binding không đổi. */}
+      {/* MỘT cổng duy nhất. `chuyen.dialogMo` luôn bằng `dangHoi !== null`, nên dùng cả hai (một
+          cái làm điều kiện dựng, một cái làm prop `open`) chỉ khiến prop `open` không bao giờ
+          `false` trong app thật — một nhánh chỉ test đi qua. `dangHoi` gán ra `const` trước: phép
+          thu hẹp "khác null" của TypeScript chỉ sống trong closure `onConfirm` khi nó nhìn vào
+          một binding không đổi. */}
       {dangHoi !== null && (
         <Dialog
-          open={chuyen.dialogMo}
           {...noiDungDialog(dangHoi, chiTiet.header)}
           pending={chuyen.pending}
           // `s.version` chứ không phải `chiTiet.version`: mỗi lần lưu server trả về số mới và
           // reducer vá vào đây. Gửi số của lần tải trang là cầm chắc 409 với chính mình ngay sau
           // cú "Nộp luôn lưu trước" ở trên.
-          onConfirm={(ghiChu) => void chuyen.xacNhan(dangHoi, chiTiet.state, s.version, ghiChu)}
+          onConfirm={(ghiChu) => void chuyen.xacNhan(dangHoi, trangThaiHienTai, s.version, ghiChu)}
           onCancel={chuyen.huy}
         />
       )}
@@ -908,12 +948,14 @@ function OChu({
   noiDung,
   suaDuoc,
   onDoi,
+  onRoiO,
 }: {
   ma: string
   nhan: string
   noiDung: string
   suaDuoc: boolean
   onDoi: (noiDung: string) => void
+  onRoiO: () => void
 }) {
   return (
     <div>
@@ -932,6 +974,7 @@ function OChu({
               e.target.style.height = `${e.target.scrollHeight}px`
               onDoi(e.target.value)
             }}
+            onBlur={onRoiO}
             className="block w-full min-h-24 border border-hair rounded-input px-2.5 py-2 bg-surface text-table text-soot focus:outline-2 focus:outline-cyan focus:-outline-offset-2"
           />
           <div className="text-[11px] text-sec text-right mt-0.5">

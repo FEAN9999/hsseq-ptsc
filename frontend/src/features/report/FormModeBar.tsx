@@ -15,18 +15,13 @@
 //
 // Dấu "…" gắn vào đúng các chuyển trạng thái `requires_note` — nó là lời hứa "bấm xong còn một
 // hộp thoại nữa" (Trả lại / Mở lại đều bắt nhập lý do, D24), không phải trang trí.
+import { NUT_CHINH, NUT_GHOST, NUT_THUONG } from '../../components/ui/nut'
 import type { ChuyenTrangThai } from './ReportForm'
 
 /** Số mã chỉ tiêu tối đa liệt kê trong thanh trước khi rút gọn thành "+n". Cùng quy ước với thanh
  * coverage của dashboard ("≤ 4 tên, hơn thì +n", thiết kế dòng 623): một form trống hoàn toàn
  * thiếu 52 ô, liệt hết sẽ đẩy thanh dính cao gần nửa màn hình. */
 const MA_HIEN_TOI_DA = 8
-
-const NUT =
-  'inline-flex items-center justify-center h-8 px-3.5 rounded-input border text-table font-medium whitespace-nowrap disabled:opacity-50'
-const NUT_THUONG = `${NUT} bg-surface border-hair text-ink transition-colors duration-[120ms] hover:bg-mutedbg`
-const NUT_CHINH = `${NUT} bg-cyan border-cyanEdge text-white`
-const NUT_GHOST = `${NUT} bg-transparent border-hair text-ink transition-colors duration-[120ms] hover:bg-mutedbg`
 
 /** Mã chỉ tiêu → id neo trong DOM ("B-8.1" → "B-8-1"). Dấu chấm hợp lệ trong id nhưng lại là dấu
  * chọn lớp trong CSS/`querySelector`, nên bản vẽ states.html đã chọn sẵn dạng gạch (`id="B-8-1"`). */
