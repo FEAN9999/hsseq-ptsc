@@ -566,10 +566,16 @@ describe('/status', () => {
       { period_key: '2026-06', is_open: false },
       { period_key: '2026-07', is_open: false },
     ]
-    moiApi({ periods: periodsChuaMo })
+    const f = moiApi({ periods: periodsChuaMo })
     renderStatus()
     expect(await screen.findByText('Chưa có kỳ nào đang mở để hiển thị tình trạng nộp')).toBeTruthy()
     expect(screen.queryByTestId('skeleton')).toBeNull()
+    // task-26-fix-3.md S4/[N-11]: khoá THẬT câu chú thích trên "`/status` KHÔNG BAO GIỜ được gọi"
+    // — trước bản vá này không có khẳng định nào cho câu đó, nên ca vẫn xanh dù `enabled` mất vế
+    // `den !== undefined` (query VẪN bắn `/status?...to=undefined`; "chưa có kỳ mở" khi đó chỉ
+    // NHẤP NHÁY rồi bị lưới đè lên ngay sau — `findByText` bắt được trạng thái TRUNG GIAN đó, không
+    // phân biệt được với trạng thái CUỐI). Đếm số lần gọi mới khoá đúng: `tk` phải chưa từng bắn.
+    expect(f.mock.calls.some(([u]) => String(u).includes('/status?'))).toBe(false)
   })
 
   // ---- Tải/lỗi: khuôn ReportDetail.tsx/Dashboard.tsx, carry C13.
@@ -660,6 +666,48 @@ describe('/status', () => {
     expect(screen.queryByText('Không tải được dữ liệu')).toBeNull()
   })
 
+  // task-26-fix-3.md S1 [LỖI HÀNH VI] — cửa THỨ SÁU. Khác ca C13 mục 2 ngay trên (ở đó queryKey của
+  // `tk` KHÔNG đổi — cùng-queryKey lỗi nền là đường ĐÃ đúng từ trước): ca này đổi `den` Ở NỀN trước
+  // (quản trị mở kỳ mới — đúng cảnh Q1 vòng 1 vừa vá), làm queryKey của `tk` đổi theo, RỒI query của
+  // queryKey MỚI đó lỗi TRƯỚC KHI kịp thành công một lần. TanStack v5 chỉ áp
+  // `placeholderData`/`keepPreviousData` lúc query `pending`; sang `error` thì `tk.data` rơi về
+  // `undefined` dù `keepPreviousData` vừa hiện đúng lưới cũ một khoảnh khắc trước — bản vá vòng 2
+  // (`tk.data === undefined`) không phân biệt được trạng thái này với "chưa từng có dữ liệu", nên
+  // lưới bị InlineError nuốt mất dù dữ liệu cũ hoàn toàn còn đúng (đây là "cửa thứ sáu").
+  it('S1/[H-1]: /periods đổi ở NỀN sang kỳ MỚI rồi /status của kỳ MỚI lỗi: LƯỚI VẪN CÒN, không bị thay bằng InlineError', async () => {
+    let goiThuPeriods = 0
+    const PERIODS_MOI = [...PERIODS, { period_key: '2026-10', is_open: true }]
+    const f = vi.fn((url: string) => {
+      if (url.includes('/templates/FM01/periods')) {
+        goiThuPeriods++
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => (goiThuPeriods === 1 ? PERIODS : PERIODS_MOI),
+        })
+      }
+      if (url.includes('/status?')) {
+        if (url.includes('to=2026-10')) {
+          return Promise.resolve({ ok: false, status: 500, json: async () => ({ detail: 'Lỗi máy chủ' }) })
+        }
+        return Promise.resolve({ ok: true, status: 200, json: async () => DEFAULT_STATUS })
+      }
+      throw new Error(`URL không lường trước: ${url}`)
+    })
+    vi.stubGlobal('fetch', f)
+    renderStatus()
+    expect(await screen.findByText('PTSC Đình Vũ')).toBeTruthy()
+
+    await act(async () => {
+      window.dispatchEvent(new Event('visibilitychange'))
+    })
+    await waitFor(() => expect(goiThuPeriods).toBeGreaterThan(1))
+    // queryKey của `tk` đã đổi (den 09 -> 10) và query MỚI đó đã lỗi 500 — lưới PHẢI còn nguyên,
+    // không bị thay bằng "Không tải được dữ liệu".
+    await waitFor(() => expect(screen.getByText('PTSC Đình Vũ')).toBeTruthy())
+    expect(screen.queryByText('Không tải được dữ liệu')).toBeNull()
+  })
+
   // task-26-fix-1.md Q1 [CHẶN] — lớp lỗi "lỗi nền phá màn đang có dữ liệu" (carry C13 mục 2) lần
   // thứ TƯ, qua một cửa MỚI: `tu`/`den` suy từ `ky.data` rồi nhét vào `queryKey` của `tk`. Khi
   // `/templates/FM01/periods` làm mới Ở NỀN và danh sách kỳ ĐỔI (quản trị mở kỳ mới — việc hằng
@@ -700,41 +748,49 @@ describe('/status', () => {
 
   // task-26-fix-2.md R1 [LỖI HÀNH VI] — nhánh Q2 (vòng sửa 1) là cửa THỨ NĂM của cùng lớp lỗi trên:
   // nhánh đó không hỏi `tk.data`, nên khi `/templates/FM01/periods` làm mới Ở NỀN và trả về "không
-  // kỳ nào is_open" (quản trị đóng hết kỳ trước khi mở kỳ mới — hai thao tác, không nguyên tử; hoặc
-  // một lượt 200 thân rỗng — trục trặc BE), cả lưới người dùng đang đọc bị thay bằng một dòng chữ,
-  // dù `tk.data` (nhờ `keepPreviousData` của Q1) vẫn còn nguyên và vẫn ĐÚNG — đó là lịch sử đã
-  // duyệt, không tự sai đi chỉ vì hiện giờ không kỳ nào đang mở.
-  it('R1/[H-1]: đang xem lưới, /periods đổi ở NỀN thành "không kỳ nào mở": LƯỚI VẪN CÒN, không bị thay bằng câu giải thích', async () => {
-    let goiThu = 0
-    const PERIODS_DONG_HET = PERIODS.map((p) => ({ ...p, is_open: false })) // quản trị đóng hết kỳ
-    const f = vi.fn((url: string) => {
-      goiThu++
-      const laLanDau = goiThu <= 2
-      if (url.includes('/templates/FM01/periods')) {
-        return Promise.resolve({
-          ok: true,
-          status: 200,
-          json: async () => (laLanDau ? PERIODS : PERIODS_DONG_HET),
-        })
-      }
-      if (url.includes('/status?')) {
-        return Promise.resolve({ ok: true, status: 200, json: async () => DEFAULT_STATUS })
-      }
-      throw new Error(`URL không lường trước: ${url}`)
-    })
-    vi.stubGlobal('fetch', f)
-    renderStatus()
-    expect(await screen.findByText('PTSC Đình Vũ')).toBeTruthy()
+  // kỳ nào is_open", cả lưới người dùng đang đọc bị thay bằng một dòng chữ, dù `tk.data` (nhờ
+  // `keepPreviousData` của Q1) vẫn còn nguyên và vẫn ĐÚNG — đó là lịch sử đã duyệt, không tự sai đi
+  // chỉ vì hiện giờ không kỳ nào đang mở.
+  // task-26-fix-3.md S4 điểm 1/[N-10]: bản TRƯỚC hứa HAI cảnh trong chú thích ("quản trị đóng hết kỳ
+  // … HOẶC một lượt 200 thân rỗng — trục trặc BE") nhưng chỉ khoá MỘT — mở lại cửa CHỈ cho cảnh
+  // "thân rỗng" vẫn 706/706 xanh. `it.each` dưới đây khoá CẢ HAI cảnh riêng biệt, không chỉ một.
+  // S4 điểm 4/[N-23]: bản TRƯỚC còn khẳng định thêm "câu giải thích PHẢI VẮNG MẶT" — khẳng định ĐÓ
+  // phạt NHẦM một bản vá TỐT HƠN giả định (giữ lưới VÀ hiện thêm một băng thông báo, không thay hẳn
+  // cả màn) — đây đúng dạng mù kiểu (d) đã bắt ở Q3 vòng 1 (đóng băng hiện trạng, phạt người vá).
+  // Bỏ khẳng định đó; chỉ khoá đúng HÀNH VI thật cần: lưới phải CÒN — không khoá CÁCH nó còn.
+  it.each<[string, unknown]>([
+    ['quản trị đóng hết kỳ (mọi is_open -> false)', PERIODS.map((p) => ({ ...p, is_open: false }))],
+    ['một lượt 200 thân rỗng (trục trặc BE)', []],
+  ])(
+    'R1/[H-1]: đang xem lưới, /periods đổi ở NỀN thành "không kỳ nào mở" (%s): LƯỚI VẪN CÒN',
+    async (_ten, periodsMoi) => {
+      let goiThu = 0
+      const f = vi.fn((url: string) => {
+        goiThu++
+        const laLanDau = goiThu <= 2
+        if (url.includes('/templates/FM01/periods')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => (laLanDau ? PERIODS : periodsMoi),
+          })
+        }
+        if (url.includes('/status?')) {
+          return Promise.resolve({ ok: true, status: 200, json: async () => DEFAULT_STATUS })
+        }
+        throw new Error(`URL không lường trước: ${url}`)
+      })
+      vi.stubGlobal('fetch', f)
+      renderStatus()
+      expect(await screen.findByText('PTSC Đình Vũ')).toBeTruthy()
 
-    await act(async () => {
-      window.dispatchEvent(new Event('visibilitychange'))
-    })
-    await waitFor(() => expect(goiThu).toBeGreaterThan(2))
-    expect(screen.getByText('PTSC Đình Vũ')).toBeTruthy()
-    expect(screen.queryByText('Chưa có kỳ nào đang mở để hiển thị tình trạng nộp')).toBeNull()
-  })
-
-  // ---- 403 (thiếu status.view — vd. reporter gõ thẳng URL /status).
+      await act(async () => {
+        window.dispatchEvent(new Event('visibilitychange'))
+      })
+      await waitFor(() => expect(goiThu).toBeGreaterThan(2))
+      expect(screen.getByText('PTSC Đình Vũ')).toBeTruthy()
+    },
+  )
 
   // task-26-fix-2.md R3: Q1/[B-1] (trên) mock `/status` trả CÙNG một body bất kể `to=`, nên chỉ
   // khoá được NỬA bất biến — "giữ dữ liệu cũ TRONG LÚC TẢI" — mù với vế còn lại: "đóng băng dữ liệu
@@ -807,6 +863,47 @@ describe('/status', () => {
     expect(screen.queryByText('PTSC Đình Vũ')).toBeNull()
   })
 
+  // ---- 403 (thiếu status.view — vd. reporter gõ thẳng URL /status).
+
+  // task-26-fix-3.md S2 [NẶNG]: luật ở đầu cụm nhánh sớm (Status.tsx) viết "CHỈ 403/404 được thay
+  // VÔ ĐIỀU KIỆN" — nhưng NGOẠI LỆ duy nhất đó chưa ca nào giữ trước vòng này. Người soát áp luật
+  // MÁY MÓC (thêm `&& tk.data === undefined` — hay nay `&& !tkTungCoDuLieu.current` — vào chính
+  // nhánh 403) và 706/706 vẫn xanh, vì ca 403 duy nhất trong suite là 403 ở LẦN TẢI ĐẦU (`tk.data`
+  // vốn đã `undefined`), nên nó thoả cả hai bản. Ca này dựng đúng cảnh S1 đòi: đã có lưới trên màn,
+  // RỒI 403 tới Ở NỀN (queryKey của `tk` KHÔNG đổi — refetchOnWindowFocus, không phải chuyển kỳ) —
+  // PHẢI thay cả trang, vì 403 là KẾT LUẬN (quyền không tự khỏi bằng tải lại), không phải trạng thái
+  // tạm như lỗi mạng/5xx. Nếu ai đó áp luật "hỏi dữ liệu trước" cho cả 403 (rất dễ vì luật không nói
+  // *làm sao* biết nhánh nào được miễn) thì ca này phải ĐỎ: dữ liệu không được phép xem sẽ vẫn còn
+  // nguyên trên màn sau khi quyền đã bị rút.
+  it('S2: 403 tới Ở NỀN sau khi đã có lưới (queryKey KHÔNG đổi) — vẫn thay CẢ TRANG, không MIỄN nhầm theo luật "hỏi dữ liệu trước" (403 là ngoại lệ DUY NHẤT)', async () => {
+    let laLanDau = true
+    const f = vi.fn((url: string) => {
+      if (url.includes('/templates/FM01/periods')) {
+        return Promise.resolve({ ok: true, status: 200, json: async () => PERIODS })
+      }
+      if (url.includes('/status?')) {
+        if (laLanDau) {
+          laLanDau = false
+          return Promise.resolve({ ok: true, status: 200, json: async () => DEFAULT_STATUS })
+        }
+        return Promise.resolve({
+          ok: false,
+          status: 403,
+          json: async () => ({ detail: 'Không có quyền status.view' }),
+        })
+      }
+      throw new Error(`URL không lường trước: ${url}`)
+    })
+    vi.stubGlobal('fetch', f)
+    renderStatus()
+    expect(await screen.findByText('PTSC Đình Vũ')).toBeTruthy()
+
+    await act(async () => {
+      window.dispatchEvent(new Event('visibilitychange'))
+    })
+    await waitFor(() => expect(screen.queryByText('PTSC Đình Vũ')).toBeNull())
+    expect(screen.getByText('Bạn không có quyền xem tình trạng nộp này')).toBeTruthy()
+  })
 
   it('403 (thiếu status.view) hiện đúng câu "không có quyền" kèm lối thoát, không phải InlineError chung', async () => {
     const f = vi.fn((url: string) => {

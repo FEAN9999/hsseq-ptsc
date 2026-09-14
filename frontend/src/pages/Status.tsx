@@ -13,6 +13,7 @@
 // tử CUỐI CÙNG có is_open=true — KHÔNG phải phần tử ĐẦU TIÊN có is_open=true, vì seed hiện có HAI
 // kỳ cùng is_open=true (08 và 09/2026) và "kỳ đang mở" theo brief phải là kỳ MỚI NHẤT (09/2026),
 // không phải kỳ open sớm nhất.
+import { useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 
@@ -73,22 +74,53 @@ export function Status() {
 
   const saoChep = useCopyMissing()
 
-  // task-26-fix-2.md R1 [LỖI HÀNH VI]: bốn cửa riêng lẻ của "lỗi nền phá màn đang có dữ liệu" đã vá
-  // rời nhau (Task 20/23/25 qua `error`, Task 26 Q1 qua `loading`/`queryKey`, Q2 qua `data` — rồi Q2
-  // TỰ nó lại mở ra cửa thứ NĂM vì quên hỏi `tk.data`) chứng minh vá từng-cửa-một đang ĐẺ RA cửa
-  // mới. Từ đây LUẬT áp cho TOÀN BỘ cụm nhánh sớm dưới đây, không phải từng mệnh đề rời:
+  // task-26-fix-3.md S1 [LỖI HÀNH VI] — cửa THỨ SÁU của "lỗi nền phá màn đang có dữ liệu", nằm ở
+  // ĐÚNG nhánh mà bảng luật vòng sửa 2 (dưới đây) từng tự chứng nhận "đúng luật". Gốc rễ: TanStack
+  // v5 CHỈ áp `placeholderData`/`keepPreviousData` khi query ở trạng thái `pending`. Khi `den` đổi ở
+  // NỀN (Q1 vòng 1) rồi query của queryKey MỚI đó LỖI (5xx/mạng) TRƯỚC KHI kịp thành công một lần,
+  // trạng thái sang `error` và `tk.data` RƠI VỀ `undefined` — dù một khoảnh khắc trước
+  // `keepPreviousData` vừa hiện đúng lưới cũ. Vậy `tk.data === undefined` KHÔNG trả lời đúng "trên
+  // màn đang có lưới hay không", nó chỉ trả lời "query HIỆN TẠI có data không" — hai câu trùng nhau
+  // lúc tải lần đầu nhưng lệch nhau đúng lúc queryKey vừa đổi rồi query mới lỗi. (Không xảy ra khi
+  // queryKey KHÔNG đổi: lúc đó `data` giữ nguyên giá trị thành công gần nhất theo cache MẶC ĐỊNH —
+  // không phải placeholderData — nên nhánh lỗi nền CÙNG-queryKey vẫn đúng như cũ, xem ca S1 dưới.)
+  // Vị ngữ THẬT cho câu hỏi đó: "đã TỪNG vẽ được lưới lên màn chưa" — theo dõi bằng ref, không phụ
+  // thuộc trạng thái query hiện tại (ref không "quên" khi query chuyển sang error, khác `tk.data`).
+  const tkTungCoDuLieu = useRef(false)
+  if (tk.data !== undefined) tkTungCoDuLieu.current = true
+
+  // task-26-fix-2.md R1 + task-26-fix-3.md S1(b): bốn cửa riêng lẻ của "lỗi nền phá màn đang có dữ
+  // liệu" đã vá rời nhau (Task 20/23/25 qua `error`, Q1 qua `loading`/`queryKey`, Q2 qua `data`, R1
+  // qua cửa thứ năm Q2 tự mở) chứng minh vá từng-cửa-một đang ĐẺ RA cửa mới — và S1 (cửa thứ SÁU)
+  // chứng minh thêm một điều: đối chiếu bằng ĐỌC ĐIỀU KIỆN trên giấy có thể chứng nhận một nhánh
+  // "đúng luật" trong khi nó vẫn nổ thật, vì chính vị ngữ nó dùng NÓI DỐI. Từ vòng này, mỗi dòng
+  // dưới đây phải kèm một ca DỰNG CẢNH thật ("đã có lưới trên màn + chuyện đó xảy ra ở NỀN" → lưới
+  // còn không?) — không đối chiếu bằng đọc chữ của điều kiện nữa:
   //
   //   MỌI NHÁNH THAY CẢ MÀN HÌNH PHẢI HỎI "TÔI ĐÃ CÓ DỮ LIỆU CHƯA?" TRƯỚC — skeleton, câu trạng
   //   thái, InlineError, tất cả. CHỈ 403/404 được thay VÔ ĐIỀU KIỆN, vì chúng là KẾT LUẬN (quyền
   //   không đủ không tự khỏi bằng tải lại), không phải trạng thái tạm.
   //
-  // Liệt kê + kiểm từng nhánh sớm của trang này theo đúng luật trên (bốn nhánh, theo thứ tự bên
-  // dưới — StatusGrid.test.tsx không có nhánh sớm nào khác ngoài bốn cái này):
-  //   1. 403           — MIỄN, đúng luật (kết luận, xem `loi.status === 403` bên dưới).
-  //   2. lỗi nền (C13)  — ĐÃ hỏi `ky.data === undefined || tk.data === undefined` từ trước, đúng luật.
-  //   3. Q2 "không kỳ mở" — CHƯA hỏi `tk.data` (đây chính là cửa R1) — VÁ ngay dưới.
-  //   4. skeleton       — chính là "hỏi rồi vẫn chưa có" — đúng luật (đây là nhánh MỌI đường hội tụ
-  //      về khi thật sự chưa có dữ liệu, không phải một cửa cần hỏi thêm).
+  // Liệt kê + kiểm từng nhánh sớm của Status.tsx theo đúng luật trên (bốn nhánh, theo thứ tự bên
+  // dưới — Status.test.tsx không có nhánh sớm nào khác ngoài bốn cái này):
+  //   1. 403        — MIỄN, đúng luật (kết luận). Dựng cảnh: 403 tới Ở NỀN SAU KHI đã có lưới — phải
+  //      thay cả trang (ca 'S2:' — khoá NGOẠI LỆ, chưa ai giữ trước vòng này dù luật đã viết ra).
+  //   2. InlineError (C13) — dựng cảnh CŨ: lỗi nền CÙNG queryKey — lưới còn, đúng luật (ca C13 mục
+  //      2). Dựng cảnh MỚI (ca 'S1:'): `den` đổi Ở NỀN rồi query MỚI lỗi — ĐÂY CHÍNH LÀ cửa thứ sáu;
+  //      bảng vòng 2 từng chứng nhận sai "đúng luật" ở dòng này vì chỉ đọc chữ `tk.data === undefined`
+  //      chứ không dựng cảnh. Vá: `!tkTungCoDuLieu.current` thay `tk.data === undefined` (xem trên).
+  //   3. Q2 "không kỳ mở" — dựng cảnh: `/periods` đóng hết kỳ Ở NỀN (ca 'R1/[H-1]' vòng 2) — lưới
+  //      còn, đúng luật. KHÔNG lặp cửa thứ sáu: nhánh này chỉ chạm tới khi `tk` bị `enabled: false`
+  //      (den mất), không phải khi `tk` lỗi — `enabled: false` giữ query ở `pending` MÃI (v5 không
+  //      còn trạng thái "idle" riêng), nên `keepPreviousData` áp dụng KHÔNG NGỪNG, không có lúc nào
+  //      "bốc hơi" như đường error. `tk.data === undefined` vẫn ĐÚNG ở đây, không cần đổi.
+  //   4. skeleton    — chính là "hỏi rồi vẫn chưa có", đúng luật. KHÔNG dựng được cảnh "đã có lưới"
+  //      cho nhánh này — nó theo ĐỊNH NGHĨA chỉ chạm tới khi CHƯA từng có lưới (skeleton mà
+  //      `tkTungCoDuLieu.current === true` là vô lý, hai điều kiện loại trừ nhau) — kiểm bằng đúng
+  //      cảnh của riêng nó: lần tải ĐẦU (ca 'lần tải đầu tiên vẫn hiện skeleton', có từ vòng 1).
+  //   (B5 — thân render chính `formatPeriod(data.periods[0])` có thể `throw` nếu BE trả `periods: []`
+  //   cho queryKey mới; không có ErrorBoundary nào trong `src/` — KHÔNG kiểm được bằng dựng-cảnh-giữ-
+  //   lưới vì nó không "thay màn", nó sập cả app. Ghi nhận, ngoài phạm vi S1-S4 — xem task-26-report.md.)
   const loi = ky.error ?? tk.error
   if (loi instanceof ApiError && loi.status === 403) {
     return (
@@ -108,8 +140,10 @@ export function Status() {
 
   // Lỗi NỀN không được phá màn đang có dữ liệu (C13 mục 2, khuôn ReportDetail.tsx/Dashboard.tsx):
   // `&& chưa có dữ liệu` bắt buộc — refetchOnWindowFocus bật toàn cục, một lượt làm mới nền hỏng
-  // khi `data` cũ còn nguyên trong cache KHÔNG được xoá màn hình đang đúng.
-  if (loi && (ky.data === undefined || tk.data === undefined)) {
+  // khi `data` cũ còn nguyên trong cache KHÔNG được xoá màn hình đang đúng. task-26-fix-3.md S1: vế
+  // `tk` đổi từ `tk.data === undefined` sang `!tkTungCoDuLieu.current` — xem bình luận ref ở trên;
+  // `tk.data === undefined` bốc hơi đúng lúc queryKey vừa đổi rồi query mới lỗi, ref thì không.
+  if (loi && (ky.data === undefined || !tkTungCoDuLieu.current)) {
     return (
       <div>
         <TieuDe>Tình trạng nộp · {TEMPLATE}</TieuDe>
