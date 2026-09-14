@@ -864,6 +864,12 @@ def test_texts_tran_2000_dem_KY_TU_va_ap_cho_moi_o_trong_luot(client, db):
        trên màn hình mới hiện 700/2000.
     2. Trần áp cho MỌI ô trong lượt, không riêng ô đầu dict — nên ô vi phạm
        dưới đây đứng THỨ HAI, sau một ô hợp lệ.
+    3. Đếm chuỗi NGUYÊN VĂN, không `strip()` trước. Thiết kế dòng 625 viết
+       "tối đa 2000 ký tự, đếm ký tự" và bộ đếm trên màn hình FE đếm cả
+       khoảng trắng, nên cắt đuôi trước khi đếm là server và FE bất đồng về
+       cùng một con số: người dùng thấy 2001/2000 mà server vẫn nhận. Trần
+       2000 lại là guard DUY NHẤT của cột `report_text.content` (kiểu `Text`,
+       DB không chặn), nên "trim rồi mới đếm" biến nó thành không trần.
     """
     seed_all(db)
     h = dang_nhap(client, "u22@ptsc.local")
@@ -890,6 +896,14 @@ def test_texts_tran_2000_dem_KY_TU_va_ap_cho_moi_o_trong_luot(client, db):
     assert sau["texts"]["C1"] == dung_tran, "payload bị từ chối mà ô chữ vẫn bị ghi đè"
     assert sau["texts"]["C2"] is None
     assert sau["version"] == v
+
+    tran_cong_khoang_trang = dung_tran + " "
+    assert len(tran_cong_khoang_trang) == 2001
+    r = _ghi(client, h, bc["id"], sau["version"], [],
+             texts={"C3": tran_cong_khoang_trang})
+    assert r.status_code == 400, "khoảng trắng cũng là ký tự — trần bị `strip()` ăn mất"
+    assert r.json()["errors"] == [
+        {"field_code": "C3", "message": "Nội dung tối đa 2000 ký tự"}]
 
 
 def test_texts_sai_tren_bao_cao_khong_sua_duoc_van_la_403_chu_khong_phai_400(client, db):
@@ -1090,6 +1104,25 @@ def test_ghi_chu_rong_duoc_chuan_hoa_ve_null(client, db):
     assert r.status_code == 200, r.text
     assert _note_trong_db() is None
 
+    # Đường INSERT. Bốn bước trên chạy trên dòng ĐÃ CÓ SẴN (fixture ghi 52/53
+    # dòng cho 2026-08) nên chỉ phủ nhánh UPDATE — đúng cái bẫy mà ca ô chữ
+    # ngay trên đã phải khoá cả hai đường mới đủ. Lệnh gán `note` chỉ có MỘT
+    # chỗ, nhưng "một chỗ" là kết luận đọc từ mã hôm nay, không phải điều ca
+    # test tự bảo đảm; mà báo cáo kỳ mới chưa có dòng nào mới là đường demo.
+    tao = client.post("/api/v1/reports",
+                      json={"template": "FM01", "period_key": "2026-09"}, headers=h)
+    assert tao.status_code == 201, tao.text
+    bc_moi = tao.json()["id"]
+    assert db.query(ReportValue).filter_by(report_id=bc_moi).count() == 0, \
+        "tiền đề: báo cáo kỳ mới chưa có dòng report_value nào"
+
+    r = _ghi(client, h, bc_moi, 1, [{"indicator_code": "B-2.1", "note": ""}])
+    assert r.status_code == 200, r.text
+    db.flush()
+    assert db.query(ReportValue).filter_by(
+        report_id=bc_moi, indicator_id=ind.id).one().note is None, \
+        "đường INSERT lưu `''` xuống DB thay vì NULL"
+
 
 def test_hai_o_chu_dang_co_noi_dung_cap_nhat_duoc_trong_cung_mot_luot(client, db):
     """Ctrl+S sau khi sửa CẢ HAI ô chữ đã có nội dung. Nạp trước dòng
@@ -1168,18 +1201,28 @@ def test_cot_cong_don_cua_dong_counter_duoc_lam_tron_theo_decimals(client, db):
     """Spec dòng 231: server làm tròn rồi mới lưu. Hai ca `test_quantize_*` ở
     trên chỉ phủ cột "Tháng này"; cột "Cộng dồn" của dòng `counter` đi qua một
     lệnh gán KHÁC nên có thể ghi thẳng giá trị chưa quantize mà không ai thấy.
-    Dùng B-1.7 (counter, `decimals=0`) — B-1.5 là `decimals=2` nên 3,5 lưu
-    nguyên vẫn hợp lệ, không phân biệt được hai đường."""
+
+    Phải dùng HAI chỉ tiêu có `decimals` khác nhau trong cùng một lượt, đúng
+    cùng lý do đã viết ca `test_quantize_theo_decimals_cua_chi_tieu_decimals_0`:
+    một mình B-1.7 (`decimals=0`) thì "làm tròn theo `decimals` của chỉ tiêu"
+    và "luôn làm tròn về số nguyên" cho ra cùng một kết quả, tên ca hứa vế đầu
+    mà chỉ khẳng định được vế sau. B-1.5 là `counter`, `decimals=2`: 3,456 phải
+    thành 3,46 chứ không phải 3."""
     seed_all(db)
     h = dang_nhap(client, "u22@ptsc.local")
     bc = _nhap_08(client, h)
 
     v = _xem(client, h, bc["id"])["version"]
     r = _ghi(client, h, bc["id"], v,
-             [{"indicator_code": "B-1.7", "acc_total_entered": 3.5}])
+             [{"indicator_code": "B-1.7", "acc_total_entered": 3.5},
+              {"indicator_code": "B-1.5", "acc_total_entered": 3.456}])
     assert r.status_code == 200, r.text
     assert _o(r.json(), "B-1.7")["acc_total_entered"] == 4.0, "Cộng dồn chưa được làm tròn"
-    assert _o(_xem(client, h, bc["id"]), "B-1.7")["acc_total_entered"] == 4.0
+    assert _o(r.json(), "B-1.5")["acc_total_entered"] == 3.46, \
+        "Cộng dồn làm tròn bằng một `decimals` cố định, không theo chỉ tiêu"
+    xem = _xem(client, h, bc["id"])
+    assert _o(xem, "B-1.7")["acc_total_entered"] == 4.0
+    assert _o(xem, "B-1.5")["acc_total_entered"] == 3.46
 
 
 def test_texts_ma_la_mang_null_van_bi_tu_choi_khong_de_lai_dong_rac(client, db):
@@ -1249,3 +1292,98 @@ def test_payload_sai_ca_so_lan_o_chu_thi_bao_loi_SO_truoc(client, db):
     assert r.status_code == 400, r.text
     assert r.json()["errors"] == [
         {"indicator_code": "B-2.1", "message": "Số không được âm"}]
+
+
+# =========================================================================
+# Task 23b — vòng sửa 3 (task-23b-rereview-1.md Phần C). Cả 294 ca trước
+# không ca nào ghi số 0 xuống bất kỳ ô nào: bộ số đang dùng là 1..1000,
+# 12.345, 3.5, −5. Mà 0 mới là con số hay gặp nhất và mang nghĩa nặng nhất
+# trong báo cáo SKATMT — "0 vụ chết người", "0 LTI" — và Ban ATCL được
+# hướng dẫn GÕ SỐ 0 chứ không để trống dòng. Mọi lỗi dạng `x or None` trên
+# đường ghi vì thế đi lọt toàn bộ bộ test mà hỏng đúng đường demo.
+# =========================================================================
+
+def test_ghi_so_0_vao_thang_nay_cua_dong_sum_luu_dung_0_khong_phai_NULL(client, db):
+    """0 là giá trị hợp lệ, không phải "ô trống". Nhầm hai thứ đó (`v or None`,
+    `if v:`) thì người nhập gõ 0 vào "Tháng này" của 48/53 dòng `sum`, thấy
+    banner "Đã lưu", tải lại trang thì ô trắng — và lúc Nộp bị chặn "thiếu ô
+    bắt buộc" đúng những dòng vừa gõ.
+
+    Khẳng định cả GET lẫn `report_value`: GET đọc thẳng cột nên ở đây hai
+    đường cùng nói một câu, nhưng phép kiểm tầng lưu trữ thì đọc tầng lưu
+    trữ."""
+    seed_all(db)
+    from app.models import Indicator, ReportValue
+    h = dang_nhap(client, "u22@ptsc.local")
+    bc = _nhap_08(client, h)
+    ind = db.query(Indicator).filter_by(code="B-2.1").one()
+    assert ind.agg_type == "sum", "tiền đề: B-2.1 (Chết người) là dòng sum"
+    assert _o(_xem(client, h, bc["id"]), "B-2.1")["this_period"] != 0, \
+        "tiền đề: ô này chưa mang số 0, nên đọc lại ra 0 là do lượt ghi này"
+
+    v = _xem(client, h, bc["id"])["version"]
+    r = _ghi(client, h, bc["id"], v, [{"indicator_code": "B-2.1", "this_period": 0}])
+    assert r.status_code == 200, r.text
+    assert _o(r.json(), "B-2.1")["this_period"] == 0, "thân 200 trả về NULL thay vì 0"
+    assert _o(_xem(client, h, bc["id"]), "B-2.1")["this_period"] == 0, \
+        "tải lại trang thì số 0 vừa gõ biến mất"
+    db.flush()
+    assert db.query(ReportValue).filter_by(
+        report_id=bc["id"], indicator_id=ind.id).one().this_period == 0, \
+        "`report_value.this_period` lưu NULL thay vì 0"
+
+
+def test_ghi_so_0_vao_hai_cot_cua_dong_counter_luu_dung_0_khong_phai_NULL(client, db):
+    """Dòng `counter` đi qua hai lệnh gán KHÁC với nhánh `sum`, nên ca trên
+    không phủ. Đúng lúc con số quan trọng nhất — "0 giờ an toàn kể từ LTI
+    cuối", tức là vừa có tai nạn — thì nó là số dễ biến mất nhất.
+
+    B-1.5 có `decimals=2`: 0 phải qua `quantize` thành `Decimal("0.00")` rồi
+    mới lưu, và `Decimal("0.00") or None` vẫn ra None y như `Decimal(0)`."""
+    seed_all(db)
+    from app.models import Indicator, ReportValue
+    h = dang_nhap(client, "u22@ptsc.local")
+    bc = _nhap_08(client, h)
+    ind = db.query(Indicator).filter_by(code="B-1.5").one()
+    assert ind.agg_type == "counter", "tiền đề: B-1.5 là dòng counter"
+    truoc = _o(_xem(client, h, bc["id"]), "B-1.5")
+    assert truoc["this_period"] != 0 and truoc["acc_total_entered"] != 0, \
+        "tiền đề: hai ô này chưa mang số 0"
+
+    v = _xem(client, h, bc["id"])["version"]
+    r = _ghi(client, h, bc["id"], v, [{"indicator_code": "B-1.5",
+                                       "this_period": 0, "acc_total_entered": 0}])
+    assert r.status_code == 200, r.text
+    o = _o(r.json(), "B-1.5")
+    assert o["this_period"] == 0 and o["acc_total_entered"] == 0, \
+        "thân 200 trả về NULL thay vì 0"
+    o = _o(_xem(client, h, bc["id"]), "B-1.5")
+    assert o["this_period"] == 0 and o["acc_total_entered"] == 0, \
+        "tải lại trang thì số 0 vừa gõ biến mất"
+    db.flush()
+    dong = db.query(ReportValue).filter_by(
+        report_id=bc["id"], indicator_id=ind.id).one()
+    assert dong.this_period == 0, "`report_value.this_period` lưu NULL thay vì 0"
+    assert dong.acc_total_entered == 0, \
+        "`report_value.acc_total_entered` lưu NULL thay vì 0"
+
+
+def test_ghi_so_0_vao_cong_don_dong_snapshot_luu_dung_0_khong_phai_NULL(client, db):
+    """Chỗ thứ BA cùng một lớp lỗi, và là chỗ duy nhất không có dữ liệu FM01 đi
+    qua (`_them_chi_tieu_snapshot` giải thích vì sao) — nên nếu chỉ khoá hai
+    nhánh `sum`/`counter` thì đột biến `or None` ở nhánh này vẫn sống, đúng
+    kiểu "sửa hai trong ba chỗ" mà cả vòng sửa này đang dọn. Snapshot là số
+    KIỂM KÊ tại một thời điểm: 0 (hết hàng, hết tồn) là kết quả kiểm kê hợp
+    lệ nhất."""
+    seed_all(db)
+    _them_chi_tieu_snapshot(db)
+    h = dang_nhap(client, "u22@ptsc.local")
+    bc = _nhap_08(client, h)
+
+    v = _xem(client, h, bc["id"])["version"]
+    r = _ghi(client, h, bc["id"], v, [{"indicator_code": "S-TEST",
+                                       "acc_total_entered": 0}])
+    assert r.status_code == 200, r.text
+    assert _o(r.json(), "S-TEST")["acc_total_entered"] == 0, "thân 200 trả NULL thay vì 0"
+    assert _o(_xem(client, h, bc["id"]), "S-TEST")["acc_total_entered"] == 0, \
+        "tải lại trang thì số 0 vừa gõ biến mất"
