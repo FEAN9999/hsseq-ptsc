@@ -12,7 +12,8 @@
 // đòi `period` bắt buộc, carry C2) nên khi URL chưa có `?period=` thì dùng hằng số KY_MAC_DINH —
 // đơn giản hơn hẳn so với gọi thêm API chỉ để suy ra kỳ mặc định (xem task-25-report.md mục "khác
 // brief").
-import { useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
+import { ApiError } from '../api/client'
 import { InlineError } from '../components/ui/InlineError'
 import { Skeleton } from '../components/ui/Skeleton'
 import { Coverage } from '../features/dashboard/Coverage'
@@ -40,6 +41,33 @@ export function Dashboard() {
 
   const summary = useSummary(period)
   const units = useUnits(period)
+
+  // Vòng sửa 1 (task-25-fix-1.md A4, review mục 3/12): vai `reporter` không có `dashboard.view`
+  // (seed/__init__.py:70) nên đây là đường đi tới được thật — gõ thẳng /dashboard nhận một câu
+  // sai nguyên nhân ("Không tải được dữ liệu" + Thử lại lặp vô ích mãi mãi) nếu không tách riêng.
+  // Khuôn giống hệt ReportDetail.tsx:46 (403 → câu "không có quyền" + lối thoát), không phát minh
+  // khuôn thứ hai.
+  const loi403 =
+    summary.error instanceof ApiError && summary.error.status === 403
+      ? summary.error
+      : units.error instanceof ApiError && units.error.status === 403
+        ? units.error
+        : null
+  if (loi403) {
+    return (
+      <div>
+        <TieuDe period={period} onChange={doiKy} />
+        <div className="border border-hair bg-surface rounded-tile p-8 text-center text-soot text-table">
+          Bạn không có quyền xem dashboard này
+          <div className="mt-2.5">
+            <Link to="/reports" className="text-soot font-medium">
+              Về báo cáo của đơn vị
+            </Link>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   if (summary.isError || units.isError) {
     return (

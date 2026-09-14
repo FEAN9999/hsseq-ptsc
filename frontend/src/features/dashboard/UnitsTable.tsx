@@ -22,6 +22,12 @@ const MA_CHI_TIEU_LTI = 'B-2.2'
 
 const O_CHUNG = 'h-9 px-3 border-b border-hair text-table'
 const O_SO = `${O_CHUNG} text-right tnum`
+// Vòng sửa 1 (task-25-fix-1.md A5-c, review mục 11 "c"): bản vẽ làm MỜ CẢ DÒNG "Chưa nộp"
+// (class="sec" trên mọi ô) — tín hiệu thị giác "dòng này không bấm được" (D4).
+const MO = ' text-sec'
+
+// 6 cột số — dùng CHUNG danh sách này cho cả tiêu đề (canh phải, A5-a) lẫn không phải tính lại.
+const TEN_COT_SO = new Set(['Giờ công', 'LTI', 'FAT', 'Near miss', 'HAZOB', 'Giờ AT kể từ LTI cuối'])
 
 function trangThai(state: string | null): ChipKind {
   return state === null ? 'missing' : (state as ChipKind)
@@ -30,12 +36,13 @@ function trangThai(state: string | null): ChipKind {
 function Dong({ row, period }: { row: UnitRow; period: string }) {
   const navigate = useNavigate()
   const coBaoCao = row.report_id !== null
+  const mo = coBaoCao ? '' : MO
 
   return (
     <tr aria-disabled={coBaoCao ? undefined : 'true'}>
-      <td className={O_CHUNG}>{row.org_unit.name}</td>
-      <td className={O_SO}>{formatNumber(row.gio_cong, 0)}</td>
-      <td className={O_SO}>
+      <td className={O_CHUNG + mo}>{row.org_unit.name}</td>
+      <td className={O_SO + mo}>{formatNumber(row.gio_cong, 0)}</td>
+      <td className={O_SO + mo}>
         {coBaoCao ? (
           <button
             type="button"
@@ -48,14 +55,16 @@ function Dong({ row, period }: { row: UnitRow; period: string }) {
             {formatNumber(row.lti, 0)}
           </button>
         ) : (
-          <span data-testid={`lti-${row.org_unit.code}`}>{formatNumber(row.lti, 0)}</span>
+          // Vòng sửa 1 (task-25-fix-1.md A3, review N8): KHÔNG data-testid ở đây — dòng chưa nộp
+          // không bấm được, không mã/test nào cần định vị riêng phần tử này bằng testid.
+          <span>{formatNumber(row.lti, 0)}</span>
         )}
       </td>
-      <td className={O_SO}>{formatNumber(row.fat, 0)}</td>
-      <td className={O_SO}>{formatNumber(row.near_miss, 0)}</td>
-      <td className={O_SO}>{formatNumber(row.hazob, 0)}</td>
-      <td className={O_SO}>{formatNumber(row.gio_an_toan_tu_lti_cuoi, 0)}</td>
-      <td className={O_CHUNG}>
+      <td className={O_SO + mo}>{formatNumber(row.fat, 0)}</td>
+      <td className={O_SO + mo}>{formatNumber(row.near_miss, 0)}</td>
+      <td className={O_SO + mo}>{formatNumber(row.hazob, 0)}</td>
+      <td className={O_SO + mo}>{formatNumber(row.gio_an_toan_tu_lti_cuoi, 0)}</td>
+      <td className={O_CHUNG + mo}>
         <Chip kind={trangThai(row.state)} />
       </td>
     </tr>
@@ -76,13 +85,19 @@ const TIEU_DE_COT = [
 export function UnitsTable({ rows, period }: { rows: UnitRow[]; period: string }) {
   return (
     <div className="overflow-x-auto border border-hair bg-surface rounded-input">
-      <table className="w-full border-collapse">
+      {/* Vòng sửa 1 (task-25-fix-1.md A5-h, review mục 11 "h"): bỏ viền dưới của dòng CUỐI trong
+          tbody — cùng khung bo/viền ngoài của chính div này thì viền dưới đó thành viền đôi ngay
+          trước mép khung. Scope riêng `tbody` (không phải `tr:last-child` trần như bản vẽ) để
+          không lỡ ăn luôn dòng tiêu đề — dòng đó vẫn CẦN viền để tách khỏi phần thân. */}
+      <table className="w-full border-collapse [&_tbody_tr:last-child_td]:border-b-0">
         <thead>
           <tr>
             {TIEU_DE_COT.map((ten) => (
               <th
                 key={ten}
-                className="h-9 px-3 border-b border-hair bg-mutedbg text-tableHead font-semibold text-left whitespace-nowrap"
+                className={`h-9 px-3 border-b border-hair bg-mutedbg text-tableHead font-semibold whitespace-nowrap ${
+                  TEN_COT_SO.has(ten) ? 'text-right' : 'text-left'
+                }`}
               >
                 {ten}
               </th>

@@ -40,7 +40,12 @@ export function KpiTile({ code, label, value, unit }: KpiTileProps) {
     return () => clearTimeout(hen)
   }, [value])
 
-  const danger = value !== null && value > 0 && MA_DO_KHI_DUONG.has(code ?? '')
+  // Vòng sửa 1 (task-25-fix-1.md A3, review N24 — đột biến TƯƠNG ĐƯƠNG thật): `value !== null &&`
+  // tách riêng là thừa — `null > 0` vốn đã `false` (so sánh quan hệ ép `null` thành `0`), và
+  // `Tile` (carry C4) tự che tiếp bằng `isDanger = Boolean(danger) && !isMissing`. Gấp null-check
+  // vào NGAY trong phép so sánh (`?? 0`) thay vì một mệnh đề `&&` riêng — tsc strict-null vẫn đòi
+  // thu hẹp kiểu cho `>`, nhưng không còn là hai điều kiện lặp ý nhau.
+  const danger = (value ?? 0) > 0 && MA_DO_KHI_DUONG.has(code ?? '')
 
   return <Tile label={label} value={value} unit={unit} danger={danger} flash={flash} />
 }

@@ -31,10 +31,17 @@ export function Coverage({
   submittedCount: number
   missingUnits: MissingUnit[]
 }) {
+  // Vòng sửa 1 (task-25-fix-1.md A2, review mục 2): states.html D11 viết đủ bốn số ở nhánh này —
+  // "Chưa có báo cáo được duyệt · Đã nộp 1/22 · Chờ duyệt 1 · Chưa nộp 21" — không dừng sau
+  // "Đã nộp n/N" như bản trước. "Chờ duyệt" dùng lại ĐÚNG `submittedCount` (cùng field, cùng ý
+  // nghĩa "đã nộp, chưa duyệt" như nhánh bình thường ngay dưới) — mockup lặp lại số 1 y hệt ở cả
+  // hai vị trí vì đó CÙNG là một con số. "Chưa nộp" ở đây chỉ là ĐẾM, không liệt tên (khác nhánh
+  // bình thường) — đúng nguyên văn D11, không có danh sách tên nào trong ví dụ đó.
   if (approvedCount === 0) {
     return (
       <div className="text-sec text-table mb-5">
-        Chưa có báo cáo được duyệt · Đã nộp {formatNumber(submittedCount, 0)}/{formatNumber(reportingUnits, 0)}
+        Chưa có báo cáo được duyệt · Đã nộp {formatNumber(submittedCount, 0)}/{formatNumber(reportingUnits, 0)} ·{' '}
+        Chờ duyệt {formatNumber(submittedCount, 0)} · Chưa nộp {formatNumber(missingUnits.length, 0)}
       </div>
     )
   }

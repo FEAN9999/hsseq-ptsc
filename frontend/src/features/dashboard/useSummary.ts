@@ -38,6 +38,9 @@ export function useSummary(period: string) {
     data: query.data,
     isLoading: query.isLoading,
     isError: query.isError,
+    // Vòng sửa 1 (task-25-fix-1.md A4): Dashboard.tsx cần phân biệt 403 (thiếu dashboard.view)
+    // với lỗi khác — `isError` (boolean) không đủ, phải có chính đối tượng lỗi để đọc `.status`.
+    error: query.error,
     refetch: query.refetch,
   }
 }

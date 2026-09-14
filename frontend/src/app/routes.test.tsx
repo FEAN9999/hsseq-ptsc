@@ -2,9 +2,9 @@
 //
 // C7 (task-19-carry.md): kiểm bảng route THẬT — dùng lại đúng `routeObjects`/`App` mà production
 // dùng (qua `createMemoryRouter` để điều khiển URL ban đầu), không tự dựng một cây <Routes> song
-// song rồi so khớp với chính nó. Không kiểm /dashboard, /status (chưa xây). Bất biến "mọi href
-// Sidebar dẫn tới trang thật" thuộc Task 26 (đã ghi ledger trong carry), không lặp một bản yếu ở
-// đây.
+// song rồi so khớp với chính nó. Không kiểm /status (chưa xây; /dashboard đã xây — Task 25). Bất
+// biến "mọi href Sidebar dẫn tới trang thật" thuộc Task 26 (đã ghi ledger trong carry), không lặp
+// một bản yếu ở đây.
 //
 // task-20-carry.md C5: Task 20 là task đầu tiên khai route bọc RequireAuth THẬT (/reports) — Task
 // 19 chưa đo được ca "bỏ RequireAuth khỏi một route cần phiên" vì lúc đó chưa có route nào để bỏ
@@ -73,6 +73,55 @@ describe('bảng route', () => {
     )
     duong('/reports')
     expect(await screen.findByText('Chưa có kỳ báo cáo nào đang mở')).toBeTruthy()
+    expect(screen.getByText('Đăng xuất')).toBeTruthy()
+  })
+
+  // Vòng sửa 1 Task 25 (task-25-fix-1.md A1, review N26 — mục 1 CẦN SỬA "NẶNG", vi phạm Ruling
+  // 177): route MỚI phải có ca riêng khoá RequireAuth, đúng khuôn Task 20 (C5)/Task 22 (C6) ở
+  // trên. Trước bản vá này, gỡ hẳn <RequireAuth> khỏi route /dashboard vẫn để `npx vitest run`
+  // 618/618 xanh — không ca nào trong repo phát hiện được. "Dashboard SKATMT" là <h1> riêng của
+  // trang, vẽ NGAY LẬP TỨC (không đợi API) ở CẢ BA nhánh tải/lỗi/có dữ liệu của Dashboard.tsx, nên
+  // đủ để khẳng định "trang có mở hay không" mà không cần dựng fetch riêng cho /dashboard/*.
+  it('vào /dashboard khi CHƯA có token: bị đá về /login, KHÔNG lộ số liệu 22 đơn vị (N26)', () => {
+    duong('/dashboard')
+    expect(screen.getByText('Đăng nhập HSEQ')).toBeTruthy()
+    expect(screen.queryByText('Dashboard SKATMT')).toBeNull()
+  })
+
+  it('có token, quyền dashboard.view: vào /dashboard thấy đúng khung AppShell (Sidebar) quanh trang', async () => {
+    useSession
+      .getState()
+      .login(
+        'tok-1',
+        { id: 1, email: 'admin@ptsc.local', full_name: 'Quản trị Ban ATCL', position: null },
+        { id: 1, code: 'HO', name: 'Ban ATCL' },
+        ['dashboard.view'],
+      )
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string) => {
+        if (url.includes('/dashboard/summary')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({
+              period_key: '2026-08',
+              reporting_units: 22,
+              approved_count: 0,
+              submitted_count: 0,
+              missing_units: [],
+              kpis: [],
+            }),
+          })
+        }
+        if (url.includes('/dashboard/units')) {
+          return Promise.resolve({ ok: true, status: 200, json: async () => [] })
+        }
+        return Promise.resolve({ ok: true, status: 200, json: async () => ({ status: 'ok' }) })
+      }),
+    )
+    duong('/dashboard')
+    expect(await screen.findByText('Dashboard SKATMT')).toBeTruthy()
     expect(screen.getByText('Đăng xuất')).toBeTruthy()
   })
 

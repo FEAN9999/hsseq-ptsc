@@ -32,6 +32,9 @@ export function useUnits(period: string) {
     items: query.data ?? [],
     isLoading: query.isLoading,
     isError: query.isError,
+    // Vòng sửa 1 (task-25-fix-1.md A4) — cùng lý do useSummary.ts: cần đối tượng lỗi để Dashboard
+    // phân biệt 403 với lỗi khác.
+    error: query.error,
     refetch: query.refetch,
   }
 }
