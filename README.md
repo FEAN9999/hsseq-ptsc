@@ -60,6 +60,31 @@ uv pip install --system -r pyproject.toml --extra dev
 pytest
 ```
 
+## Chạy e2e (Playwright)
+
+Bộ e2e nằm ở `e2e/` gốc repo và là một **gói npm riêng** — cố ý không nằm trong `frontend/`, vì
+`npm test` của frontend (`npm run build && vitest run`) không được phép phụ thuộc vào một server
+đang chạy. Nó nói chuyện với cả backend lẫn frontend.
+
+```bash
+docker compose -f infra/docker-compose.yml up -d --build   # --build: xem cảnh báo dưới
+cd e2e
+npm install && npx playwright install chromium             # chỉ lần đầu
+npx playwright test                                        # 2 viewport: 1280×800 và 1024×640 (=125%)
+```
+
+Không cần tự chạy `npm run preview`: `playwright.config.ts` khai `webServer` nên nó tự dựng
+`frontend` và tự dọn. Chạy trên môi trường ngoài: `BASE_URL=https://… npx playwright test`
+(lúc đó `webServer` tự tắt và `resetDemo()` từ chối chạy — reset ở đó bằng
+`docker compose exec api python -m scripts.reset_demo --yes`).
+
+- **Phải `--build`.** `docker compose up -d` không tự build lại khi image `infra-api` đã tồn tại, nên
+  nó chạy im lặng bằng mã cũ. Một lần như vậy đã làm `GET /status` trả thiếu `report_id` và mọi chip
+  trong lưới trỏ về `/reports/undefined` mà không có lỗi nào hiện ra.
+- **`FIXTURE_CSV`:** helper `resetDemo()` trỏ `FIXTURE_CSV` sang `backend/tests/fixtures/full_synthetic.csv`
+  vì fixture số thật (`backend/app/seed/fixtures/fm01_2026-06_2026-08.csv`) hiện mới có dòng tiêu đề.
+  Khi đã dán số thật vào đó thì bỏ biến này đi.
+
 ## Kết nối Supabase
 
 Tạo project Supabase và nhập mật khẩu database là việc của Chồng yêu — hành động ngoài máy này, không phải việc của subagent.

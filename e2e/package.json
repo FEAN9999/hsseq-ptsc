@@ -1,0 +1,17 @@
+{
+  "name": "hseq-e2e",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Playwright e2e cho HSEQ PTSC. Gói RIÊNG, không nằm trong frontend/ — `npm test` của frontend là cổng gác 26 task (build + vitest) và không được phụ thuộc vào một server đang chạy.",
+  "scripts": {
+    "test:e2e": "playwright test",
+    "test:e2e:desktop": "playwright test --project=desktop-1280",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "@types/node": "^24.13.4",
+    "typescript": "~6.0.2"
+  }
+}
