@@ -11,9 +11,9 @@
 // 2. CÂU TOAST DỰNG TỪ `name_vi` CỦA DỮ LIỆU. Có ca dùng một `name_vi` KHÔNG nằm trong seed để
 //    một bảng chuỗi viết cứng không sống nổi.
 //
-// 3. `dialogMo` PHẢI ĐƯỢC THẤY LÚC NÓ BẬT. Ca "409 đóng hộp thoại" của brief chỉ khẳng định
-//    `dialogMo === false` sau lỗi — mà nó chưa từng `true` lần nào, nên khẳng định đó không nhìn
-//    thấy thứ nó đang canh. Mọi ca dưới đây mở hộp thoại trước rồi mới đo.
+// 3. HỘP THOẠI PHẢI ĐƯỢC THẤY LÚC NÓ MỞ. Ca "409 đóng hộp thoại" của brief chỉ khẳng định
+//    `dangHoi === null` sau lỗi — mà nó chưa từng khác `null` lần nào, nên khẳng định đó không
+//    nhìn thấy thứ nó đang canh. Mọi ca dưới đây mở hộp thoại trước rồi mới đo.
 import { useState, type ReactNode } from 'react'
 import { act, renderHook, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -92,16 +92,14 @@ beforeEach(() => {
 })
 
 describe('useChuyenTrangThai — mở và đóng hộp thoại', () => {
-  it('chưa hỏi gì thì dialogMo là false và dangHoi là null', () => {
+  it('chưa hỏi gì thì dangHoi là null', () => {
     const { result } = ren()
-    expect(result.current.dialogMo).toBe(false)
     expect(result.current.dangHoi).toBeNull()
   })
 
-  it('hoi() bật dialogMo và giữ đúng chuyển trạng thái được hỏi', () => {
+  it('hoi() mở hộp thoại cho ĐÚNG chuyển trạng thái được hỏi', () => {
     const { result } = ren()
     act(() => result.current.hoi(TRA_LAI))
-    expect(result.current.dialogMo).toBe(true)
     expect(result.current.dangHoi).toEqual(TRA_LAI)
   })
 
@@ -109,18 +107,18 @@ describe('useChuyenTrangThai — mở và đóng hộp thoại', () => {
     const { result } = ren()
     act(() => result.current.hoi(DUYET))
     act(() => result.current.huy())
-    expect(result.current.dialogMo).toBe(false)
+    expect(result.current.dangHoi).toBeNull()
     expect(postSpy).not.toHaveBeenCalled()
   })
 
   it('gửi xong thì đóng hộp thoại', async () => {
     const { result } = ren()
     act(() => result.current.hoi(DUYET))
-    expect(result.current.dialogMo).toBe(true)
+    expect(result.current.dangHoi).toEqual(DUYET)
     await act(async () => {
       await result.current.xacNhan(DUYET, 'submitted', 8, '')
     })
-    expect(result.current.dialogMo).toBe(false)
+    expect(result.current.dangHoi).toBeNull()
   })
 
   // task-24-carry.md C5 + spec dòng 682: "409 trong dialog → đóng dialog, banner 409 của form".
@@ -131,7 +129,7 @@ describe('useChuyenTrangThai — mở và đóng hộp thoại', () => {
     const onLoi = vi.fn()
     const { result } = ren({ onLoi })
     act(() => result.current.hoi(DUYET))
-    expect(result.current.dialogMo).toBe(true)
+    expect(result.current.dangHoi).toEqual(DUYET)
     await act(async () => {
       await result.current.xacNhan(DUYET, 'submitted', 8, '')
     })
@@ -144,7 +142,7 @@ describe('useChuyenTrangThai — mở và đóng hộp thoại', () => {
       state: 'draft',
       version: 9,
     })
-    expect(result.current.dialogMo).toBe(false)
+    expect(result.current.dangHoi).toBeNull()
   })
 
   it('pending bật trong lúc request bay rồi tắt khi xong', async () => {

@@ -741,9 +741,9 @@ export function ReportForm({ mau, chiTiet, loiLamMoi = false }: ReportFormProps)
         onChuyenTrangThai={bamChuyenTrangThai}
       />
 
-      {/* MỘT cổng duy nhất. `chuyen.dialogMo` luôn bằng `dangHoi !== null`, nên dùng cả hai (một
-          cái làm điều kiện dựng, một cái làm prop `open`) chỉ khiến prop `open` không bao giờ
-          `false` trong app thật — một nhánh chỉ test đi qua. `dangHoi` gán ra `const` trước: phép
+      {/* MỘT cổng duy nhất: `dangHoi !== null` vừa là điều kiện dựng vừa là "hộp thoại đang mở".
+          `Dialog` cố ý KHÔNG có prop `open` — giữ cả hai thì prop `open` không bao giờ `false`
+          trong app thật, một nhánh chỉ test đi qua. `dangHoi` gán ra `const` trước: phép
           thu hẹp "khác null" của TypeScript chỉ sống trong closure `onConfirm` khi nó nhìn vào
           một binding không đổi. */}
       {dangHoi !== null && (

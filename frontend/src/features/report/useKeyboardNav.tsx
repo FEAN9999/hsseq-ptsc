@@ -5,7 +5,7 @@
 //   Shift+Enter / ↑  ô nhập phía trên cùng cột
 //   Tab              ô nhập kế tiếp bên phải rồi sang dòng sau, bỏ qua ô chỉ đọc
 //   Esc              khôi phục giá trị trước khi sửa
-//   Ctrl/Cmd+S       Lưu
+//   Ctrl/Cmd+S       chốt ô đang gõ dở rồi Lưu
 //
 // TAB KHÔNG CÓ MÃ Ở ĐÂY, CÓ CHỦ Ý. Ô chỉ đọc của bảng này là `<td>` chữ thường (yêu cầu a11y:
 // "ô chỉ đọc là <td>, không input disabled"), mà `<td>` không nhận focus — nên thứ tự Tab mặc
@@ -18,6 +18,7 @@
 // dựng sẽ lệch khỏi bảng thật ngay khi bảng đổi (thêm cột Lệch cho admin, nhóm ẩn/hiện, dòng
 // `empty` của snapshot không có ô nào). `data-cot` trên `<td>` là thứ duy nhất cần biết.
 import { useEffect, useRef, type RefObject } from 'react'
+import { flushSync } from 'react-dom'
 
 /** Mọi ô NHẬP của một cột, đúng thứ tự chúng nằm trong bảng. */
 function oCungCot(luoi: HTMLElement, cot: string): HTMLInputElement[] {
@@ -53,6 +54,31 @@ function datLaiChu(o: HTMLInputElement, chu: string) {
   o.dispatchEvent(new Event('input', { bubbles: true }))
 }
 
+/** Chốt ô đang gõ dở TRƯỚC khi lưu (fix-2 K1).
+ *
+ * Cả ba loại ô nhập của form — ô số (`NumberCell.xuLyBlur`), ô "Ghi chú" của từng chỉ tiêu, ô chữ
+ * nhóm C — đẩy giá trị vào hàng chờ của lớp lưu trong `onBlur` của chúng. Nên ô ĐANG focus chưa
+ * bao giờ nằm trong hàng chờ: gọi thẳng `saveNow()` sẽ gửi một `PUT` thiếu đúng con số vừa gõ,
+ * rồi dải đầu báo "Đã lưu HH:MM" — màn hình nói đã lưu trong khi server chưa hề thấy số đó. Mà
+ * Ctrl+S là ĐÚNG cử chỉ người cẩn thận làm ngay sau khi gõ xong, chưa kịp rời ô. (Nút "Lưu" không
+ * dính lỗi này: bấm chuột lên nút đã tự rời ô trước khi trình xử lý click chạy.)
+ *
+ * `flushSync` KHÔNG phải trang trí. `blur()` bắn `focusout` đồng bộ nên `onBlur` chạy xong ngay,
+ * nhưng các `setState` trong đó chỉ được VẼ LẠI ở microtask kế tiếp. Không ép vẽ thì `focus()`
+ * ngay dưới đọc trúng `error`/`text` CŨ của `NumberCell`, và với ô đang giữ một chuỗi không phải
+ * số, nhánh "giữ nguyên chữ người dùng đã gõ" (fix-1 S3) không chạy — chữ đó bị thay bằng giá trị
+ * cũ, đúng lỗi S3 đã sửa.
+ *
+ * Trả focus về đúng ô vì Ctrl+S là cử chỉ GIỮA CHỪNG, không phải cử chỉ rời ô: bỏ focus lại ở
+ * `<body>` thì Enter/mũi tên/Tab của người đang nhập 55 dòng rơi vào hư không.
+ */
+function chotODangGo() {
+  const o = document.activeElement
+  if (!(o instanceof HTMLInputElement || o instanceof HTMLTextAreaElement)) return
+  flushSync(() => o.blur())
+  o.focus()
+}
+
 export function useKeyboardNav(luoiRef: RefObject<HTMLElement | null>, onLuu: () => void) {
   // Chữ của ô tại đúng thời điểm nó nhận focus — "giá trị trước khi sửa" mà Esc khôi phục về.
   const chuLucFocus = useRef('')
@@ -86,6 +112,7 @@ export function useKeyboardNav(luoiRef: RefObject<HTMLElement | null>, onLuu: ()
     function xuLyLuu(e: KeyboardEvent) {
       if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 's') return
       e.preventDefault() // nếu không, trình duyệt mở hộp thoại "Lưu trang"
+      chotODangGo()
       luuRef.current()
     }
 

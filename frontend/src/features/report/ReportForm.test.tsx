@@ -2021,6 +2021,66 @@ describe('lưu khi rời ô', () => {
     expect(putSpy).toHaveBeenCalledTimes(1) // hẹn cũ đã bị huỷ, không có PUT thứ hai
   })
 
+  // fix-2 K1. Ba ca dưới đây đi ĐÚNG đường người cẩn thận đi: gõ xong là bấm Ctrl+S ngay, KHÔNG
+  // rời ô. Cả ba loại ô chỉ đẩy giá trị vào hàng chờ lúc `onBlur`, nên trước K1 lượt Ctrl+S đó gửi
+  // một `PUT` KHÔNG có ô vừa gõ rồi dải đầu báo "Đã lưu HH:MM" — màn hình nói đã lưu trong khi
+  // server chưa hề thấy con số ấy. Khẳng định phải nhìn vào THÂN request, không nhìn số lần gọi:
+  // `PUT` vẫn bắn ra như cũ, chỉ thiếu ruột.
+  it('Ctrl+S khi CHƯA rời ô số: thân PUT có ngay ô đang gõ dở', async () => {
+    const u = nguoiDung()
+    ve({ state: 'draft', vai: 'reporter', version: 8, mau: MAU_HAI_DONG() })
+    await u.click(o('B-1.1', 'Tháng này'))
+    await u.keyboard('12')
+    await u.keyboard('{Control>}s{/Control}')
+    expect(putSpy).toHaveBeenCalledTimes(1)
+    expect(thanPut(0)).toEqual({ version: 8, values: [{ indicator_code: 'B-1.1', this_period: 12 }] })
+  })
+
+  it('Ctrl+S khi CHƯA rời ô "Ghi chú": thân PUT có ngay câu đang gõ dở', async () => {
+    const u = nguoiDung()
+    ve({ state: 'draft', vai: 'reporter', version: 8, mau: MAU_HAI_DONG() })
+    await u.click(o('B-1.1', 'Ghi chú'))
+    await u.keyboard('bù giờ ca đêm')
+    await u.keyboard('{Control>}s{/Control}')
+    expect(thanPut(0)).toEqual({ version: 8, values: [{ indicator_code: 'B-1.1', note: 'bù giờ ca đêm' }] })
+  })
+
+  it('Ctrl+S khi CHƯA rời ô chữ nhóm C: thân PUT có ngay khoá texts', async () => {
+    const u = nguoiDung()
+    ve({ state: 'draft', vai: 'reporter', version: 8, mau: MAU_HAI_DONG() })
+    await u.click(screen.getByLabelText('C1. Hoạt động nổi bật trong tháng'))
+    await u.keyboard('Có diễn tập')
+    await u.keyboard('{Control>}s{/Control}')
+    expect(thanPut(0)).toEqual({ version: 8, values: [], texts: { C1: 'Có diễn tập' } })
+  })
+
+  // Ctrl+S là cử chỉ GIỮA CHỪNG. Chốt ô bằng `blur()` mà không trả focus lại thì focus rơi về
+  // `<body>`, và người đang nhập 55 dòng mất luôn Enter/mũi tên/Tab ngay sau cú lưu.
+  it('Ctrl+S không cướp focus khỏi ô đang gõ', async () => {
+    const u = nguoiDung()
+    ve({ state: 'draft', vai: 'reporter', version: 8, mau: MAU_HAI_DONG() })
+    const oB = o('B-1.1', 'Tháng này')
+    await u.click(oB)
+    await u.keyboard('12')
+    await u.keyboard('{Control>}s{/Control}')
+    expect(document.activeElement).toBe(oB)
+  })
+
+  // `flushSync` trong `chotODangGo` là thứ duy nhất giữ được ca này: không ép vẽ lại giữa `blur()`
+  // và `focus()` thì `NumberCell` nhận lại focus với `error` CŨ (còn null), nhánh "giữ nguyên chữ
+  // người dùng đã gõ" (fix-1 S3) không chạy, và chữ "12a" bị thay bằng giá trị cũ của ô.
+  it('Ctrl+S khi ô đang giữ chữ không phải số: giữ nguyên chữ đó, không gửi gì', async () => {
+    const u = nguoiDung()
+    ve({ state: 'draft', vai: 'reporter', version: 8, mau: MAU_HAI_DONG() })
+    const oB = o('B-1.1', 'Tháng này')
+    await u.click(oB)
+    await u.keyboard('12a')
+    await u.keyboard('{Control>}s{/Control}')
+    expect(chu(oB)).toBe('12a')
+    expect(oB.getAttribute('aria-invalid')).toBe('true')
+    expect(putSpy).not.toHaveBeenCalled()
+  })
+
   it('nút Lưu (không có onLuu) cũng gửi ngay', async () => {
     const u = nguoiDung()
     ve({ state: 'draft', vai: 'reporter', mau: MAU_HAI_DONG() })

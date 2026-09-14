@@ -137,8 +137,6 @@ function chuDauThanhThuong(s: string): string {
 export interface KetQuaChuyenTrangThai {
   /** Chuyển trạng thái đang chờ xác nhận; `null` khi không hỏi gì cả. */
   dangHoi: ChuyenTrangThai | null
-  /** Hộp thoại có đang mở không — luôn bằng `dangHoi !== null`. */
-  dialogMo: boolean
   /** Từ lúc bấm nút chính tới lúc server trả lời. */
   pending: boolean
   /** Mở hộp thoại xác nhận cho một chuyển trạng thái. */
@@ -223,7 +221,6 @@ export function useChuyenTrangThai(
 
   return {
     dangHoi,
-    dialogMo: dangHoi !== null,
     pending,
     hoi: setDangHoi,
     huy: () => setDangHoi(null),
