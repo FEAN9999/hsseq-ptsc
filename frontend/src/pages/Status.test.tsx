@@ -200,16 +200,20 @@ describe('/status', () => {
     expect(resolveCascadeWinner(o2.className, 'background-color')).not.toBe('bg-transparent')
   })
 
-  // task-26-fix-1.md Q5 (Phần D2 báo cáo soát, mở status.html gốc): nửa ĐẦU dòng "Chú giải" mockup
-  // là chìa khoá DUY NHẤT trên toàn màn cho ký hiệu viền rỗng/đặc — bỏ nó là mất thông tin thật
-  // (KIND_BG.missing của Chip.tsx cũng bg-transparent, nên có HAI loại chip nền trong suốt trên
-  // màn, chỉ khác màu viền, không gì giải thích nếu thiếu dòng này). Nửa sau (liệt màu trạng thái)
-  // vẫn ĐÚNG là bỏ — không ca nào đòi lại nó.
+  // task-26-fix-1.md Q5 (Phần D2 báo cáo soát, đối chiếu NGUYÊN VĂN với status.html gốc — dòng
+  // 12: `<span class="chip c-ok c-seed">Đã duyệt</span> viền rỗng = nạp từ file tổng hợp ·
+  // <span class="chip c-ok">Đã duyệt</span> đặc = nộp trên hệ thống · …`): nửa ĐẦU dòng "Chú giải"
+  // mockup là chìa khoá DUY NHẤT trên toàn màn cho ký hiệu viền rỗng/đặc — bỏ nó là mất thông tin
+  // thật (KIND_BG.missing của Chip.tsx cũng bg-transparent, nên có HAI loại chip nền trong suốt
+  // trên màn, chỉ khác màu viền, không gì giải thích nếu thiếu dòng này). Khẳng định giữ ĐÚNG chữ
+  // "viền rỗng"/"đặc" (không chỉ dấu "="): đây là TÊN của ký hiệu, thiếu tên thì người xem còn phải
+  // tự đoán "=" đang nói về thuộc tính nào. Nửa sau (liệt màu trạng thái) vẫn ĐÚNG là bỏ — không ca
+  // nào đòi lại nó.
   it('Q5: hiện lại câu giải thích viền rỗng = nạp từ file, đặc = nộp trên hệ thống', async () => {
     moiApi()
     renderStatus()
-    expect(await screen.findByText(/nạp từ file tổng hợp/)).toBeTruthy()
-    expect(screen.getByText(/nộp trên hệ thống/)).toBeTruthy()
+    expect(await screen.findByText(/viền rỗng = nạp từ file tổng hợp/)).toBeTruthy()
+    expect(screen.getByText(/đặc = nộp trên hệ thống/)).toBeTruthy()
   })
 
   it('is_late hiện Đã nộp (muộn)', async () => {

@@ -173,8 +173,8 @@ export function Status() {
           mẫu ví dụ tự động khớp đúng hành vi outline thật của StatusGrid.tsx, không lệch nếu Chip.tsx
           đổi cách vẽ outline sau này. */}
       <p className="flex items-center gap-1.5 text-sec text-table mb-5">
-        <Chip kind="approved" outline /> = nạp từ file tổng hợp · <Chip kind="approved" /> = nộp trên
-        hệ thống
+        <Chip kind="approved" outline /> viền rỗng = nạp từ file tổng hợp ·{' '}
+        <Chip kind="approved" /> đặc = nộp trên hệ thống
       </p>
       <StatusGrid periods={data.periods} units={data.units} />
     </div>
