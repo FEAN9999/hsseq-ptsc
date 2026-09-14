@@ -768,15 +768,37 @@ describe('useSaveValues — đường lỗi', () => {
     expect(h.current.xungDot?.state).toBe('returned')
   })
 
+  // fix-5 M7 (C6): thân 409 THIẾU `state` phải cho `null` — "server không nói" — chứ không được
+  // đoán thành `'draft'`. Trên backend hôm nay hai bản cho cùng kết quả (`hop-dong-loi-backend.md`:
+  // 409 kèm `values` luôn kèm `state`), nên đây là ca canh cho lúc lệch phiên bản triển khai: một
+  // backend cũ không gửi `state` sẽ âm thầm hạ một báo cáo `returned` xuống `draft`, thanh dính
+  // đổi lại thành "Nộp báo cáo" và banner lý do trả lại biến mất khỏi màn hình người nộp.
+  it('409 kèm values mà THIẾU state: giữ null, không tự đoán thành draft', async () => {
+    putSpy.mockRejectedValueOnce(
+      new ApiError(409, { detail: 'Người khác vừa sửa báo cáo này', version: 21, values: [] }),
+    )
+    const h = ren()
+    act(() => {
+      h.current.markDirty('B-2.1', { thisPeriod: 1 })
+    })
+    await tick(1600)
+    expect(h.current.xungDot?.state).toBeNull()
+  })
+
   // Thân 409 mang `values` + `state` nhưng KHÔNG mang dải đầu: `decision_note` của lượt trả lại,
   // `submitted_at`, `is_late` chỉ có trong `GET /reports/{id}`. Không kéo một lượt GET về thì người
   // nộp đứng trước một form vừa đổi trạng thái mà không một dòng nào nói vì sao.
-  it('409 "người khác vừa sửa" gọi invalidateReportQueries để kéo bản mới về', async () => {
+  //
+  // fix-5 M4: `version` ở đây là 21 chứ KHÔNG phải 12. Bản cũ khai 12 đúng bằng `reportId` mà
+  // `ren()` dựng hook, nên ca này mù trước một bản đưa nhầm `phienBan.current` vào tham số thứ
+  // hai — hai con số trùng thì `toHaveBeenCalledWith` không phân biệt được, còn hậu quả thật là
+  // lượt `GET` bắn vào một BÁO CÁO KHÁC và form vẫn đứng ở trạng thái chết.
+  it('409 "người khác vừa sửa" gọi invalidateReportQueries theo MÃ BÁO CÁO, không phải version mới', async () => {
     putSpy.mockRejectedValueOnce(
       new ApiError(409, {
         detail: 'Người khác vừa sửa báo cáo này',
         state: 'returned',
-        version: 12,
+        version: 21,
         values: [],
       }),
     )
@@ -786,6 +808,7 @@ describe('useSaveValues — đường lỗi', () => {
     })
     await tick(1600)
     expect(invalidateSpy).toHaveBeenCalledWith(expect.anything(), 12)
+    expect(h.current.xungDot?.version).toBe(21)
   })
 
   // C2: 409 thứ hai (thao tác không hợp lệ ở trạng thái hiện tại) KHÔNG mang `values` — không có

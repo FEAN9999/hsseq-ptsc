@@ -123,17 +123,25 @@ export function NumberCell({ value, decimals, ariaLabel, loiNgoai, onChange, onC
     onChange?.(parseViNumber(t, decimals))
   }
 
-  /** Esc = HUỶ lần sửa đang dở. `useKeyboardNav` (listener cấp lưới, bọt lên TRƯỚC trình xử lý
-   * React này) đã trả chữ về giá trị trước khi sửa — mà giá trị đó theo định nghĩa là giá trị ô
-   * ĐANG CÓ, tức hợp lệ. Câu lỗi do chính lần sửa vừa bị huỷ đẻ ra phải đi theo nó: một ô mang giá
-   * trị hợp lệ mà vẫn `aria-invalid="true"` là trạng thái SAI — người nhập bấm Esc để thoát khỏi
-   * ô đang đỏ, thấy vẫn đỏ, kết luận Esc không ăn; còn trình đọc màn hình thì đọc "không hợp lệ"
-   * cho một ô đã đúng (fix-4).
+  /** Esc = HUỶ lần sửa đang dở. `useKeyboardNav` (listener cấp lưới) đã trả chữ về mốc trước khi
+   * sửa, nên trạng thái lỗi phải được tính LẠI theo đúng chữ vừa được trả về — không xoá mù quáng.
+   *
+   * fix-4 xoá thẳng `setError(null)` vì tưởng mốc khôi phục luôn hợp lệ; fix-5 M1 đo ra ca biên
+   * phá tiền đề đó: bỏ dở một ô đang lỗi rồi quay lại thì mốc của lượt focus MỚI chính là chuỗi
+   * hỏng (fix-1 S3 giữ nguyên chữ), Esc trả về đúng `100a` và xoá đỏ lúc đó để ô mang chuỗi hỏng
+   * mà trông sạch sẽ. Tính lại thì cả hai đường đều đúng: khôi phục về `100` là hết đỏ ngay (đúng
+   * thứ fix-4 sinh ra để vá — người nhập bấm Esc thoát ô đỏ, thấy vẫn đỏ thì kết luận Esc không
+   * ăn), khôi phục về `100a` là vẫn đỏ.
+   *
+   * Đọc `e.currentTarget.value` được vì tới lượt `onKeyDown` của React thì chữ ĐÃ về mốc: lưới
+   * nằm sâu hơn gốc cây nơi React 18 gắn listener uỷ quyền, nên listener của lưới bọt lên trước.
+   * Thứ tự đó nay MANG TẢI, không còn là mô tả suông (fix-5 M6): đọc trước lượt khôi phục là đọc
+   * trúng chuỗi hỏng và ô đã Esc xong vẫn đỏ.
    *
    * KHÔNG đụng `loiNgoai`: lỗi đó nói về giá trị ĐÃ CHỐT ("Bắt buộc" sau lần bấm Nộp đầu tiên),
    * không phải về chữ đang nằm trong ô — Esc không trả lời được nó. */
   function xuLyPhim(e: KeyboardEvent<HTMLInputElement>) {
-    if (e.key === 'Escape') setError(null)
+    if (e.key === 'Escape') setError(parseViNumber(e.currentTarget.value, decimals).error)
   }
 
   function xuLyDan(e: ClipboardEvent<HTMLInputElement>) {

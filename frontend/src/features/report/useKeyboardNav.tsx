@@ -123,13 +123,21 @@ export function useKeyboardNav(luoiRef: RefObject<HTMLElement | null>, onLuu: ()
       const dau = o.selectionStart
       const cuoi = o.selectionEnd
       dangTuChotO = true
-      flushSync(() => o.blur())
-      // Ép vẽ lần thứ hai: `focus()` làm `NumberCell` đổi chữ về dạng SỐ THÔ, và chừng nào lượt vẽ
-      // đó chưa chạy thì `setSelectionRange` dưới đây đặt con trỏ lên một chuỗi sắp bị ghi đè —
-      // React ghi `value` mới xong là con trỏ nhảy về cuối (đo: `[1,3]` thành `[6,6]`).
-      flushSync(() => o.focus())
-      if (dau !== null && cuoi !== null) o.setSelectionRange(dau, cuoi)
-      dangTuChotO = false
+      // `try/finally` (fix-5 M2): hai `flushSync` dưới đây chạy MÃ VẼ của cả cây, nên một ngoại lệ
+      // ở đó là chuyện có thật. Thoát ra mà cờ còn bật thì nó kẹt bật tới hết đời component —
+      // `focusin` thôi ghi mốc, và Esc ở mọi ô SAU đó khôi phục bằng mốc của ô cuối cùng được ghi,
+      // tức ghi số của DÒNG KHÁC vào ô người ta đang đứng rồi chốt luôn xuống reducer. Ngoại lệ
+      // vẫn để nguyên cho nó bay lên: cờ là thứ duy nhất phải dọn.
+      try {
+        flushSync(() => o.blur())
+        // Ép vẽ lần thứ hai: `focus()` làm `NumberCell` đổi chữ về dạng SỐ THÔ, và chừng nào lượt vẽ
+        // đó chưa chạy thì `setSelectionRange` dưới đây đặt con trỏ lên một chuỗi sắp bị ghi đè —
+        // React ghi `value` mới xong là con trỏ nhảy về cuối (đo: `[1,3]` thành `[6,6]`).
+        flushSync(() => o.focus())
+        if (dau !== null && cuoi !== null) o.setSelectionRange(dau, cuoi)
+      } finally {
+        dangTuChotO = false
+      }
     }
 
     function xuLyLuu(e: KeyboardEvent) {

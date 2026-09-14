@@ -978,6 +978,39 @@ describe('bàn phím kiểu Excel', () => {
     expect(document.activeElement).toBe(oB)
   })
 
+  // fix-5 M5 (C13): mốc khôi phục phải SỐNG QUA lượt Esc. Bấm Esc hai lần liên tiếp đúng là thứ
+  // người ta làm khi không chắc phím vừa rồi có ăn; nếu lượt đầu xoá luôn mốc thì lượt hai làm
+  // TRẮNG ô, và rời ô là chốt `null` — số cũ mất khỏi cả màn hình lẫn server.
+  it('Esc hai lần liên tiếp vẫn giữ số cũ, không làm trắng ô', async () => {
+    const u = userEvent.setup()
+    ve({ state: 'draft', vai: 'reporter', values: [{ indicator_code: 'B-2.1', this_period: 100 }] })
+    const oB = o('B-2.1', 'Tháng này')
+    await u.click(oB)
+    await u.keyboard('9')
+    await u.keyboard('{Escape}')
+    expect(chu(oB)).toBe('100')
+
+    await u.keyboard('{Escape}')
+    expect(chu(oB)).toBe('100')
+    // Ô chỉ đọc cùng dòng tính TỪ STATE: một ô bị làm trắng chốt `null` xuống reducer và ô này
+    // thành "—".
+    expect(o('B-2.1', 'Cộng dồn').textContent).toBe('100')
+  })
+
+  // fix-5 M8 (C14): nhánh Esc cấp lưới phải NUỐT phím. Không `preventDefault` thì Esc lọt xuống
+  // trình duyệt, và lượt "revert ô nhập" riêng của một số trình duyệt chồng lên đúng ô vừa được
+  // trả về mốc.
+  it('Esc trong ô số bị chặn, không lọt xuống trình duyệt', async () => {
+    const u = userEvent.setup()
+    ve({ state: 'draft', vai: 'reporter', values: [{ indicator_code: 'B-2.1', this_period: 100 }] })
+    const theoDoi = theoDoiChan('Escape')
+    await u.click(o('B-2.1', 'Tháng này'))
+    await u.keyboard('9')
+    await u.keyboard('{Escape}')
+    expect(theoDoi.thay).toBe(true)
+    expect(theoDoi.chan).toBe(true)
+  })
+
   it('Esc ở ô đang trống thì trả về trống, không đẻ ra lỗi "Chỉ nhập số"', async () => {
     ve({ state: 'draft', vai: 'reporter' })
     const oB = o('B-2.1', 'Tháng này')
@@ -1030,6 +1063,50 @@ describe('bàn phím kiểu Excel', () => {
     expect(screen.queryByText('Chỉ nhập số')).toBeNull()
   })
 
+  // fix-5 M7 (C9): mọi ca của vòng 4 đều gõ `abc`, nên chúng chỉ canh đúng câu 'Chỉ nhập số'.
+  // `parseViNumber` còn ba câu nữa và Esc phải gỡ được cả ba — nó tính LẠI lỗi theo chữ vừa khôi
+  // phục, chứ không nhận diện riêng một câu nào.
+  it.each([
+    ['-5', 'Số không được âm'],
+    ['1,5', 'Chỉ nhận tối đa 0 chữ số thập phân'],
+    ['99999999999999999', 'Số quá lớn, tối đa 16 chữ số phần nguyên'],
+  ])('Esc gỡ được cả câu lỗi KHÔNG phải "Chỉ nhập số": gõ %s', async (goVao, cauLoi) => {
+    const u = userEvent.setup()
+    ve({ state: 'draft', vai: 'reporter', values: [{ indicator_code: 'B-2.1', this_period: 100 }] })
+    const oB = o('B-2.1', 'Tháng này')
+    await u.click(oB)
+    await u.clear(oB)
+    await u.keyboard(goVao)
+    await u.keyboard('{Control>}s{/Control}') // chốt ô tại chỗ: ô đỏ lên mà con trỏ không rời đi
+    expect(screen.getByText(cauLoi)).toBeTruthy()
+
+    await u.keyboard('{Escape}')
+    expect(chu(oB)).toBe('100')
+    expect(oB.getAttribute('aria-invalid')).toBeNull()
+    expect(screen.queryByText(cauLoi)).toBeNull()
+  })
+
+  // fix-5 M1 — mặt kia của ca ngay trên, và là ca biên vòng 4 bỏ sót. "Esc khôi phục về một giá
+  // trị theo định nghĩa là hợp lệ" chỉ đúng khi mốc được ghi trên một ô ĐANG SẠCH. Bỏ dở một ô
+  // đang lỗi, quay lại, bấm Esc: mốc của lượt focus MỚI chính là chuỗi hỏng, nên Esc trả về đúng
+  // `100a` — xoá đỏ lúc đó là để ô mang chuỗi hỏng mà trông sạch sẽ, và trình đọc màn hình đọc
+  // "hợp lệ" cho một ô sai, ngay lúc người ta đang sửa nó.
+  it('Esc ở ô đã lỗi từ trước: giữ nguyên chuỗi hỏng thì cũng phải giữ nguyên đỏ', async () => {
+    const u = userEvent.setup()
+    ve({ state: 'draft', vai: 'reporter', values: [{ indicator_code: 'B-2.1', this_period: 100 }] })
+    const oB = o('B-2.1', 'Tháng này')
+    await u.click(oB)
+    await u.keyboard('a')
+    await u.tab() // rời ô: lỗi được chốt, chữ hỏng ở lại (fix-1 S3)
+    expect(oB.getAttribute('aria-invalid')).toBe('true')
+
+    await u.click(oB) // quay lại ô đang đỏ — mốc khôi phục của lượt này là chính '100a'
+    await u.keyboard('{Escape}')
+    expect(chu(oB)).toBe('100a')
+    expect(oB.getAttribute('aria-invalid')).toBe('true')
+    expect(screen.getByText('Chỉ nhập số')).toBeTruthy()
+  })
+
   // fix-3 D2: `xuLyBlur` ghi lại `value` của ô trong lúc ô đang KHÔNG focus, nên React không khôi
   // phục được vùng chọn — đo được `[1,3]` thành `[5,5]`. Hệ quả thật: người đang sửa chữ số thứ hai
   // của một số 5 chữ số bấm Ctrl+S theo thói quen rồi gõ tiếp, chữ số rơi vào CUỐI số.
@@ -1042,6 +1119,64 @@ describe('bàn phím kiểu Excel', () => {
     oB.setSelectionRange(1, 3)
     await u.keyboard('{Control>}s{/Control}')
     expect([oB.selectionStart, oB.selectionEnd]).toEqual([1, 3])
+  })
+
+  // fix-5 M3: ca ngay trên đặt một vùng BÔI ĐEN, nên nó vẫn xanh với một bản chỉ khôi phục khi
+  // `dau !== cuoi`. Con trỏ RỜI giữa một con số mới là hình dạng phổ biến nhất của lỗi D2 — người
+  // ta sửa một chữ số ở giữa, bấm Ctrl+S theo thói quen, gõ tiếp thì chữ số rơi vào CUỐI và ra một
+  // con số khác hẳn mà không gì báo.
+  it('Ctrl+S giữ nguyên con trỏ RỜI giữa số, không chỉ giữ vùng bôi đen', async () => {
+    const u = userEvent.setup()
+    ve({ state: 'draft', vai: 'reporter', values: [{ indicator_code: 'B-2.1', this_period: 12345 }] })
+    const oB = o('B-2.1', 'Tháng này') as HTMLInputElement
+    await u.click(oB)
+    await u.keyboard('6')
+    oB.setSelectionRange(2, 2)
+    await u.keyboard('{Control>}s{/Control}')
+    expect([oB.selectionStart, oB.selectionEnd]).toEqual([2, 2])
+  })
+
+  // fix-5 M2: cờ `dangTuChotO` bật quanh khoảng blur→focus của `chotODangGo`. Một ngoại lệ rơi
+  // vào giữa khoảng đó (một lượt vẽ ném bên trong `flushSync`) mà không có `try/finally` thì cờ
+  // kẹt BẬT tới hết đời component: `focusin` thôi ghi mốc, và Esc ở ô KẾ TIẾP khôi phục bằng mốc
+  // của ô TRƯỚC — tức ghi số của dòng khác vào ô người ta đang đứng, rồi chốt luôn xuống reducer.
+  it('ngoại lệ giữa blur→focus của Ctrl+S: Esc ở ô sau vẫn về mốc của chính nó, không phải của ô trước', async () => {
+    const u = userEvent.setup()
+    ve({
+      state: 'draft',
+      vai: 'reporter',
+      values: [
+        { indicator_code: 'B-2.1', this_period: 100 },
+        { indicator_code: 'B-2.2', this_period: 55 },
+      ],
+    })
+    const o1 = o('B-2.1', 'Tháng này')
+    const o2 = o('B-2.2', 'Tháng này')
+    await u.click(o1)
+
+    const focusGoc = o1.focus.bind(o1)
+    let daNem = false
+    o1.focus = () => {
+      if (!daNem) {
+        daNem = true
+        throw new Error('lượt vẽ ném trong flushSync')
+      }
+      focusGoc()
+    }
+    // Ngoại lệ này là ĐỐI TƯỢNG ĐO, không phải sự cố: jsdom bắt nó trong lượt gọi listener rồi
+    // báo lên window, và vitest tính một "unhandled error" làm đỏ cả lượt chạy. `preventDefault`
+    // là cách chuẩn nói "đã xử lý" cho đúng khoảng này.
+    const nuotLoi = (e: ErrorEvent) => e.preventDefault()
+    window.addEventListener('error', nuotLoi)
+    await u.keyboard('{Control>}s{/Control}')
+    window.removeEventListener('error', nuotLoi)
+    delete (o1 as Partial<HTMLElement>).focus
+
+    await u.click(o2)
+    await u.keyboard('{Escape}')
+    expect(chu(o2)).toBe('55')
+    // Ô chỉ đọc cùng dòng tính TỪ STATE: bằng chứng mốc của dòng khác không chui được xuống reducer.
+    expect(o('B-2.2', 'Cộng dồn').textContent).toBe('55')
   })
 
   it('Ctrl+S khi đang đứng trong ô nhập: gọi Lưu ĐÚNG MỘT lần và chặn hộp thoại lưu trang', async () => {
