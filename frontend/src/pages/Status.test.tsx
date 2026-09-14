@@ -263,6 +263,94 @@ async function dungCanhLoiNenCungKy() {
   return { dem: (u: string) => f.mock.calls.filter(([url]) => String(url).includes(u)).length }
 }
 
+// task-26-fix-6.md W3 — "NGƯỜI DÙNG CÓ THẤY KHÔNG", hỏi cho TỪNG phần tử chứ không chỉ cho khối
+// ngoài. Mù kiểu (b) tái diễn SÂU HƠN MỘT TẦNG: ca vòng 5 đọc `className` của **riêng** thẻ bọc, nên
+// V-17 (ẩn đúng `<span>` chữ, giữ nguyên khối) đi lọt — người dùng thấy một cái NÚT TRƠ không lời
+// giải thích, mà `getByTestId` vẫn xanh. Và nó chỉ hỏi MỘT cách ẩn (`display`), trong khi có ít nhất
+// bốn cách ẩn một phần tử mà DOM vẫn còn nguyên.
+//
+// Vì sao không dùng `getComputedStyle`: jsdom không có bộ máy CSS, `.hidden` của Tailwind là một
+// class trong file CSS đã build chứ không phải style inline — `getComputedStyle` trả về rỗng. Nên
+// hỏi bốn nguồn ẩn ĐỘC LẬP với nhau:
+//   1. thuộc tính `hidden` của HTML · 2. `aria-hidden="true"` (ẩn với người đọc màn hình) ·
+//   3. style INLINE `display:none`/`visibility:hidden` · 4. token class ẩn của Tailwind
+//   (`hidden`/`invisible`/`sr-only`) — đọc THẲNG token, không qua CSS build, vì đã đo được là
+//   Tailwind CHỈ emit utility đang được dùng nên `.hidden` **không có trong CSS build** và
+//   `resolveCascadeWinner` trả `null` chứ không trả `'none'`.
+// Lưới an toàn thứ năm: `resolveCascadeWinner(...) === 'none'` bắt một class TỰ ĐẶT ánh xạ sang
+// `display:none` trong CSS thật.
+//
+// Khác bản vòng 5 một điểm CÓ CHỦ Ý: `null` (className không mang utility `display` nào) KHÔNG còn
+// bị coi là ẩn. Bản cũ bắn đỏ oan vào một bản vá hợp lệ bỏ `flex` đi (V-13) — đó là mù kiểu (d),
+// phạt người vá đúng. Điều ca này thật sự phải canh là "có bị ẩn không", không phải "có đúng utility
+// tôi quen mắt không".
+function biAnDi(el: Element): boolean {
+  if (el instanceof HTMLElement) {
+    if (el.hidden) return true
+    if (el.style.display === 'none' || el.style.visibility === 'hidden') return true
+  }
+  if (el.getAttribute('aria-hidden') === 'true') return true
+  const lop = typeof el.className === 'string' ? el.className : ''
+  if (lop.split(/\s+/).some((c) => c === 'hidden' || c === 'invisible' || c === 'sr-only')) return true
+  return resolveCascadeWinner(lop, 'display') === 'none'
+}
+
+/** Tên thẻ + đoạn chữ đầu — để khi ca đỏ, thông báo chỉ thẳng phần tử nào bị ẩn thay vì chỉ `false`. */
+function moTa(el: Element): string {
+  return `<${el.tagName.toLowerCase()}> "${(el.textContent ?? '').trim().slice(0, 40)}"`
+}
+
+// task-26-fix-6.md W3 — hai mặt của CHỮ trên băng, dùng chung cho mọi cảnh có băng (hai câu khác
+// nhau: cảnh lỗi tải, và cảnh không-còn-kỳ-mở của [V-1b]).
+// Mặt DƯƠNG (đã có từ vòng 5): phải nói số liệu đang cũ.
+// Mặt ÂM (vòng 6 thêm): **không được nói ngược**. V-10 cho thấy mặt dương một mình là bằng chứng
+// rỗng — "Số liệu cũ đã được cập nhật" chứa chữ "cũ" nên khớp mẫu dương, mà nghĩa thì NGƯỢC HẲN:
+// nó trấn an người dùng rằng số đang mới, đúng lúc số đang cũ. Mù kiểu (a) tái diễn: tên ca hứa
+// "nói số liệu đang CŨ", khẳng định chỉ đòi "có chứa chữ cũ".
+// Vẫn khoá bằng MẪU chứ không bằng nguyên văn, để một bản sau đổi lời mà vẫn nói đúng thì đi qua
+// được (một câu cộc lốc kiểu "Số liệu cũ" — V-09 — là thật, và được phép).
+function kiemChuBang(bang: HTMLElement) {
+  const chu = within(bang).getByText(/cũ|lần tải gần nhất|chưa cập nhật|không còn kỳ nào đang mở/i)
+  const noiDung = chu.textContent?.trim() ?? ''
+  expect(noiDung).not.toBe('')
+  expect(noiDung).not.toMatch(/đã (được )?(làm mới|cập nhật)|mới nhất|thành công|đang là bản mới/i)
+}
+
+// task-26-fix-6.md W1 — cảnh thứ hai của U1: `/periods` làm mới ở NỀN và trả `[]` (mất hết kỳ).
+// Khác `dungCanhDongHetKy`: ở đây `tu` VÀ `den` cùng mất, nên URL `/status` mà `tk.refetch()` dựng
+// ra là `…&from=undefined&to=undefined`.
+async function dungCanhPeriodsRong() {
+  let goiThu = 0
+  const f = vi.fn((url: string) => {
+    goiThu++
+    const laLanDau = goiThu <= 2
+    if (url.includes('/templates/FM01/periods')) {
+      return Promise.resolve({ ok: true, status: 200, json: async () => (laLanDau ? PERIODS : []) })
+    }
+    if (url.includes('/status?')) {
+      // Mô phỏng ĐÚNG backend TRƯỚC bản vá W1b: `from`/`to` là `str` không validate và bộ lọc so
+      // sánh CHUỖI, nên `from=undefined` cho ra **200 với THÂN RỖNG** (đo thật trên CSDL:
+      // `'2026-09' >= 'undefined'` là FALSE). Giữ hành vi cũ ở đây CÓ CHỦ Ý: bản vá phía FE phải
+      // đứng được MỘT MÌNH, không dựa vào việc backend vừa được siết — một máy chủ cũ, một proxy,
+      // hay một bản triển khai khác vẫn có thể trả đúng như vậy.
+      if (url.includes('from=undefined')) {
+        return Promise.resolve({ ok: true, status: 200, json: async () => ({ periods: [], units: [] }) })
+      }
+      return Promise.resolve({ ok: true, status: 200, json: async () => DEFAULT_STATUS })
+    }
+    throw new Error(`URL không lường trước: ${url}`)
+  })
+  vi.stubGlobal('fetch', f)
+  renderStatus()
+  expect(await screen.findByText('PTSC Đình Vũ')).toBeTruthy()
+  await act(async () => {
+    window.dispatchEvent(new Event('visibilitychange'))
+  })
+  await waitFor(() => expect(goiThu).toBeGreaterThan(2))
+  await choLang(() => goiThu)
+  return f
+}
+
 describe('/status', () => {
   it('nút sao chép đưa đúng danh sách tên đơn vị chưa nộp vào clipboard', async () => {
     moiApi()
@@ -733,6 +821,42 @@ describe('/status', () => {
     expect(screen.queryByText(/kỳ đầu có dữ liệu/)).toBeNull()
   })
 
+  // task-26-fix-6.md W4 [V-40] — MẶT ÂM của cảnh periods-rỗng. Ca T7 ngay trên chỉ hỏi "có vẽ được
+  // không"; nó không hỏi **màn hình rỗng ấy có được miễn luật báo-dữ-liệu-cũ không**. Câu trả lời là
+  // KHÔNG: một bảng trống mà im lặng là màn hình mơ hồ nhất trong cả trang — người dùng không phân
+  // biệt được "kỳ này chưa ai nộp" với "vừa có thứ hỏng". Cảnh: `/status` trả 200 THÂN RỖNG ngay từ
+  // đầu (nên `duLieuCuoi.current` không bao giờ được gán — đúng theo bản vá W1), rồi `/periods` hỏng
+  // ở NỀN ⇒ `loi` khác null ⇒ băng PHẢI hiện. Ca này cũng là tấm chắn cho chính bản vá W1: một bản
+  // sau "gọn gàng hoá" bằng `if (data.periods.length === 0) return <skeleton/>` sẽ đỏ ngay tại đây.
+  it('W4/[V-40]: periods RỖNG + lỗi nền — bảng trống KHÔNG được im lặng, băng vẫn phải hiện', async () => {
+    let luotKy = 0
+    const f = vi.fn((url: string) => {
+      if (url.includes('/templates/FM01/periods')) {
+        luotKy++
+        return luotKy === 1
+          ? Promise.resolve({ ok: true, status: 200, json: async () => PERIODS })
+          : Promise.resolve({ ok: false, status: 502, json: async () => ({ detail: 'Bad gateway' }) })
+      }
+      if (url.includes('/status?')) {
+        return Promise.resolve({ ok: true, status: 200, json: async () => ({ periods: [], units: [] }) })
+      }
+      throw new Error(`URL không lường trước: ${url}`)
+    })
+    vi.stubGlobal('fetch', f)
+    renderStatus()
+    expect(await screen.findByTestId('chu-giai')).toBeTruthy()
+    expect(screen.queryByTestId('bang-du-lieu-cu')).toBeNull() // chưa hỏng gì thì chưa được báo
+
+    await act(async () => {
+      window.dispatchEvent(new Event('visibilitychange'))
+    })
+    await waitFor(() => expect(luotKy).toBeGreaterThan(1))
+    await choLang(() => f.mock.calls.length)
+
+    expect(screen.getByTestId('chu-giai')).toBeTruthy() // vẫn là trang, không bị màn thay thế nuốt
+    kiemChuBang(screen.getByTestId('bang-du-lieu-cu'))
+  })
+
   it('lần tải đầu tiên CÓ hiện skeleton trước khi dữ liệu về', async () => {
     vi.stubGlobal('fetch', vi.fn(() => new Promise<never>(() => {})))
     renderStatus()
@@ -889,6 +1013,12 @@ describe('/status', () => {
     const bang = screen.getByTestId('bang-du-lieu-cu')
     expect(bang.textContent).not.toBe('')
     expect(within(bang).getByRole('button', { name: 'Thử lại' })).toBeTruthy()
+    // task-26-fix-6.md W2 — vế "xa hơn" của U1(b), khoá ngay tại cảnh sinh ra nó: bản đang vẽ là dữ
+    // liệu của kỳ 09, trong khi kỳ ĐANG MỞ là 10 (`/periods` vừa đổi ở nền). Dòng phạm vi tuyệt đối
+    // không được gắn nhãn "(kỳ đang mở)" cho 09 — đó là nói dối đúng lúc người dùng cần biết mình
+    // đang nhìn số của kỳ nào. Đột biến V-07 (`den !== undefined ? '(kỳ đang mở)' : …`) chết ở đây.
+    // (`/kỳ đang mở/` KHÔNG khớp "…kỳ nào đang mở" của hai câu kia — chữ "nào" chen giữa.)
+    expect(screen.queryByText(/kỳ đang mở/)).toBeNull()
   })
 
   // task-26-fix-1.md Q1 [CHẶN] — lớp lỗi "lỗi nền phá màn đang có dữ liệu" (carry C13 mục 2) lần
@@ -998,6 +1128,110 @@ describe('/status', () => {
     await dungCanhDongHetKy()
     expect(screen.queryByText(/kỳ đang mở/)).toBeNull()
     expect(screen.getByText(/Từ 06\/2026 .* đến 09\/2026/)).toBeTruthy()
+  })
+
+  // task-26-fix-6.md W1 [CHẶN — LỖI HÀNH VI] — chuỗi "bản vá đẻ ra cửa kế tiếp" QUAY LẠI, và quay
+  // lại theo đúng khuôn U3 vừa được viết ra để chống. U1 (vòng 5) không thêm một UI mới; nó làm một
+  // UI CŨ — băng, kèm nút Thử lại — **với tới được ở một CẢNH MỚI** (`den === undefined`). Và không
+  // ai hỏi nút đó LÀM GÌ ở cảnh mới. Hai ca U1 chỉ khẳng định băng CÓ MẶT và dòng phạm vi nói gì;
+  // ca U3 bấm-nút chỉ chạy ở cảnh cả hai query đều `error` và `den` còn.
+  //
+  // Luật bổ sung cho luật hai-mặt: **khi một bản vá làm một UI CŨ với tới được ở một CẢNH MỚI, cảnh
+  // mới đó thừa hưởng ĐỦ BỐN câu hỏi — kể cả "nút của nó làm gì".** Bốn ca dưới đây trả nợ đúng câu
+  // hỏi đó cho hai cảnh U1 tạo ra.
+  //
+  // Cơ chế hỏng: `tk.refetch()` VẪN CHẠY dù `enabled:false` (TanStack v5), và `${den}` trong chuỗi
+  // mẫu cho ra chuỗi `"undefined"` NGUYÊN VĂN trong URL.
+  it('W1: bấm Thử lại ở cảnh đóng-hết-kỳ — CHỈ gọi lại /periods, KHÔNG bắn /status?…to=undefined', async () => {
+    const f = await dungCanhDongHetKy()
+    const dem = (u: string) => f.mock.calls.filter(([url]) => String(url).includes(u)).length
+    const truocKy = dem('/templates/FM01/periods')
+    const truocTrangThai = dem('/status?')
+    await userEvent.click(
+      within(screen.getByTestId('bang-du-lieu-cu')).getByRole('button', { name: 'Thử lại' }),
+    )
+    // Nút KHÔNG vô tác dụng: `/periods` PHẢI được gọi lại — đó chính là thứ có thể đổi (quản trị
+    // vừa mở kỳ mới), và là lý do nút vẫn đáng có ở cảnh này.
+    await waitFor(() => expect(dem('/templates/FM01/periods')).toBeGreaterThan(truocKy))
+    await choLang(() => f.mock.calls.length)
+    // …nhưng KHÔNG được bắn thêm một lượt `/status` nào: tham số chưa đủ để gọi.
+    expect(dem('/status?')).toBe(truocTrangThai)
+    expect(f.mock.calls.some(([u]) => String(u).includes('undefined'))).toBe(false)
+  })
+
+  it('W1: /periods trả [] ở NỀN rồi bấm Thử lại trên băng — LƯỚI VẪN CÒN (không bị xoá bằng MỘT cú bấm)', async () => {
+    const f = await dungCanhPeriodsRong()
+    // Tiền đề của cảnh: TRƯỚC khi bấm, lưới đang còn và băng đang mời bấm.
+    expect(screen.getByText('PTSC Đình Vũ')).toBeTruthy()
+    await userEvent.click(
+      within(screen.getByTestId('bang-du-lieu-cu')).getByRole('button', { name: 'Thử lại' }),
+    )
+    await choLang(() => f.mock.calls.length)
+    // Đường thoát DUY NHẤT màn hình mời người dùng bấm không được lấy mất chính thứ nó đang bảo vệ.
+    expect(screen.getByText('PTSC Đình Vũ')).toBeTruthy()
+    expect(f.mock.calls.some(([u]) => String(u).includes('from=undefined'))).toBe(false)
+  })
+
+  // task-26-fix-6.md W1 phần 2 — chặn ĐẦU ĐỘC ref ([L-1b] vòng 4). `duLieuCuoi.current` là "bản
+  // dữ liệu TỐT cuối cùng"; một thân rỗng hợp lệ (`200 {periods:[],units:[]}`) KHÔNG phải bản tốt,
+  // nhưng nó `!== undefined` nên trước bản vá ref nuốt luôn, và **bản tốt không bao giờ quay lại**.
+  // Cảnh ba bước dưới đây là cách DUY NHẤT quan sát được vế này (ở cùng một `queryKey`, `tk.data`
+  // giữ nguyên giá trị thành công gần nhất nên không có lúc nào rơi về ref):
+  //   1. lưới tốt (kỳ mở 09) · 2. nền: kỳ 10 mở, `/status` kỳ 10 trả 200 THÂN RỖNG (ref bị đầu độc
+  //   nếu không chặn) · 3. nền: kỳ 11 mở, `/status` kỳ 11 LỖI ⇒ `queryKey` đổi, `tk.data` về
+  //   `undefined` ⇒ rơi về ref. Phải rơi về LƯỚI TỐT, không về bản rỗng.
+  it('W1: thân RỖNG 200 không được đầu độc bản-tốt-cuối-cùng — lỗi sau đó vẫn rơi về LƯỚI, không về bảng trống', async () => {
+    const P10 = [...PERIODS, { period_key: '2026-10', is_open: true }]
+    const P11 = [...P10, { period_key: '2026-11', is_open: true }]
+    let luotPeriods = 0
+    const f = vi.fn((url: string) => {
+      if (url.includes('/templates/FM01/periods')) {
+        luotPeriods++
+        const than = luotPeriods === 1 ? PERIODS : luotPeriods === 2 ? P10 : P11
+        return Promise.resolve({ ok: true, status: 200, json: async () => than })
+      }
+      if (url.includes('/status?')) {
+        if (url.includes('to=2026-11')) {
+          return Promise.resolve({ ok: false, status: 500, json: async () => ({ detail: 'Lỗi máy chủ' }) })
+        }
+        if (url.includes('to=2026-10')) {
+          return Promise.resolve({ ok: true, status: 200, json: async () => ({ periods: [], units: [] }) })
+        }
+        return Promise.resolve({ ok: true, status: 200, json: async () => DEFAULT_STATUS })
+      }
+      throw new Error(`URL không lường trước: ${url}`)
+    })
+    vi.stubGlobal('fetch', f)
+    renderStatus()
+    expect(await screen.findByText('PTSC Đình Vũ')).toBeTruthy()
+
+    await act(async () => {
+      window.dispatchEvent(new Event('visibilitychange'))
+    })
+    await waitFor(() => expect(luotPeriods).toBeGreaterThan(1))
+    await choLang(() => f.mock.calls.length)
+
+    await act(async () => {
+      window.dispatchEvent(new Event('visibilitychange'))
+    })
+    await waitFor(() => expect(luotPeriods).toBeGreaterThan(2))
+    await choLang(() => f.mock.calls.length)
+
+    expect(screen.getByText('PTSC Đình Vũ')).toBeTruthy()
+  })
+
+  // task-26-fix-6.md W1/[V-1b] — băng nói SAI NGUYÊN NHÂN ở cảnh U1: "Không tải được số liệu mới"
+  // trong khi `/periods` vừa về 200 và nói rõ KHÔNG CÒN KỲ NÀO ĐANG MỞ. Không có gì hỏng cả — đó là
+  // một SỰ THẬT MỚI. Đổ cho lỗi tải là dạy người dùng đi tìm sai chỗ (mạng? máy chủ?) trong khi thứ
+  // họ cần biết là kỳ đã đóng. Mặt ÂM của cùng nghĩa vụ: ở cảnh CÓ lỗi thật, băng vẫn phải nói lỗi
+  // tải — ca `'U3: chữ của băng…'` giữ vế đó (nó chạy ở `dungCanhLoiNenCungKy`).
+  it('W1/[V-1b]: ở cảnh không-còn-kỳ-mở, băng nói ĐÚNG nguyên nhân — không đổ cho "không tải được"', async () => {
+    await dungCanhDongHetKy()
+    const bang = screen.getByTestId('bang-du-lieu-cu')
+    expect(within(bang).getByText(/không còn kỳ nào đang mở/i)).toBeTruthy()
+    expect(within(bang).queryByText(/không tải được/i)).toBeNull()
+    // Câu MỚI này cũng phải qua đủ hai mặt như câu cũ — một cảnh mới không được miễn luật W3.
+    kiemChuBang(bang)
   })
 
   // task-26-fix-2.md R3: Q1/[B-1] (trên) mock `/status` trả CÙNG một body bất kể `to=`, nên chỉ
@@ -1237,9 +1471,7 @@ describe('/status', () => {
     // sau đổi lời mà vẫn nói đúng thì không bị phạt.
     it('U3: chữ của băng phải nói số liệu đang CŨ (không đọc textContent cả khối)', async () => {
       await dungCanhLoiNenCungKy()
-      const bang = screen.getByTestId('bang-du-lieu-cu')
-      const chu = within(bang).getByText(/cũ|lần tải gần nhất/i)
-      expect(chu.textContent?.trim()).not.toBe('')
+      kiemChuBang(screen.getByTestId('bang-du-lieu-cu'))
     })
 
     // (3b) NGƯỜI DÙNG CÓ THẤY KHÔNG — khác "DOM có không". N-46 đổi `flex …` thành `hidden …`:
@@ -1249,12 +1481,12 @@ describe('/status', () => {
     // utility `display` nào mà CSS build ra biết — đó CHÍNH LÀ thứ xảy ra với `hidden` (Tailwind chỉ
     // emit utility đang được dùng), nhưng nó cũng sẽ bắn nếu một bản sau bỏ hẳn utility display
     // (một `<div>` thường vẫn hiện). Khi ấy hãy sửa ca CÓ CHỦ Ý, đừng luồn qua nó.
-    it('U3: băng phải NHÌN THẤY ĐƯỢC — không display:none (testid trong DOM không đủ)', async () => {
+    it('U3: băng phải NHÌN THẤY ĐƯỢC — kể cả TỪNG PHẦN TỬ CON (testid trong DOM không đủ)', async () => {
       await dungCanhLoiNenCungKy()
       const bang = screen.getByTestId('bang-du-lieu-cu')
-      const display = resolveCascadeWinner(bang.className, 'display')
-      expect(display).not.toBe('none')
-      expect(display).not.toBeNull()
+      for (const el of [bang, ...bang.querySelectorAll('*')]) {
+        expect({ the: moTa(el), biAn: biAnDi(el) }).toEqual({ the: moTa(el), biAn: false })
+      }
     })
 
     // (4) NÚT CỦA NÓ LÀM GÌ. Ca `S1/[H-1]` chỉ kiểm nút CÓ MẶT, nên `onClick={() => {}}` (N-21) đi

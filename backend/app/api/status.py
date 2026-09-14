@@ -24,6 +24,21 @@ from app.schemas.base import ApiModel
 
 router = APIRouter(prefix="/status")
 
+# task-26-fix-6.md W1b — `from`/`to` TRƯỚC vòng này là `str` KHÔNG validate, mà
+# bộ lọc dưới đây so sánh CHUỖI (`period_key >= tu_ky`), nên một chuỗi rác lọt
+# thẳng vào phép so và **thành công âm thầm**: đo thật trên CSDL,
+# `'2026-09' >= 'undefined'` là FALSE ⇒ `from=undefined` cho ra **200 với thân
+# rỗng** thay vì một lỗi. Đó là thứ biến một request rác của FE thành "máy chủ
+# trả lời hợp lệ rằng không có gì" — và phía FE thì một thân rỗng hợp lệ trông
+# y hệt một câu trả lời thật. Hợp đồng phải nói thẳng: sai định dạng kỳ ⇒ 422.
+# Giữ đúng hình dạng "YYYY-MM" của `ReportingPeriod.period_key`.
+# Đã ĐO trước khi siết (task-26-fix-6.md đòi): mọi nơi gọi hiện có đều truyền
+# đúng `YYYY-MM` — `pages/Status.tsx:70` (suy từ chính `period_key`) và 6 ca
+# trong `tests/api/test_dashboard.py`; ca `test_reporter_khong_xem_duoc_status`
+# gọi KHÔNG kèm `from`/`to` nên không đụng pattern (và vẫn 403, xem docstring
+# module về bẫy 422-thắng-403).
+KY_PATTERN = r"^\d{4}-(0[1-9]|1[0-2])$"
+
 
 def _pham_vi(u: CurrentUser = Depends(require_permission("status.view"))) -> set[int] | None:
     """Dependency bọc `pham_vi_bao_cao` — PHẢI chạy như dependency (xem docstring
@@ -68,8 +83,8 @@ class StatusOut(ApiModel):
 @router.get("", response_model=StatusOut)
 def ma_tran_trang_thai(
     template: str,
-    tu_ky: str = Query(alias="from"),
-    den_ky: str = Query(alias="to"),
+    tu_ky: str = Query(alias="from", pattern=KY_PATTERN),
+    den_ky: str = Query(alias="to", pattern=KY_PATTERN),
     pham_vi: set[int] | None = Depends(_pham_vi),
     db: Session = Depends(get_db),
 ):

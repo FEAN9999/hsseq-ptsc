@@ -412,6 +412,27 @@ def test_status_khong_N_cong_1(client, db):
     assert d["n"] <= 6, f"status dùng {d['n']} query — nghi N+1"
 
 
+def test_status_from_to_sai_dinh_dang_tra_422(client, db):
+    """task-26-fix-6.md W1b. `from`/`to` được so sánh bằng CHUỖI, nên trước vòng
+    này một chuỗi rác không bị từ chối mà lọt vào phép so và THÀNH CÔNG ÂM THẦM:
+    `'2026-09' >= 'undefined'` là FALSE ⇒ `from=undefined` trả **200 với thân
+    rỗng**, tức máy chủ trả lời "không có gì" bằng một mã thành công. Phía gọi
+    không có cách nào phân biệt nó với một câu trả lời thật — đó là cái biến một
+    request rác thành mất dữ liệu trên màn hình (xem W1). Hợp đồng: sai định
+    dạng kỳ ⇒ 422, không phải 200 rỗng."""
+    seed_all(db)
+    h = dang_nhap(client, "admin@ptsc.local")
+    assert client.get("/api/v1/status?template=FM01&from=undefined&to=undefined",
+                      headers=h).status_code == 422
+    assert client.get("/api/v1/status?template=FM01&from=2026-06&to=undefined",
+                      headers=h).status_code == 422
+    assert client.get("/api/v1/status?template=FM01&from=2026-13&to=2026-06",
+                      headers=h).status_code == 422
+    # Đối chứng: định dạng ĐÚNG vẫn đi qua bình thường (không siết quá tay).
+    assert client.get("/api/v1/status?template=FM01&from=2026-06&to=2026-09",
+                      headers=h).status_code == 200
+
+
 def test_status_template_khong_ton_tai_tra_404(client, db):
     seed_all(db)
     h = dang_nhap(client, "admin@ptsc.local")

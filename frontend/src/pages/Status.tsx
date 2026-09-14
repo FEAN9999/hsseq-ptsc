@@ -65,10 +65,15 @@ export function Status() {
   // (TanStack v5, cùng công cụ Dashboard.tsx/useUnits.ts dùng cho đường đổi kỳ) giữ dữ liệu CỦA
   // queryKey CŨ hiển thị tiếp trong lúc queryKey MỚI đang tải — không ảnh hưởng lần tải ĐẦU (chưa
   // có gì để giữ) hay nhánh lỗi/403 (đó là hai đường khác, không liên quan `data`).
+  // task-26-fix-6.md W1 [LỖI HÀNH VI] — RÚT RA THÀNH TÊN, không nhân đôi vị ngữ: điều kiện này giờ
+  // có HAI nơi cần (`enabled` và `thuLai`), và hai bản sao của cùng một vị ngữ là cách cửa thứ tám
+  // ra đời. Một tên, một nguồn chân lý.
+  const tkBat = tu !== undefined && den !== undefined
+
   const tk = useQuery({
     queryKey: ['status', TEMPLATE, tu, den],
     queryFn: () => api.get<StatusOut>(`/status?template=${TEMPLATE}&from=${tu}&to=${den}`),
-    enabled: tu !== undefined && den !== undefined,
+    enabled: tkBat,
     placeholderData: keepPreviousData,
   })
 
@@ -92,15 +97,30 @@ export function Status() {
   // VỀ `undefined` dù một khoảnh khắc trước `keepPreviousData` vừa hiện đúng lưới cũ.
   // `duLieuCuoi.current` CHỈ được gán, không bao giờ bị xoá trong một lần mount (rời trang rồi quay
   // lại là mount mới, ref reset — không "nhớ dai" qua lần mount khác).
+  //
+  // task-26-fix-6.md W1 [L-1b] — `periods.length > 0`: ref này là "bản TỐT cuối cùng", và một thân
+  // rỗng hợp lệ (`200 {periods:[],units:[]}`) KHÔNG phải bản tốt. Nó `!== undefined` nên nếu không
+  // chặn, ref nuốt luôn và **bản tốt không bao giờ quay lại** trong cả lần mount — mọi lỗi về sau
+  // rơi về một bảng trống thay vì lưới thật. Thân rỗng vẫn hiển thị BÌNH THƯỜNG khi nó là câu trả
+  // lời của CHÍNH queryKey đang xem (`data` ưu tiên `tk.data`); chỉ là nó không được nhận vai "bản
+  // để rơi về". Một mẫu chưa có kỳ nào thì lần lỗi kế tiếp cho skeleton — đúng bằng lúc chưa có gì.
   const duLieuCuoi = useRef<StatusOut | undefined>(undefined)
-  if (tk.data !== undefined) duLieuCuoi.current = tk.data
+  if (tk.data !== undefined && tk.data.periods.length > 0) duLieuCuoi.current = tk.data
   const data = tk.data ?? duLieuCuoi.current
 
   // Gọi lại CẢ HAI nguồn — dùng chung cho `InlineError` (chưa có dữ liệu) và băng dữ liệu-cũ (đã có
   // dữ liệu): hai màn hình khác nhau nhưng cùng một lối thoát cho người dùng.
   const thuLai = () => {
     ky.refetch()
-    tk.refetch()
+    // task-26-fix-6.md W1 [CHẶN]: `refetch()` của TanStack v5 VẪN CHẠY dù `enabled:false` — nó là
+    // lệnh mệnh lệnh, không hỏi lại `enabled`. Ở cảnh không-còn-kỳ-mở (U1 vòng 5 vừa làm băng và
+    // nút này với tới được), `tu`/`den` là `undefined`, chuỗi mẫu dựng ra `…&from=undefined&to=
+    // undefined` NGUYÊN VĂN; backend lọc kỳ bằng SO SÁNH CHUỖI nên `'2026-09' >= 'undefined'` là
+    // FALSE ⇒ **200 với thân RỖNG** ⇒ lưới biến mất bằng ĐÚNG MỘT CÚ BẤM vào đường thoát duy nhất
+    // màn hình đang mời. (Vòng này cũng siết `from`/`to` thành `pattern=YYYY-MM` ở
+    // `backend/app/api/status.py` ⇒ 422; nhưng chặn ở đây là chặn ở NGUỒN: không có tham số thì
+    // không có lượt gọi nào để mà đúng hay sai, và FE không được phụ thuộc vào việc BE vừa siết.)
+    if (tkBat) tk.refetch()
   }
 
   // LUẬT (không đổi từ vòng 2):
@@ -251,7 +271,16 @@ export function Status() {
           data-testid="bang-du-lieu-cu"
           className="flex items-center justify-between gap-4 mb-5 border border-hair bg-mutedbg rounded-tile px-4 py-2.5 text-table text-soot"
         >
-          <span>Không tải được số liệu mới — đang hiện bản của lần tải gần nhất</span>
+          {/* task-26-fix-6.md [V-1b]: băng phải nói ĐÚNG chuyện đang xảy ra. Ở cảnh `den === undefined`
+              không có gì hỏng cả — `/periods` vừa về 200 và nói rõ không còn kỳ nào đang mở. Đổ cho
+              "không tải được" là dạy người dùng đi tìm sai chỗ (mạng? máy chủ?) trong khi thứ họ cần
+              biết là kỳ đã đóng. `den === undefined` xét TRƯỚC vì nó là nguyên nhân CỤ THỂ hơn: ở
+              cảnh đó `tk` đang tắt nên không lượt gọi `/status` nào đang hỏng để mà nói. */}
+          <span>
+            {den === undefined
+              ? 'Không còn kỳ nào đang mở — đang hiện bản của lần tải gần nhất'
+              : 'Không tải được số liệu mới — đang hiện bản của lần tải gần nhất'}
+          </span>
           <button
             type="button"
             onClick={thuLai}
