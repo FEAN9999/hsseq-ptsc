@@ -105,8 +105,12 @@ export function Status() {
 
   // LUẬT (không đổi từ vòng 2):
   //   MỌI NHÁNH THAY CẢ MÀN HÌNH PHẢI HỎI "TÔI ĐÃ CÓ DỮ LIỆU CHƯA?" TRƯỚC — skeleton, câu trạng
-  //   thái, InlineError, tất cả. CHỈ 403/404 được thay VÔ ĐIỀU KIỆN, vì chúng là KẾT LUẬN (quyền
-  //   không đủ không tự khỏi bằng tải lại), không phải trạng thái tạm.
+  //   thái, InlineError, tất cả. CHỈ 403 được thay VÔ ĐIỀU KIỆN, vì nó là KẾT LUẬN (quyền không đủ
+  //   không tự khỏi bằng tải lại), không phải trạng thái tạm.
+  // (task-26-fix-5.md — sửa một chỗ bình luận nói dối về mã, có từ trước vòng 4 và vòng 4 chép lại:
+  // câu trên từng ghi "CHỈ 403/404", nhưng mã KHÔNG có nhánh 404 riêng — 404 hôm nay đi đường
+  // `InlineError` như mọi lỗi khác, tức nó KHÔNG được miễn. Cùng bệnh "chứng nhận bằng chữ" mà cả
+  // Task 26 đang chữa, nên không để lại.)
   //
   // task-26-fix-4.md T3: vòng 2 chứng nhận SAI dòng 2 của bảng này bằng ĐỌC ĐIỀU KIỆN; vòng 3 viết
   // lại cả bảng theo lối dựng-cảnh, làm được ba dòng, rồi vẫn chứng nhận dòng 4 bằng suy luận trên
@@ -203,7 +207,14 @@ export function Status() {
   }
 
   // Đang vẽ lưới từ BẢN CŨ (hoặc số mới vừa tải hỏng) — xem băng thông báo ngay dưới tiêu đề.
-  const duLieuCu = loi !== null || tk.data === undefined
+  // task-26-fix-5.md U1 [LỖI HÀNH VI]: vế thứ BA (`den === undefined`) là nhánh CÂM của chính luật
+  // vòng 4 đặt ra ngay dưới đây. Khi `/periods` làm mới ở NỀN rồi trả về "không kỳ nào đang mở"
+  // (quản trị đóng hết kỳ, hoặc một lượt 200 thân rỗng), `den` mất ⇒ `enabled:false` ⇒ `tk` ở
+  // `pending` MÃI ⇒ `keepPreviousData` áp KHÔNG NGỪNG ⇒ `tk.data` vẫn CÓ, và không lượt gọi nào lỗi
+  // ⇒ `loi === null`. Hai vế đầu cùng im, nên lưới cũ nằm đó câm VĨNH VIỄN trong một lần mount —
+  // không lượt gọi nào còn chạy để tự khỏi. Ba cảnh đo được: đóng hết kỳ · `/periods` trả `[]` ·
+  // `/periods` rỗng kèm `/status` lỗi. Ca `'U1 mặt DƯƠNG…'` khoá vế này.
+  const duLieuCu = loi !== null || tk.data === undefined || den === undefined
   const kyDau = data.periods[0]
   const kyCuoi = data.periods.at(-1) ?? ''
   // task-26-fix-1.md Q4: `report_id === null`, KHÔNG `state === null` — cùng nguồn chân lý
@@ -256,9 +267,19 @@ export function Status() {
           TypeError, KHÔNG ErrorBoundary nào trong src/ đỡ -> TRẮNG MÀN, kiểu hỏng tệ nhất trong
           danh sách. Canh mảng rỗng trước khi lấy `[0]`: không có kỳ nào thì không có "phạm vi" để
           nói, ẩn hẳn dòng — không bịa ra chữ mới. */}
+      {/* task-26-fix-5.md U1, vế thứ hai — QUYẾT ĐỊNH + LÝ DO: ở nhánh câm trên, màn hình không chỉ
+          im lặng, nó còn PHÁT BIỂU SAI ("đến 09/2026 (kỳ đang mở)" khi 09/2026 vừa bị đóng).
+          Băng thông báo một mình CHƯA đủ: băng nói "bản của lần tải gần nhất" — đúng cho phần LƯỚI,
+          nhưng `ky.data` là dữ liệu TƯƠI (lượt `/periods` vừa về 200), nên nhãn "(kỳ đang mở)" là
+          một khẳng định mà trang VỪA BIẾT là sai, không phải một mẩu của bản cũ. Nhãn đó chỉ đúng
+          khi kỳ cuối của BẢN ĐANG VẼ đúng bằng kỳ đang mở hiện giờ — dùng thẳng phép so đó, nên nó
+          cũng tự đúng ở cảnh cửa-thứ-bảy (bản cũ kết ở 09/2026 trong khi kỳ mở đã là 10/2026).
+          Đây là một bước đi XA HƠN bản vá một-vế người soát đã đo; ghi ra để người phán xử đảo
+          ngược được nếu thấy băng là đủ. */}
       {kyDau !== undefined && (
         <p className="text-sec text-table mb-5">
-          Từ {formatPeriod(kyDau)} (kỳ đầu có dữ liệu) đến {formatPeriod(kyCuoi)} (kỳ đang mở)
+          Từ {formatPeriod(kyDau)} (kỳ đầu có dữ liệu) đến {formatPeriod(kyCuoi)}{' '}
+          {kyCuoi === den ? '(kỳ đang mở)' : '(kỳ cuối có dữ liệu)'}
         </p>
       )}
       {/* task-26-fix-1.md Q5 (Phần D2 báo cáo soát): CHỈ khôi phục nửa ĐẦU dòng "Chú giải" mockup —

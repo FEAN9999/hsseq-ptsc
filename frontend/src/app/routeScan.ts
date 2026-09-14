@@ -24,8 +24,19 @@
 //   không phải bỏ sót âm thầm): `to={{ pathname: … }}` (object `To`), `to={cond ? a : b}` (ternary),
 //   `to={HANG_SO}` (biến/hằng số cùng file), `navigate({ pathname: … })` (dạng object của
 //   `useNavigate`), và thẻ neo thường `<a href="…">` (không phải điều hướng SPA qua react-router).
-//   task-26-fix-4.md T6(b): năm hình dạng vừa liệt đều là hình dạng dự án KHÔNG dùng (người soát
-//   quét thật và xác nhận), trong khi hình dạng CÓ THẬT mà bộ quét mù lại bị bỏ sót khỏi danh sách —
+//   task-26-fix-5.md U4 — SỬA một kết luận SAI của chính khối này: năm hình dạng vừa liệt KHÔNG
+//   phải "đều là hình dạng dự án không dùng". TERNARY LÀM ĐỐI SỐ CỦA `navigate()` CÓ THẬT, ngay
+//   trong tập quét:
+//       pages/Login.tsx:139  navigate(roles.includes('reporter') ? '/reports' : '/dashboard', …)
+//   `RE_NAVIGATE` đòi đối số ĐẦU bắt đầu bằng dấu trích dẫn, mà ở đây đối số đầu là một biểu thức
+//   `? :` — nên bộ quét trả `[]` (đo thật, không suy luận). Mục liệt kê ở trên ghi hẹp
+//   `to={cond ? a : b}` (và đúng: KHÔNG có `<Link to={ternary}>` nào), nên câu chữ không sai tuyệt
+//   đối — nhưng KẾT LUẬN thì sai. Hôm nay bất biến C3/C5 kín chỉ nhờ TRÙNG HỢP: cả `/reports` lẫn
+//   `/dashboard` đã lọt vào tập quét từ occurrence KHÁC (`<Link to="/reports">` và
+//   `navigate('/dashboard')` ở `useChuyenTrangThai.ts:190`). Đổi `'/dashboard'` ở dòng 139 thành một
+//   đích chết thì CẢ BỐN nguồn của bất biến đều im lặng. Ca tự vệ ở `routeScan.test.ts` khoá đúng
+//   sự thật này để nó không âm thầm sai đi.
+//   task-26-fix-4.md T6(b): hình dạng CÓ THẬT thứ hai mà bộ quét mù —
 //   COMPONENT BỌC CỦA CHÍNH DỰ ÁN MANG PROP `to=`: `<MucNav to="/dashboard|/reports|/status">`
 //   (`components/Sidebar.tsx:91-93`, ba đích LITERAL, trong đó `/status` không xuất hiện ở bất kỳ
 //   file nào khác trong tập quét). Neo tên thẻ chỉ nhận `Link|NavLink|Navigate` nên `<MucNav>` không

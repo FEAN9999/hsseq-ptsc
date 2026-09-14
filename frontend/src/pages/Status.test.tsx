@@ -200,6 +200,69 @@ async function choLang(demLuotGoi: () => number) {
   }
 }
 
+// task-26-fix-5.md U1 — cảnh dùng chung cho hai ca U1 (và là cảnh R1 vòng 2): đã có lưới trên màn,
+// rồi `/periods` làm mới Ở NỀN và quản trị đã ĐÓNG HẾT KỲ. Sau cảnh này `den === undefined` ⇒
+// `enabled:false` ⇒ `tk` ở `pending` MÃI ⇒ `keepPreviousData` áp không ngừng ⇒ `tk.data` vẫn CÓ, và
+// không `error` nào ⇒ `loi === null`. Tức đây đúng là nhánh mà mọi tín hiệu "hỏng" đều im.
+async function dungCanhDongHetKy() {
+  let goiThu = 0
+  const f = vi.fn((url: string) => {
+    goiThu++
+    const laLanDau = goiThu <= 2
+    if (url.includes('/templates/FM01/periods')) {
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: async () => (laLanDau ? PERIODS : PERIODS.map((k) => ({ ...k, is_open: false }))),
+      })
+    }
+    if (url.includes('/status?')) {
+      return Promise.resolve({ ok: true, status: 200, json: async () => DEFAULT_STATUS })
+    }
+    throw new Error(`URL không lường trước: ${url}`)
+  })
+  vi.stubGlobal('fetch', f)
+  renderStatus()
+  expect(await screen.findByText('PTSC Đình Vũ')).toBeTruthy()
+  await act(async () => {
+    window.dispatchEvent(new Event('visibilitychange'))
+  })
+  await waitFor(() => expect(goiThu).toBeGreaterThan(2))
+  await choLang(() => goiThu)
+  return f
+}
+
+// task-26-fix-5.md U3 — cảnh dùng chung cho cụm ca băng: đang xem lưới, rời tab rồi quay lại và
+// lượt làm mới Ở NỀN hỏng với CÙNG `queryKey` (502). Đây là cảnh PHỔ BIẾN NHẤT của cả lớp lỗi, và
+// là cảnh mà hai đột biến N-16/N-18 làm băng biến mất mà không ca nào đỏ.
+async function dungCanhLoiNenCungKy() {
+  let goiThu = 0
+  const f = vi.fn((url: string) => {
+    goiThu++
+    const laLanDau = goiThu <= 2
+    if (url.includes('/templates/FM01/periods')) {
+      return laLanDau
+        ? Promise.resolve({ ok: true, status: 200, json: async () => PERIODS })
+        : Promise.resolve({ ok: false, status: 502, json: async () => ({ detail: 'Bad gateway' }) })
+    }
+    if (url.includes('/status?')) {
+      return laLanDau
+        ? Promise.resolve({ ok: true, status: 200, json: async () => DEFAULT_STATUS })
+        : Promise.resolve({ ok: false, status: 502, json: async () => ({ detail: 'Bad gateway' }) })
+    }
+    throw new Error(`URL không lường trước: ${url}`)
+  })
+  vi.stubGlobal('fetch', f)
+  renderStatus()
+  expect(await screen.findByText('PTSC Đình Vũ')).toBeTruthy()
+  await act(async () => {
+    window.dispatchEvent(new Event('visibilitychange'))
+  })
+  await waitFor(() => expect(goiThu).toBeGreaterThan(2))
+  await choLang(() => goiThu)
+  return { dem: (u: string) => f.mock.calls.filter(([url]) => String(url).includes(u)).length }
+}
+
 describe('/status', () => {
   it('nút sao chép đưa đúng danh sách tên đơn vị chưa nộp vào clipboard', async () => {
     moiApi()
@@ -752,8 +815,12 @@ describe('/status', () => {
       window.dispatchEvent(new Event('visibilitychange'))
     })
     await waitFor(() => expect(goiThu).toBeGreaterThan(2))
+    // task-26-fix-5.md U2: cùng lý do với ca `S1/[H-1]` — vết đóng băng này có TỪ TRƯỚC vòng 4 ở
+    // chính ca này, và vòng 4 nhân nó lên ca thứ hai. Khẳng định về HẬU QUẢ: lưới có mặt, không màn
+    // hình THAY THẾ nào; không cấm nguyên văn một chuỗi có thể hợp lệ khi đứng CẠNH lưới.
     expect(screen.getByText('PTSC Đình Vũ')).toBeTruthy()
-    expect(screen.queryByText('Không tải được dữ liệu')).toBeNull()
+    expect(screen.getByRole('table')).toBeTruthy()
+    expect(screen.queryByTestId('skeleton')).toBeNull()
   })
 
   // task-26-fix-3.md S1 + task-26-fix-4.md T1/T2 — cửa THỨ BẢY của "lỗi nền phá màn đang có dữ
@@ -805,11 +872,17 @@ describe('/status', () => {
     await waitFor(() => expect(goiStatusKyMoi).toBeGreaterThan(0))
     await choLang(() => goiStatusKyMoi)
 
-    // Trạng thái CUỐI (không phải khoảnh khắc): lưới CÒN...
+    // Trạng thái CUỐI (không phải khoảnh khắc): lưới CÒN, và không có màn hình THAY THẾ nào.
+    // task-26-fix-5.md U2 — khẳng định về HẬU QUẢ, không phải phép cấm NGUYÊN VĂN một chuỗi. Bản
+    // trước cấm hẳn chữ 'Không tải được dữ liệu' xuất hiện; người soát viết đúng một bản vá TỐT HƠN
+    // (hiện `InlineError` ĐỨNG CẠNH lưới — lưới còn, nút Thử lại còn, người dùng được giải thích rõ
+    // hơn) và ca này ĐỎ oan, cùng với ca 'C13 mục 2'. Đó là mù kiểu (d): khẳng định sống nhưng chỉ
+    // bắn vào người vá đúng. Thứ ca này thật sự phải canh là "lưới có bị THAY không", nên khoá đúng
+    // hai vế đó: lưới có mặt + không màn hình thay thế nào (skeleton). Mọi cách hiện lỗi mà VẪN giữ
+    // lưới đều được phép đi qua.
     expect(screen.getByText('PTSC Đình Vũ')).toBeTruthy()
-    // ...và không rơi vào BẤT KỲ màn hình thay thế nào trong hai lối thoát của cửa này.
+    expect(screen.getByRole('table')).toBeTruthy()
     expect(screen.queryByTestId('skeleton')).toBeNull()
-    expect(screen.queryByText('Không tải được dữ liệu')).toBeNull()
     // Giữ lưới mà IM LẶNG là một lỗi khác (người dùng đọc số cũ tưởng số mới): phải có băng nói dữ
     // liệu đang cũ + một đường thử lại. Khoá bằng testid + sự CÓ MẶT của nút, không khoá nguyên văn
     // câu chữ — để một bản vá sau đổi lời mà không bị ca này phạt (mù kiểu (d)).
@@ -901,6 +974,31 @@ describe('/status', () => {
       expect(screen.getByText('PTSC Đình Vũ')).toBeTruthy()
     },
   )
+
+  // task-26-fix-5.md U1 [LỖI HÀNH VI] — nhánh CÂM của chính luật vòng 4 vừa tự đặt ra
+  // (`Status.tsx`: "giữ được lưới rồi mà IM LẶNG là một lỗi KHÁC… Lưới còn → phải nói ra là số liệu
+  // đang cũ"). Ba cảnh đo được cho lưới cũ im lặng VĨNH VIỄN trong một lần mount (`enabled:false`
+  // nên không lượt gọi nào tự khỏi — chỉ đổi route hoặc F5 mới thoát): quản trị đóng hết kỳ ·
+  // `/periods` trả `[]` · `/periods` rỗng kèm `/status` lỗi. Ca này khoá mặt DƯƠNG của băng ở đúng
+  // nhánh đó. Ca R1/[H-1] ngay trên chỉ khoá "lưới CÒN" — nó không nói gì về việc màn hình có báo
+  // hay không, nên nhánh này câm suốt hai vòng mà không ca nào đỏ.
+  it('U1 mặt DƯƠNG: /periods đóng hết kỳ ở NỀN — lưới CÒN nhưng KHÔNG được câm, băng PHẢI hiện', async () => {
+    await dungCanhDongHetKy()
+    expect(screen.getByText('PTSC Đình Vũ')).toBeTruthy()
+    expect(screen.getByTestId('bang-du-lieu-cu')).toBeTruthy()
+  })
+
+  // task-26-fix-5.md U1, vế thứ hai: ở cảnh trên màn hình không chỉ IM — nó còn PHÁT BIỂU SAI. Dòng
+  // phạm vi vẫn ghi "đến 09/2026 (kỳ đang mở)" trong khi 09/2026 vừa bị đóng, và `ky.data` là dữ
+  // liệu TƯƠI (lượt `/periods` vừa về 200) nên đây không phải "cả màn đều là bản cũ" — trang đang
+  // khẳng định điều mà nó VỪA BIẾT là sai. Nhãn "(kỳ đang mở)" chỉ đúng khi kỳ cuối của BẢN ĐANG VẼ
+  // đúng là kỳ đang mở hiện giờ. Mặt ÂM của cùng nghĩa vụ (lượt xem bình thường VẪN phải ghi "kỳ
+  // đang mở") do ca 'dòng phạm vi hiện đúng kỳ đầu/kỳ đang mở theo dữ liệu (carry C7)' giữ.
+  it('U1: /periods đóng hết kỳ ở NỀN — dòng phạm vi THÔI khẳng định "kỳ đang mở"', async () => {
+    await dungCanhDongHetKy()
+    expect(screen.queryByText(/kỳ đang mở/)).toBeNull()
+    expect(screen.getByText(/Từ 06\/2026 .* đến 09\/2026/)).toBeTruthy()
+  })
 
   // task-26-fix-2.md R3: Q1/[B-1] (trên) mock `/status` trả CÙNG một body bất kể `to=`, nên chỉ
   // khoá được NỬA bất biến — "giữ dữ liệu cũ TRONG LÚC TẢI" — mù với vế còn lại: "đóng băng dữ liệu
@@ -1059,5 +1157,119 @@ describe('/status', () => {
     )
     expect(await screen.findByText('Bạn không có quyền xem tình trạng nộp này')).toBeTruthy()
     expect(f.mock.calls.length).toBe(2)
+  })
+
+  // ---- task-26-fix-5.md U3: BĂNG DỮ-LIỆU-CŨ là UI MỚI mang NGHĨA VỤ HÀNH VI MỚI.
+  //
+  // Vòng 4 sinh ra băng này rồi chỉ canh nó bằng đúng một phép kiểm SỰ TỒN TẠI
+  // (`getByTestId` + `textContent !== ''` + nút có mặt) — **7 đột biến đi lọt**: băng hiện trên MỌI
+  // lượt xem · băng biến mất ở cảnh phổ biến nhất · băng nháy lên giữa một lượt tải bình thường ·
+  // nút Thử lại CHẾT · chữ băng rỗng hoặc dạy NGƯỢC · băng `display:none`.
+  //
+  // Luật rút ra, áp cho mọi phần tử UI mới: **một UI mới sinh nghĩa vụ ở CẢ HAI MẶT** — khi nào nó
+  // PHẢI xảy ra, và khi nào nó TUYỆT ĐỐI KHÔNG được xảy ra — mỗi mặt một ca riêng. Bốn câu hỏi phải
+  // có người canh: (1) khi nào hiện, (2) khi nào KHÔNG hiện, (3) nó NÓI gì, (4) nút của nó LÀM gì.
+  describe('băng dữ-liệu-cũ — nghĩa vụ HAI MẶT (U3)', () => {
+    // (2) MẶT ÂM, cảnh sạch nhất: cả hai nguồn lành, số liệu vừa tải xong. Băng "Không tải được số
+    // liệu mới" ở đây là một cảnh báo GIẢ — hiện riết thành tiếng ồn rồi không ai tin nó nữa.
+    it('U3 mặt ÂM: lượt xem BÌNH THƯỜNG (hai nguồn đều lành) — TUYỆT ĐỐI không có băng', async () => {
+      const f = moiApi()
+      renderStatus()
+      expect(await screen.findByText('PTSC Đình Vũ')).toBeTruthy()
+      await choLang(() => f.mock.calls.length)
+      expect(screen.queryByTestId('bang-du-lieu-cu')).toBeNull()
+    })
+
+    // (2) MẶT ÂM, cảnh tinh vi hơn: `den` vừa đổi ở NỀN nên `tk` đang tải kỳ MỚI — nhưng CHƯA lỗi
+    // gì. `keepPreviousData` giữ lưới cũ trong lúc chờ. Đây là CHỜ, không phải HỎNG — đúng câu bình
+    // luận trong `Status.tsx` hứa. Ca này cũng là chốt chặn duy nhất còn lại cho chính tuỳ chọn
+    // `placeholderData: keepPreviousData`: gỡ nó đi thì `tk.data` về `undefined`, `duLieuCu` bật, và
+    // băng NHÁY LÊN giữa một lượt tải hoàn toàn bình thường (P-6 — vòng 3 đột biến này giết 5 ca,
+    // trên HEAD vòng 4 thì 722/722 xanh vì `duLieuCuoi.current` đã làm thay việc giữ LƯỚI).
+    it('U3 mặt ÂM: đang tải kỳ MỚI ở NỀN, chưa lỗi gì — KHÔNG băng (đó là chờ, không phải hỏng)', async () => {
+      const PERIODS_MOI = [...PERIODS, { period_key: '2026-10', is_open: true }]
+      let goiThuPeriods = 0
+      let daGoiStatusMoi = false
+      const f = vi.fn((url: string) => {
+        if (url.includes('/templates/FM01/periods')) {
+          goiThuPeriods++
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => (goiThuPeriods === 1 ? PERIODS : PERIODS_MOI),
+          })
+        }
+        if (url.includes('/status?')) {
+          if (url.includes('to=2026-10')) {
+            daGoiStatusMoi = true
+            return new Promise<never>(() => {})
+          }
+          return Promise.resolve({ ok: true, status: 200, json: async () => DEFAULT_STATUS })
+        }
+        throw new Error(`URL không lường trước: ${url}`)
+      })
+      vi.stubGlobal('fetch', f)
+      renderStatus()
+      expect(await screen.findByText('PTSC Đình Vũ')).toBeTruthy()
+      await act(async () => {
+        window.dispatchEvent(new Event('visibilitychange'))
+      })
+      await waitFor(() => expect(daGoiStatusMoi).toBe(true))
+      await choLang(() => f.mock.calls.length)
+      expect(screen.getByText('PTSC Đình Vũ')).toBeTruthy()
+      expect(screen.queryByTestId('skeleton')).toBeNull()
+      expect(screen.queryByTestId('bang-du-lieu-cu')).toBeNull()
+    })
+
+    // (1) MẶT DƯƠNG ở cảnh phổ biến NHẤT: rời tab, quay lại, lượt làm mới CÙNG queryKey hỏng. Ca
+    // 'C13 mục 2' khoá "lưới CÒN"; ca này khoá nửa còn lại của cùng một luật — "lưới còn thì phải
+    // BÁO". Hai đột biến N-16/N-18 làm băng biến mất đúng ở đây mà không ca nào đỏ.
+    it('U3 mặt DƯƠNG: lỗi nền CÙNG queryKey — lưới CÒN và băng PHẢI hiện', async () => {
+      await dungCanhLoiNenCungKy()
+      expect(screen.getByText('PTSC Đình Vũ')).toBeTruthy()
+      expect(screen.getByTestId('bang-du-lieu-cu')).toBeTruthy()
+    })
+
+    // (3) BĂNG NÓI GÌ. KHÔNG dùng `bang.textContent !== ''`: chữ của chính cái NÚT ("Thử lại") nằm
+    // TRONG băng nên khẳng định ấy luôn thoả — băng có thể rỗng chữ (N-24) hoặc **dạy NGƯỢC**
+    // ("Số liệu đã được cập nhật mới nhất" — N-25, song sinh của [M-43] ở dòng chú giải) mà vẫn
+    // xanh. Đọc CHỮ riêng, và khoá Ý NGHĨA bằng một mẫu chứ không bằng nguyên văn câu, để một bản
+    // sau đổi lời mà vẫn nói đúng thì không bị phạt.
+    it('U3: chữ của băng phải nói số liệu đang CŨ (không đọc textContent cả khối)', async () => {
+      await dungCanhLoiNenCungKy()
+      const bang = screen.getByTestId('bang-du-lieu-cu')
+      const chu = within(bang).getByText(/cũ|lần tải gần nhất/i)
+      expect(chu.textContent?.trim()).not.toBe('')
+    })
+
+    // (3b) NGƯỜI DÙNG CÓ THẤY KHÔNG — khác "DOM có không". N-46 đổi `flex …` thành `hidden …`:
+    // `getByTestId` vẫn thấy, `getByRole('button')` vẫn thấy, 722/722 xanh, mà mắt người dùng không
+    // thấy gì. jsdom không nạp CSS thật nên `getComputedStyle` vô dụng; dùng đúng công cụ của dự án
+    // (`cascade.ts` đọc CSS ĐÃ BUILD). Giới hạn phải nói rõ: `null` nghĩa là className không mang
+    // utility `display` nào mà CSS build ra biết — đó CHÍNH LÀ thứ xảy ra với `hidden` (Tailwind chỉ
+    // emit utility đang được dùng), nhưng nó cũng sẽ bắn nếu một bản sau bỏ hẳn utility display
+    // (một `<div>` thường vẫn hiện). Khi ấy hãy sửa ca CÓ CHỦ Ý, đừng luồn qua nó.
+    it('U3: băng phải NHÌN THẤY ĐƯỢC — không display:none (testid trong DOM không đủ)', async () => {
+      await dungCanhLoiNenCungKy()
+      const bang = screen.getByTestId('bang-du-lieu-cu')
+      const display = resolveCascadeWinner(bang.className, 'display')
+      expect(display).not.toBe('none')
+      expect(display).not.toBeNull()
+    })
+
+    // (4) NÚT CỦA NÓ LÀM GÌ. Ca `S1/[H-1]` chỉ kiểm nút CÓ MẶT, nên `onClick={() => {}}` (N-21) đi
+    // lọt: đường thoát duy nhất của màn hình chết mà bộ test im. Khoá đúng HÀNH VI: bấm là gọi lại
+    // CẢ HAI nguồn (cùng khuôn ca 'lỗi tải hiện InlineError kèm nút Thử lại' của nhánh chưa-có-dữ-liệu).
+    it('U3: bấm Thử lại TRÊN BĂNG gọi lại CẢ HAI endpoint (đường thoát phải CHẠY, không chỉ có mặt)', async () => {
+      const { dem } = await dungCanhLoiNenCungKy()
+      const bang = screen.getByTestId('bang-du-lieu-cu')
+      const truocKy = dem('/templates/FM01/periods')
+      const truocTrangThai = dem('/status?')
+      await userEvent.click(within(bang).getByRole('button', { name: 'Thử lại' }))
+      await waitFor(() => {
+        expect(dem('/templates/FM01/periods')).toBeGreaterThan(truocKy)
+        expect(dem('/status?')).toBeGreaterThan(truocTrangThai)
+      })
+    })
   })
 })

@@ -97,6 +97,18 @@ describe('duongDanTrongNoiDung — navigate(): cả ba kiểu trích dẫn (task
   it('navigate(bien) — đích động — KHÔNG ra phần tử nào', () => {
     expect(duongDanTrongNoiDung('navigate(noiBo)')).toEqual([])
   })
+
+  // task-26-fix-5.md U4: hình dạng TERNARY làm đối số của `navigate()` CÓ THẬT trong repo
+  // (`pages/Login.tsx:139`), NẰM TRONG tập quét, và bộ quét mù hoàn toàn với nó. Đây là một lỗ ĐÃ
+  // BIẾT, không phải bỏ sót âm thầm — khối "KHÔNG PHỦ" ở `routeScan.ts` nói rõ, và ca này khoá lời
+  // nói đó lại: nếu ngày nào đó regex được mở rộng để bắt ternary, ca này đỏ và người sửa buộc phải
+  // cập nhật khối tài liệu thay vì để nó nói dối. (Khác các ca tự vệ ở trên — `navigate(bien)`,
+  // `<NavLink to={bien}>` — ở đó đích ĐỘNG nên KHÔNG quét được là ĐÚNG Ý; ở đây hai đích là hằng số
+  // literal, quét được mới là đúng, nên đây là một lỗ THẬT được ghi nhận, không phải một quyết định.)
+  it('U4: navigate(ternary) — hai đích LITERAL mà bộ quét KHÔNG thấy (lỗ đã biết, có thật ở Login.tsx:139)', () => {
+    const jsCall = "navigate(roles.includes('reporter') ? '/reports' : '/dashboard', { replace: true })"
+    expect(duongDanTrongNoiDung(jsCall)).toEqual([])
+  })
 })
 
 // task-26-fix-4.md T6(a) / task-26-rereview-3.md [M-25]: trước ca này, gỡ `src/components` khỏi
