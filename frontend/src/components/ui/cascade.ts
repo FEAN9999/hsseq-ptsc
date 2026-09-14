@@ -205,7 +205,17 @@ export function resolveCascadeWinner(className: string, cssProperty: string): st
  * những bất biến SO SÁNH HAI PHẦN TỬ khác nhau — vd. "lớp phủ hộp thoại phải nằm TRÊN header cột
  * dính", thứ duy nhất bù cho việc `Dialog` không gọi `showModal()` (components/ui/Dialog.tsx).
  * So tên lớp ở đó là tautology; so hai con số mới là đo thật.
+ *
+ * `null` (chứ không phải `'0'` hay `''`) khi KHÔNG lớp nào khai báo thuộc tính đang hỏi: hai ca
+ * lớp phủ nói trên so giá trị bằng `Number(...)`, mà `Number('')` và `Number('0')` đều ra `0` —
+ * một sentinel "rỗng" trả về số sẽ biến "không tìm thấy khai báo nào" thành "tìm thấy số 0" và hai
+ * ca đó xanh cả khi lớp phủ thôi phủ kín trang (fix-3 L9).
  */
+export function resolveDeclaredValueFromCss(css: string, className: string, cssProperty: string): string | null {
+  return thangCascade(css, className, cssProperty)?.value ?? null
+}
+
+/** Bản đọc CSS đã build của `resolveDeclaredValueFromCss`. */
 export function resolveDeclaredValue(className: string, cssProperty: string): string | null {
-  return thangCascade(loadBuiltCss(), className, cssProperty)?.value ?? null
+  return resolveDeclaredValueFromCss(loadBuiltCss(), className, cssProperty)
 }

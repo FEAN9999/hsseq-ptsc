@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { resolveCascadeWinnerFromCss } from './cascade'
+import { resolveCascadeWinnerFromCss, resolveDeclaredValueFromCss } from './cascade'
 
 // Vòng sửa 3 — P4 (phát hiện nặng nhất của review): sau khi P1 sửa xong, không component nào còn
 // hai utility cùng thuộc tính cùng lúc — nghĩa là mọi assert trong ui.test.tsx chỉ còn ĐÚNG MỘT
@@ -67,5 +67,36 @@ describe('resolveCascadeWinnerFromCss — quy tắc lõi', () => {
     const css =
       '.bg-surface{background-color:#ffffff}@media (hover:hover){.hover\\:bg-mutedbg:hover{background-color:#f5f5f4}}'
     expect(resolveCascadeWinnerFromCss(css, 'bg-surface hover:bg-mutedbg', 'background-color')).toBe('bg-surface')
+  })
+})
+
+// fix-3 L9 (R14/R13). `resolveDeclaredValue` là thứ DUY NHẤT bù cho việc `Dialog` không gọi
+// `showModal()` — hai ca "lớp phủ phủ kín bốn cạnh" và "z-index lớp phủ > z-index header cột dính"
+// đều so GIÁ TRỊ. Trước vòng này nó không có một ca đơn vị nào, và đã đo được: đổi sentinel `null`
+// thành `'0'` rồi bỏ `inset-0` khỏi lớp phủ thì `Dialog.test.tsx` vẫn 35/35 xanh.
+describe('resolveDeclaredValueFromCss — giá trị của lớp thắng', () => {
+  it('lấy GIÁ TRỊ của lớp thắng, không phải tên lớp', () => {
+    const css = '.z-50{z-index:50}'
+    expect(resolveDeclaredValueFromCss(css, 'z-50', 'z-index')).toBe('50')
+  })
+
+  it('CÙNG MỘT LỚP khai hai lần → lấy khai báo ĐỨNG SAU (quy tắc cascade, không phải lần gặp đầu)', () => {
+    // `resolveCascadeWinnerFromCss` không thấy được cuộc đua này: cả hai rule đều tên `.inset-0`
+    // nên tên lớp thắng giống hệt nhau dù lấy rule nào.
+    const css = ['.inset-0{inset:9px}', '.khac{color:red}', '.inset-0{inset:0}'].join('\n')
+    expect(resolveDeclaredValueFromCss(css, 'inset-0', 'inset')).toBe('0')
+  })
+
+  it('KHÔNG lớp nào khai báo thuộc tính đang hỏi → null, không phải một giá trị trông như đã khai', () => {
+    // Đây là ca giữ răng cho hai ca lớp phủ: chúng so `toBe('0')` và `toBe(50)`, nên một sentinel
+    // TRÔNG NHƯ một khai báo thật (`'0'`) sẽ biến "không tìm thấy khai báo nào" thành "tìm thấy
+    // đúng giá trị đang cần" và ca lớp phủ xanh cả khi lớp phủ thôi phủ kín trang.
+    const css = '.z-50{z-index:50}'
+    expect(resolveDeclaredValueFromCss(css, 'lop-khong-co-that', 'inset')).toBeNull()
+  })
+
+  it('lớp CÓ mặt nhưng không khai thuộc tính đang hỏi → cũng null', () => {
+    const css = '.z-50{z-index:50}'
+    expect(resolveDeclaredValueFromCss(css, 'z-50', 'inset')).toBeNull()
   })
 })

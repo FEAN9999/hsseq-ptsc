@@ -119,6 +119,14 @@ describe('Dialog — lớp phủ thay cho top-layer', () => {
     expect(cuaPhu).toBeGreaterThan(cuaHeaderBang)
   })
 
+  // fix-3 L10 (R12): `-1` chứ không phải `0`. Hộp thoại phải nhận được focus BẰNG MÃ (nhánh
+  // `pending` và nhánh `ds.length === 0` của bẫy Tab đều gọi `hopRef.current.focus()`), nhưng
+  // không được tự chen vào thứ tự Tab như một điểm dừng mà người dùng bàn phím phải đi qua.
+  it('chính hộp thoại nhận focus bằng mã, KHÔNG phải một điểm dừng Tab (tabindex = -1)', () => {
+    ve({ title: 'Duyệt báo cáo này?', confirmLabel: 'Duyệt' })
+    expect(screen.getByRole('dialog').getAttribute('tabindex')).toBe('-1')
+  })
+
   it('hộp thoại tự khai là hộp CHẶN (aria-modal), không phải một khối chữ giữa trang', () => {
     ve({ title: 'Duyệt báo cáo này?', confirmLabel: 'Duyệt' })
     expect(screen.getByRole('dialog').getAttribute('aria-modal')).toBe('true')

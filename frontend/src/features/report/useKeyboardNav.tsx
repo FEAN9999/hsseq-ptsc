@@ -54,31 +54,6 @@ function datLaiChu(o: HTMLInputElement, chu: string) {
   o.dispatchEvent(new Event('input', { bubbles: true }))
 }
 
-/** Chốt ô đang gõ dở TRƯỚC khi lưu (fix-2 K1).
- *
- * Cả ba loại ô nhập của form — ô số (`NumberCell.xuLyBlur`), ô "Ghi chú" của từng chỉ tiêu, ô chữ
- * nhóm C — đẩy giá trị vào hàng chờ của lớp lưu trong `onBlur` của chúng. Nên ô ĐANG focus chưa
- * bao giờ nằm trong hàng chờ: gọi thẳng `saveNow()` sẽ gửi một `PUT` thiếu đúng con số vừa gõ,
- * rồi dải đầu báo "Đã lưu HH:MM" — màn hình nói đã lưu trong khi server chưa hề thấy số đó. Mà
- * Ctrl+S là ĐÚNG cử chỉ người cẩn thận làm ngay sau khi gõ xong, chưa kịp rời ô. (Nút "Lưu" không
- * dính lỗi này: bấm chuột lên nút đã tự rời ô trước khi trình xử lý click chạy.)
- *
- * `flushSync` KHÔNG phải trang trí. `blur()` bắn `focusout` đồng bộ nên `onBlur` chạy xong ngay,
- * nhưng các `setState` trong đó chỉ được VẼ LẠI ở microtask kế tiếp. Không ép vẽ thì `focus()`
- * ngay dưới đọc trúng `error`/`text` CŨ của `NumberCell`, và với ô đang giữ một chuỗi không phải
- * số, nhánh "giữ nguyên chữ người dùng đã gõ" (fix-1 S3) không chạy — chữ đó bị thay bằng giá trị
- * cũ, đúng lỗi S3 đã sửa.
- *
- * Trả focus về đúng ô vì Ctrl+S là cử chỉ GIỮA CHỪNG, không phải cử chỉ rời ô: bỏ focus lại ở
- * `<body>` thì Enter/mũi tên/Tab của người đang nhập 55 dòng rơi vào hư không.
- */
-function chotODangGo() {
-  const o = document.activeElement
-  if (!(o instanceof HTMLInputElement || o instanceof HTMLTextAreaElement)) return
-  flushSync(() => o.blur())
-  o.focus()
-}
-
 export function useKeyboardNav(luoiRef: RefObject<HTMLElement | null>, onLuu: () => void) {
   // Chữ của ô tại đúng thời điểm nó nhận focus — "giá trị trước khi sửa" mà Esc khôi phục về.
   const chuLucFocus = useRef('')
@@ -91,9 +66,19 @@ export function useKeyboardNav(luoiRef: RefObject<HTMLElement | null>, onLuu: ()
     const luoi = luoiRef.current
     if (!luoi) return
 
+    /** Bật trong đúng khoảng `chotODangGo` tự blur rồi focus lại. Hai trình xử lý dưới đây ở
+     * chung một closure nên một biến thường là đủ: khoảng đó chạy đồng bộ, không có `await` nào
+     * chen vào giữa. */
+    let dangTuChotO = false
+
     function ghiNhoChuLucFocus(e: FocusEvent) {
       const o = e.target
       if (!(o instanceof HTMLInputElement)) return
+      // fix-3 L1: lượt `focus()` do CHÍNH Ctrl+S phát ra không phải là một lần "người dùng bước
+      // vào ô", nên nó KHÔNG được dời mốc khôi phục. Thiết kế dòng 676 nói "Esc khôi phục giá trị
+      // TRƯỚC KHI SỬA"; dời mốc theo mỗi lần Ctrl+S thì ô lỡ gõ thành `100a` sẽ Esc ra đúng
+      // `100a` — người nhập mất đường thoát duy nhất của một ô đang đỏ.
+      if (dangTuChotO) return
       // ĐỌC TRỄ MỘT MICROTASK, có lý do: `NumberCell` đổi chữ hiển thị sang dạng SỐ THÔ ngay
       // trong `onFocus` của nó, mà React nghe `onFocus` bằng chính sự kiện `focusin` này ở gốc
       // cây — tức SAU listener của lưới (lưới nằm sâu hơn, bọt lên trước). Đọc thẳng `o.value`
@@ -109,6 +94,44 @@ export function useKeyboardNav(luoiRef: RefObject<HTMLElement | null>, onLuu: ()
     // `<body>` nên keydown không bao giờ bọt tới — Ctrl+S lúc đó rơi vào trình duyệt và mở hộp
     // thoại "Lưu trang", đúng thứ dòng `preventDefault` dưới đây sinh ra để tránh. Bản vẽ
     // states.html in sẵn lời hứa "Ctrl+S để lưu" ở dải đầu, tức lời hứa ở cấp TRANG.
+    /** Chốt ô đang gõ dở TRƯỚC khi lưu (fix-2 K1).
+     *
+     * Cả ba loại ô nhập của form — ô số (`NumberCell.xuLyBlur`), ô "Ghi chú" của từng chỉ tiêu, ô
+     * chữ nhóm C — đẩy giá trị vào hàng chờ của lớp lưu trong `onBlur` của chúng. Nên ô ĐANG focus
+     * chưa bao giờ nằm trong hàng chờ: gọi thẳng `saveNow()` sẽ gửi một `PUT` thiếu đúng con số
+     * vừa gõ, rồi dải đầu báo "Đã lưu HH:MM" — màn hình nói đã lưu trong khi server chưa hề thấy
+     * số đó. Mà Ctrl+S là ĐÚNG cử chỉ người cẩn thận làm ngay sau khi gõ xong, chưa kịp rời ô.
+     * (Nút "Lưu" không dính lỗi này: bấm chuột lên nút đã tự rời ô trước khi trình xử lý click
+     * chạy.)
+     *
+     * Thứ bắt buộc là MỘT LƯỢT ÉP VẼ NẰM GIỮA `blur()` và `focus()`, không phải việc bọc `blur()`
+     * (fix-3, đo: `o.blur(); flushSync(() => {}); o.focus()` cho kết quả y hệt). Lý do: `blur()`
+     * bắn `focusout` đồng bộ nên `onBlur` chạy xong ngay, nhưng các `setState` trong đó chỉ được
+     * vẽ lại ở microtask kế tiếp. Không có lượt ép vẽ ấy thì `focus()` đọc trúng `error`/`text` CŨ
+     * của `NumberCell`, và với ô đang giữ một chuỗi không phải số, nhánh "giữ nguyên chữ người
+     * dùng đã gõ" (fix-1 S3) không chạy — chữ đó bị thay bằng giá trị cũ.
+     *
+     * Trả focus VÀ con trỏ về đúng chỗ cũ: Ctrl+S là cử chỉ GIỮA CHỪNG. Bỏ focus lại ở `<body>`
+     * thì Enter/mũi tên/Tab rơi vào hư không; còn không đặt lại `selectionRange` thì con trỏ nhảy
+     * về cuối ô (React không khôi phục được vùng chọn của một ô đang KHÔNG focus lúc `value` bị
+     * ghi lại) — người đang sửa chữ số thứ hai của một số 5 chữ số gõ tiếp sẽ ra số sai mà không
+     * có gì báo (fix-3 D2).
+     */
+    function chotODangGo() {
+      const o = document.activeElement
+      if (!(o instanceof HTMLInputElement || o instanceof HTMLTextAreaElement)) return
+      const dau = o.selectionStart
+      const cuoi = o.selectionEnd
+      dangTuChotO = true
+      flushSync(() => o.blur())
+      // Ép vẽ lần thứ hai: `focus()` làm `NumberCell` đổi chữ về dạng SỐ THÔ, và chừng nào lượt vẽ
+      // đó chưa chạy thì `setSelectionRange` dưới đây đặt con trỏ lên một chuỗi sắp bị ghi đè —
+      // React ghi `value` mới xong là con trỏ nhảy về cuối (đo: `[1,3]` thành `[6,6]`).
+      flushSync(() => o.focus())
+      if (dau !== null && cuoi !== null) o.setSelectionRange(dau, cuoi)
+      dangTuChotO = false
+    }
+
     function xuLyLuu(e: KeyboardEvent) {
       if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 's') return
       e.preventDefault() // nếu không, trình duyệt mở hộp thoại "Lưu trang"

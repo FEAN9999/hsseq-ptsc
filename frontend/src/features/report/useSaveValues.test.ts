@@ -748,6 +748,46 @@ describe('useSaveValues — đường lỗi', () => {
     expect(than(1)).toEqual({ version: 11, values: [{ indicator_code: 'B-2.1', this_period: 1 }] })
   })
 
+  // fix-3 L2: thân 409 mang CẢ `state` server đang giữ (`services/reports.py:438`). Vứt nó đi thì
+  // nơi gọi chỉ nhận được một `version` mới đi kèm trạng thái CŨ — một cặp server chưa bao giờ ở
+  // trong, và form tin cặp đó (xem ca thanh dính ở ReportForm.test.tsx).
+  it('409 "người khác vừa sửa" đẩy lên cả state server đang giữ', async () => {
+    putSpy.mockRejectedValueOnce(
+      new ApiError(409, {
+        detail: 'Người khác vừa sửa báo cáo này',
+        state: 'returned',
+        version: 12,
+        values: [],
+      }),
+    )
+    const h = ren()
+    act(() => {
+      h.current.markDirty('B-2.1', { thisPeriod: 1 })
+    })
+    await tick(1600)
+    expect(h.current.xungDot?.state).toBe('returned')
+  })
+
+  // Thân 409 mang `values` + `state` nhưng KHÔNG mang dải đầu: `decision_note` của lượt trả lại,
+  // `submitted_at`, `is_late` chỉ có trong `GET /reports/{id}`. Không kéo một lượt GET về thì người
+  // nộp đứng trước một form vừa đổi trạng thái mà không một dòng nào nói vì sao.
+  it('409 "người khác vừa sửa" gọi invalidateReportQueries để kéo bản mới về', async () => {
+    putSpy.mockRejectedValueOnce(
+      new ApiError(409, {
+        detail: 'Người khác vừa sửa báo cáo này',
+        state: 'returned',
+        version: 12,
+        values: [],
+      }),
+    )
+    const h = ren()
+    act(() => {
+      h.current.markDirty('B-2.1', { thisPeriod: 1 })
+    })
+    await tick(1600)
+    expect(invalidateSpy).toHaveBeenCalledWith(expect.anything(), 12)
+  })
+
   // C2: 409 thứ hai (thao tác không hợp lệ ở trạng thái hiện tại) KHÔNG mang `values` — không có
   // gì để vẽ lại bảng. Phân biệt bằng sự CÓ MẶT của `values`, không bằng chuỗi `detail`.
   //

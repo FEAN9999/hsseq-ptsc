@@ -130,6 +130,10 @@ export interface MauBaoCao {
  * bởi `ApiError` (api/client.ts). Task 23 bắt lỗi rồi đẩy xuống đây. */
 export interface LoiXungDot {
   detail: string
+  /** Trạng thái server đang giữ TẠI LÚC từ chối (`services/reports.py:438` gửi kèm). Không nhận
+   * lấy thì form đứng ở trạng thái chết: thanh dính hiện nút của trạng thái cũ và người nộp
+   * không thấy banner lý do trả lại — xem `case 'xung-dot'` (fix-3 L2). */
+  state: string | null
   version: number
   values: GiaTriBaoCao[]
 }
@@ -268,6 +272,10 @@ function rutGon(s: TrangThaiForm, h: HanhDongForm): TrangThaiForm {
       return {
         ...s,
         version: h.loi.version,
+        // fix-3 L2: nhận luôn trạng thái server vừa nói, y như nhánh `loi-chuyen`. `version` đi
+        // lên mà `trangThai` đứng yên là dựng ra một cặp (version mới, trạng thái cũ) mà server
+        // chưa bao giờ ở trong — trọng tài bên dưới tin cặp đó và khoá form vào trạng thái chết.
+        trangThai: h.loi.state ?? s.trangThai,
         server,
         xungDot: { detail: h.loi.detail, tuPhienBan: s.version, denPhienBan: h.loi.version },
       }

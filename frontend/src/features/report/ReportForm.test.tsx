@@ -203,7 +203,7 @@ async function bat409(
   loi: LoiXungDot,
 ) {
   putSpy.mockRejectedValueOnce(
-    new ApiError(409, { detail: loi.detail, state: 'draft', version: loi.version, values: loi.values }),
+    new ApiError(409, { detail: loi.detail, state: loi.state, version: loi.version, values: loi.values }),
   )
   await u.click(o(ma, 'Tháng này'))
   await u.keyboard(so)
@@ -696,6 +696,7 @@ describe('banner', () => {
 
     await bat409(u, 'B-2.1', '7', {
       detail: 'Người khác vừa sửa báo cáo này',
+      state: 'draft',
       version: 9,
       values: [giaTri({ indicator_code: 'B-1.1', acc_prev_computed: 999 })],
     })
@@ -724,7 +725,15 @@ describe('banner', () => {
     expect(screen.queryByRole('alert')).toBeNull()
     expect(screen.getAllByRole('status')).toHaveLength(2)
 
-    await bat409(u, 'B-1.1', '7', { detail: 'Người khác vừa sửa báo cáo này', version: 9, values: [] })
+    // `state: 'returned'` — thân 409 nói trạng thái server ĐANG giữ, mà "người khác vừa sửa" là
+    // một lượt GHI GIÁ TRỊ, không đổi trạng thái. Từ fix-3 L2 form nhận lấy `state` này, nên khai
+    // sai ở đây là tự tay đẩy báo cáo về `draft` và banner trả lại biến mất.
+    await bat409(u, 'B-1.1', '7', {
+      detail: 'Người khác vừa sửa báo cáo này',
+      state: 'returned',
+      version: 9,
+      values: [],
+    })
 
     const bao = await screen.findByRole('alert')
     expect(bao.textContent).toContain('Người khác vừa sửa báo cáo này')
@@ -749,16 +758,35 @@ describe('banner', () => {
   it('409 lần hai đếm từ version MỚI — chứng minh version đã được vá vào state', async () => {
     const u = userEvent.setup()
     ve({ state: 'draft', vai: 'reporter', version: 8 })
-    await bat409(u, 'B-1.1', '7', { detail: 'Người khác vừa sửa báo cáo này', version: 9, values: [] })
+    await bat409(u, 'B-1.1', '7', { detail: 'Người khác vừa sửa báo cáo này', state: 'draft', version: 9, values: [] })
     expect(await screen.findByText(/phiên bản 8 → 9/)).toBeTruthy()
-    await bat409(u, 'B-1.1', '8', { detail: 'Người khác vừa sửa báo cáo này', version: 12, values: [] })
+    await bat409(u, 'B-1.1', '8', { detail: 'Người khác vừa sửa báo cáo này', state: 'draft', version: 12, values: [] })
     expect(await screen.findByText(/phiên bản 9 → 12/)).toBeTruthy()
+  })
+
+  // fix-3 L2 (D1): 409 của LỚP LƯU cũng nói trạng thái server đang giữ. Vứt `state` đi thì
+  // `s.version` nhảy lên bằng server trong khi `s.trangThai` đứng ở bản cũ; trọng tài tin cặp đó và
+  // thanh dính hiện nút "Nộp báo cáo" cho một báo cáo VỪA BỊ TRẢ LẠI — bấm vào là ăn thêm 409 nữa.
+  it('409 của lớp lưu đổi luôn nút thanh dính sang trạng thái server vừa nói', async () => {
+    const u = userEvent.setup()
+    ve({ state: 'draft', vai: 'reporter', version: 8 })
+    expect(screen.getByRole('button', { name: 'Nộp báo cáo' })).toBeTruthy()
+
+    await bat409(u, 'B-1.1', '7', {
+      detail: 'Người khác vừa sửa báo cáo này',
+      state: 'returned',
+      version: 12,
+      values: [],
+    })
+
+    expect(await screen.findByRole('button', { name: 'Nộp lại' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Nộp báo cáo' })).toBeNull()
   })
 
   it('409 hiện NGUYÊN VĂN detail của server, không viết lại câu', async () => {
     const u = userEvent.setup()
     ve({ state: 'draft', vai: 'reporter' })
-    await bat409(u, 'B-1.1', '7', { detail: 'Một câu hoàn toàn khác từ server', version: 9, values: [] })
+    await bat409(u, 'B-1.1', '7', { detail: 'Một câu hoàn toàn khác từ server', state: 'draft', version: 9, values: [] })
     expect(await screen.findByText(/Một câu hoàn toàn khác từ server/)).toBeTruthy()
   })
 
@@ -932,6 +960,56 @@ describe('bàn phím kiểu Excel', () => {
     await userEvent.keyboard('{Escape}')
     expect(chu(oB)).toBe('')
     expect(oB.getAttribute('aria-invalid')).not.toBe('true')
+  })
+
+  // fix-3 L1: Ctrl+S chốt ô bằng cách blur rồi focus lại (K1), và lượt focus ĐÓ không được tính là
+  // một lần "người dùng bước vào ô" — nếu tính thì mốc Esc khôi phục về bị dời theo mỗi lần bấm
+  // Ctrl+S, trái thẳng dòng thiết kế 676 "Esc khôi phục giá trị TRƯỚC KHI SỬA".
+  it('Esc sau Ctrl+S vẫn trả về giá trị trước khi sửa, không phải giá trị lúc lưu', async () => {
+    const u = userEvent.setup()
+    ve({ state: 'draft', vai: 'reporter', values: [{ indicator_code: 'B-2.1', this_period: 100 }] })
+    const oB = o('B-2.1', 'Tháng này')
+    await u.click(oB)
+    await u.clear(oB)
+    await u.keyboard('12')
+    await u.keyboard('{Control>}s{/Control}')
+    await u.keyboard('{Escape}')
+    expect(chu(oB)).toBe('100')
+    // Đọc qua ô chỉ đọc cùng dòng: nó tính TỪ STATE, nên đây là bằng chứng 100 đã về lại reducer
+    // chứ không chỉ còn là chữ trên màn hình.
+    expect(o('B-2.1', 'Cộng dồn').textContent).toBe('100')
+  })
+
+  // Ca QUYẾT ĐỊNH của L1: ô đang LỖI. Sau Ctrl+S ô đỏ lên, và Esc là đường thoát DUY NHẤT về số
+  // cũ — nếu mốc khôi phục đã bị dời thành "100a" thì Esc trả lại đúng chuỗi hỏng đó và số 100
+  // biến mất khỏi cả màn hình lẫn mốc, trên form 55 dòng chỉ còn cách nhớ lại mà gõ tay.
+  it('Esc cứu được ô đang lỗi sau Ctrl+S: trả về số cũ, không trả lại chuỗi hỏng', async () => {
+    const u = userEvent.setup()
+    ve({ state: 'draft', vai: 'reporter', values: [{ indicator_code: 'B-2.1', this_period: 100 }] })
+    const oB = o('B-2.1', 'Tháng này')
+    await u.click(oB)
+    await u.keyboard('a')
+    expect(chu(oB)).toBe('100a')
+    await u.keyboard('{Control>}s{/Control}')
+    expect(oB.getAttribute('aria-invalid')).toBe('true')
+
+    await u.keyboard('{Escape}')
+    expect(chu(oB)).toBe('100')
+    expect(o('B-2.1', 'Cộng dồn').textContent).toBe('100')
+  })
+
+  // fix-3 D2: `xuLyBlur` ghi lại `value` của ô trong lúc ô đang KHÔNG focus, nên React không khôi
+  // phục được vùng chọn — đo được `[1,3]` thành `[5,5]`. Hệ quả thật: người đang sửa chữ số thứ hai
+  // của một số 5 chữ số bấm Ctrl+S theo thói quen rồi gõ tiếp, chữ số rơi vào CUỐI số.
+  it('Ctrl+S giữ nguyên vị trí con trỏ và vùng bôi đen trong ô', async () => {
+    const u = userEvent.setup()
+    ve({ state: 'draft', vai: 'reporter', values: [{ indicator_code: 'B-2.1', this_period: 12345 }] })
+    const oB = o('B-2.1', 'Tháng này') as HTMLInputElement
+    await u.click(oB)
+    await u.keyboard('6')
+    oB.setSelectionRange(1, 3)
+    await u.keyboard('{Control>}s{/Control}')
+    expect([oB.selectionStart, oB.selectionEnd]).toEqual([1, 3])
   })
 
   it('Ctrl+S khi đang đứng trong ô nhập: gọi Lưu ĐÚNG MỘT lần và chặn hộp thoại lưu trang', async () => {
@@ -1777,6 +1855,9 @@ describe('lưu khi rời ô', () => {
   beforeEach(dongHoGia)
 
   const MAU_HAI_DONG = () => mauNho([chiTieu({ code: 'B-1.1' }), chiTieu({ code: 'B-1.2' })])
+  /** `mauNho` chỉ dựng MỘT ô chữ; FM01 thật có ba. Lấy thẳng `text_fields` của catalog để ca gộp
+   * hàng chờ chữ chạy trên đúng số ô mà người nhập gặp. */
+  const MAU_BA_O_CHU = () => ({ ...MAU_HAI_DONG(), text_fields: MAU_FM01.text_fields })
 
   it('rời ô CÓ SỬA thì 1,5 giây sau gửi đúng ô đó kèm version', async () => {
     const u = nguoiDung()
@@ -1979,6 +2060,57 @@ describe('lưu khi rời ô', () => {
     expect(putSpy).not.toHaveBeenCalled()
   })
 
+  // fix-3 L4 (R3): XOÁ SẠCH một ghi chú cũng là một lần sửa. Nếu ô rỗng bị coi là "không đổi" thì
+  // người nhập xoá câu giải thích bộ đếm lệch đã lỗi thời, dải đầu vẫn báo "Đã lưu 14:02", và tải
+  // lại trang thì câu cũ quay về.
+  it('xoá sạch ô "Ghi chú" vẫn lên tới server, gửi note rỗng', async () => {
+    const u = nguoiDung()
+    ve({
+      state: 'draft',
+      vai: 'reporter',
+      version: 8,
+      mau: MAU_HAI_DONG(),
+      values: [{ indicator_code: 'B-1.1', note: 'Ca đêm bù giờ' }],
+    })
+    await u.clear(o('B-1.1', 'Ghi chú'))
+    await u.tab()
+    await choDebounce()
+    expect(thanPut(0)).toEqual({ version: 8, values: [{ indicator_code: 'B-1.1', note: '' }] })
+  })
+
+  // fix-3 L5 (R4): y hệt L4 cho ba ô chữ nhóm C. Backend `593d933`/`08b81eb` vừa mở đường cho ca
+  // này (chuẩn hoá `''` → `NULL` trong `report_text`); phía FE mà bỏ qua ô rỗng thì đường đó không
+  // bao giờ có ai đi.
+  it('xoá sạch ô chữ nhóm C vẫn lên tới server, gửi texts rỗng', async () => {
+    const u = nguoiDung()
+    ve({
+      state: 'draft',
+      vai: 'reporter',
+      version: 8,
+      mau: MAU_HAI_DONG(),
+      texts: { C1: 'Câu cũ đã lỗi thời' },
+    })
+    await u.clear(screen.getByLabelText('C1. Hoạt động nổi bật trong tháng'))
+    await u.tab()
+    await choDebounce()
+    expect(thanPut(0)).toEqual({ version: 8, values: [], texts: { C1: '' } })
+  })
+
+  // fix-3 L6 (R5): FM01 có ĐÚNG ba ô chữ và người nhập điền liền tay cả ba. Hàng chờ chữ phải gộp,
+  // không phải "ô cuối cùng thắng" — mất hai ô đầu thì không có gì trên màn hình nói ra.
+  it('hai ô chữ nhóm C đổi trong CÙNG một cửa sổ debounce thì cả hai vào một PUT', async () => {
+    const u = nguoiDung()
+    ve({ state: 'draft', vai: 'reporter', version: 8, mau: MAU_BA_O_CHU() })
+    await u.click(screen.getByLabelText('C1. Hoạt động nổi bật trong tháng'))
+    await u.keyboard('Diễn tập PCCC')
+    await u.click(screen.getByLabelText('C2. Hoạt động dự kiến cho tháng tới'))
+    await u.keyboard('Huấn luyện cứu hộ')
+    await u.tab()
+    await choDebounce()
+    expect(putSpy).toHaveBeenCalledTimes(1)
+    expect(thanPut(0).texts).toEqual({ C1: 'Diễn tập PCCC', C2: 'Huấn luyện cứu hộ' })
+  })
+
   it('ô số và ô chữ đổi cùng lúc đi CHUNG một PUT, cùng một version', async () => {
     const u = nguoiDung()
     ve({ state: 'draft', vai: 'reporter', version: 8, mau: MAU_HAI_DONG() })
@@ -2056,10 +2188,15 @@ describe('lưu khi rời ô', () => {
 
   // Ctrl+S là cử chỉ GIỮA CHỪNG. Chốt ô bằng `blur()` mà không trả focus lại thì focus rơi về
   // `<body>`, và người đang nhập 55 dòng mất luôn Enter/mũi tên/Tab ngay sau cú lưu.
-  it('Ctrl+S không cướp focus khỏi ô đang gõ', async () => {
+  //
+  // fix-3 L3: ô đo là dòng THỨ HAI, có chủ ý. Ca cũ đo ở B-1.1 — đúng là `<input>` đầu tiên của
+  // trang — nên nó xanh cả với một bản "trả focus về ô ĐẦU BẢNG". Lỗi đó nếu sống thật: Ctrl+S ở
+  // dòng 40 ném focus lên dòng 1, gõ tiếp là ghi đè số của dòng 1.
+  it('Ctrl+S không cướp focus khỏi ô đang gõ (ô ở dòng thứ hai, không phải ô đầu trang)', async () => {
     const u = nguoiDung()
     ve({ state: 'draft', vai: 'reporter', version: 8, mau: MAU_HAI_DONG() })
-    const oB = o('B-1.1', 'Tháng này')
+    const oB = o('B-1.2', 'Tháng này')
+    expect(document.querySelector('input')).not.toBe(oB)
     await u.click(oB)
     await u.keyboard('12')
     await u.keyboard('{Control>}s{/Control}')
@@ -2131,6 +2268,24 @@ describe('dải đầu — trạng thái lưu', () => {
     expect(screen.getByText('Chưa lưu (1 ô)')).toBeTruthy()
     await u.click(screen.getByLabelText('C1. Hoạt động nổi bật trong tháng'))
     await u.keyboard('Có diễn tập')
+    await u.tab()
+    expect(screen.getByText('Chưa lưu (2 ô)')).toBeTruthy()
+  })
+
+  // fix-3 L10 (R15): ca ngay trên chỉ làm bẩn MỘT ô chữ, nên một bản "mọi ô chữ đang chờ tính là
+  // một" vẫn ra đúng con số. Ô chữ là thứ dài nhất người ta gõ trong form này — đếm thiếu là nói
+  // giảm đúng khối lượng có thể mất khi đóng tab.
+  it('hai ô chữ nhóm C bẩn thì đếm là HAI ô, không gộp thành một', async () => {
+    const u = nguoiDung()
+    ve({
+      state: 'draft',
+      vai: 'reporter',
+      mau: { ...MAU_BA_DONG(), text_fields: MAU_FM01.text_fields },
+    })
+    await u.click(screen.getByLabelText('C1. Hoạt động nổi bật trong tháng'))
+    await u.keyboard('Có diễn tập')
+    await u.click(screen.getByLabelText('C2. Hoạt động dự kiến cho tháng tới'))
+    await u.keyboard('Sẽ huấn luyện cứu hộ')
     await u.tab()
     expect(screen.getByText('Chưa lưu (2 ô)')).toBeTruthy()
   })
@@ -2680,6 +2835,29 @@ describe('hộp thoại chuyển trạng thái', () => {
     expect(thanPut(0).version).toBe(11)
   })
 
+  // fix-3 L8 (R9): 400 và 403 của transition KHÔNG mang `version` (hop-dong-loi-backend.md — chỉ
+  // 409 mang). Nhận bừa một số thay thế (vd `loi.version ?? 0`) là đặt khoá lạc quan của lớp lưu
+  // về một số server chưa bao giờ giữ: MỌI lượt lưu sau đó ăn 409 "người khác vừa sửa" sai sự
+  // thật, và người nhập kẹt cho tới khi tải lại trang.
+  it('400 của transition (không mang version) KHÔNG đụng tới version của lớp lưu', async () => {
+    postSpy.mockRejectedValueOnce(
+      new ApiError(400, {
+        detail: 'Dữ liệu không hợp lệ',
+        errors: [{ indicator_code: 'B-8.1', message: 'Bắt buộc' }],
+      }),
+    )
+    const u = nguoiDung()
+    ve({ state: 'draft', vai: 'reporter', version: 8, mau: MOT_DONG(), values: DA_DIEN })
+    await moHop(u, 'Nộp báo cáo')
+    await u.click(nutHop('Nộp'))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+
+    await u.click(o('B-1.1', 'Tháng này'))
+    await u.keyboard('12')
+    await u.click(screen.getByRole('button', { name: 'Lưu' }))
+    expect(thanPut(0).version).toBe(8)
+  })
+
   it('duyệt xong thì chip trạng thái ở dải đầu đổi ngay, không chờ lượt làm mới nền', async () => {
     postSpy.mockResolvedValueOnce({ state: 'approved', version: 9 })
     const u = nguoiDung()
@@ -2707,6 +2885,27 @@ describe('hộp thoại chuyển trạng thái', () => {
     )
     expect(screen.queryByRole('button', { name: 'Duyệt' })).toBeNull()
     expect(screen.getByRole('button', { name: 'Mở lại…' })).toBeTruthy()
+  })
+
+  // fix-3 L7 (R7): ranh giới HOÀ là chỗ DUY NHẤT `>=` khác `>`. Luật đã chọn: hai nguồn cùng nói
+  // một `version` thì bản của SERVER (prop) thắng — reducer chỉ được thắng khi nó đang giữ một
+  // `version` LỚN HƠN, tức nó vừa nhận phản hồi của một lệnh ghi mà lượt `GET` nền chưa thấy. Lật
+  // ranh giới này là form tin bản của chính mình và mở ô nhập cho một báo cáo người khác đã nộp.
+  it('hoà phiên bản thì trạng thái của prop (server) thắng, không phải của reducer', () => {
+    useSession.getState().login('tok-test', NGUOI_DUNG, DON_VI, QUYEN_REPORTER)
+    const mau = MOT_DONG()
+    const r = veCay(
+      <ReportForm mau={mau} chiTiet={duLieu({ state: 'draft', version: 8, mau, values: DA_DIEN })} />,
+    )
+    expect(screen.getByRole('button', { name: 'Nộp báo cáo' })).toBeTruthy()
+    expect(screen.getAllByRole('textbox').length).toBeGreaterThan(0)
+
+    // CÙNG version 8, trạng thái khác.
+    r.rerender(
+      <ReportForm mau={mau} chiTiet={duLieu({ state: 'submitted', version: 8, mau, values: DA_DIEN })} />,
+    )
+    expect(screen.queryByRole('button', { name: 'Nộp báo cáo' })).toBeNull()
+    expect(screen.queryAllByRole('textbox')).toHaveLength(0)
   })
 
   it('sau một transition thành công, cú Lưu ĐẦU TIÊN gửi version mới chứ không phải số cũ', async () => {

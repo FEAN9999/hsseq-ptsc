@@ -213,7 +213,19 @@ export function useSaveValues(reportId: number, phienBanDau: number): KetQuaLuu 
         // đây đọc thẳng `phienBan.current` chứ không canh thêm lần nữa cho một ca không tồn tại.
         if (typeof loi.version === 'number') phienBan.current = loi.version
         if (loi.status === 409 && Array.isArray(loi.values)) {
-          setXungDot({ detail: loi.detail, version: phienBan.current, values: loi.values as GiaTriBaoCao[] })
+          // fix-3 L2: `state` cũng là dữ liệu mới nhất server vừa nói, đúng như `version` ngay
+          // trên. Vứt nó đi thì thanh dính còn hiện nút của trạng thái cũ ("Nộp báo cáo" cho một
+          // báo cáo vừa bị trả lại) và người nộp không thấy banner lý do trả lại.
+          setXungDot({
+            detail: loi.detail,
+            state: typeof loi.state === 'string' ? loi.state : null,
+            version: phienBan.current,
+            values: loi.values as GiaTriBaoCao[],
+          })
+          // Và kéo một lượt `GET` về: thân 409 chỉ mang `values` + `state`, không mang dải đầu
+          // (`decision_note` của lượt trả lại, `submitted_at`, `is_late`). Không có lượt này thì
+          // form đứng ở bản cũ tới khi người dùng tự tải lại trang.
+          invalidateReportQueries(qc, reportId)
         } else {
           setLoiLuu(loi.detail)
           setLoiLuuChiTiet(loi.errors ?? null)
