@@ -30,10 +30,21 @@ import { Forbidden } from '../pages/Forbidden'
 import { NotFound } from '../pages/NotFound'
 import { Reports } from '../pages/Reports'
 import { ReportDetail } from '../pages/ReportDetail'
+import { Dashboard } from '../pages/Dashboard'
 
 export const routeObjects: RouteObject[] = [
   { path: '/login', element: <Login /> },
   { path: '/403', element: <Forbidden /> },
+  {
+    path: '/dashboard',
+    element: (
+      <RequireAuth>
+        <AppShell>
+          <Dashboard />
+        </AppShell>
+      </RequireAuth>
+    ),
+  },
   {
     path: '/reports',
     element: (
