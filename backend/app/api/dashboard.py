@@ -231,6 +231,10 @@ class DashboardUnitOut(ApiModel):
     hazob: JsonNumber
     gio_an_toan_tu_lti_cuoi: JsonNumber
     state: str | None
+    # Task 25 carry C1: FE cần id để dựng '/reports/{id}' khi bấm số LTI của một
+    # đơn vị — KHÔNG suy từ `state` (state != None và report_id != None trùng
+    # nhau ở dữ liệu hiện có, nhưng report_id mới là thứ link thật sự cần).
+    report_id: int | None
 
 
 def _gia_tri_chi_tieu(ma: str):
@@ -281,6 +285,9 @@ def bang_don_vi(
             _gia_tri_chi_tieu("B-1.2").label("gc2"),
             _gia_tri_chi_tieu("B-1.3").label("gc3"),
             _gia_tri_chi_tieu("B-1.5").label("gio_an_toan_tu_lti_cuoi"),
+            # C1 — một cột THÊM vào câu đang chạy (Report đã outerjoin sẵn ngay dưới),
+            # không phải một query mới: test_units_khong_N_cong_1 vẫn canh đúng ngân sách.
+            Report.id.label("report_id"),
         )
         .select_from(OrgUnit)
         .outerjoin(Report, and_(Report.org_unit_id == OrgUnit.id, Report.period_id == ky_id))
@@ -306,8 +313,10 @@ def bang_don_vi(
         # evaluate_computed (thành phần trống coi là 0), CHỈ khi đơn vị đã có
         # báo cáo — chưa nộp thì để None nguyên dòng ("—", không click).
         gio_cong = None if h.state is None else _hoac(h.gc1, 0) + _hoac(h.gc2, 0) + _hoac(h.gc3, 0)
+        # report_id THÊM VÀO CUỐI tuple (không chen giữa) để không phải sửa lại
+        # các chỉ số t[3]/t[4]/t[8] mà khoá sắp xếp ngay dưới đang dùng.
         dong.append((h.code, h.name, h.state, h.lti, h.fat, h.near_miss, h.hazob,
-                     h.gio_an_toan_tu_lti_cuoi, gio_cong))
+                     h.gio_an_toan_tu_lti_cuoi, gio_cong, h.report_id))
 
     # Sắp LTI giảm dần, hoà thì FAT giảm dần, hoà tiếp thì giờ công giảm dần
     # (task-13-brief.md Step 3) — đơn vị chưa nộp (không giá trị) luôn xếp
@@ -318,7 +327,7 @@ def bang_don_vi(
         DashboardUnitOut(
             org_unit=OrgUnitBrief(code=code, name=name), state=state,
             lti=lti, fat=fat, near_miss=near_miss, hazob=hazob,
-            gio_an_toan_tu_lti_cuoi=gio_lti, gio_cong=gio_cong,
+            gio_an_toan_tu_lti_cuoi=gio_lti, gio_cong=gio_cong, report_id=report_id,
         )
-        for code, name, state, lti, fat, near_miss, hazob, gio_lti, gio_cong in dong
+        for code, name, state, lti, fat, near_miss, hazob, gio_lti, gio_cong, report_id in dong
     ]

@@ -603,3 +603,31 @@ def test_summary_thu_tu_6_o_kpi_dung_luoi_thiet_ke(client, db):
         ("DON_VI_CO_LTI", "Đơn vị có LTI"), ("B-1.4", "Tổng giờ công"),
         ("B-2.10", "Near miss"), ("B-2.11", "HAZOB card"),
     ]
+
+
+# ---------------------------------------------------------------------------
+# Task 25 carry C1 — lỗ hợp đồng: DashboardUnitOut thiếu report_id nên FE
+# không dựng được đường dẫn '/reports/{id}' khi bấm số LTI của một đơn vị.
+# ---------------------------------------------------------------------------
+
+
+def test_units_report_id_null_khi_chua_nop_dung_id_khi_da_nop(client, db):
+    """C1 (task-25-carry.md) — khẳng định CẢ HAI chiều: đơn vị chưa có báo cáo
+    (kỳ 2026-09, mọi đơn vị) trả report_id None; đơn vị đã có báo cáo (U01, kỳ
+    2026-08, approved) trả ĐÚNG id thật trong DB, không chỉ "khác None" (một
+    id ngẫu nhiên/hằng số vẫn qua được nếu chỉ kiểm "not None")."""
+    seed_all(db)
+    from app.models import OrgUnit, Report, ReportingPeriod
+    h = dang_nhap(client, "admin@ptsc.local")
+
+    rong = client.get("/api/v1/dashboard/units?period=2026-09", headers=h).json()
+    assert len(rong) == 22
+    assert all(u["report_id"] is None for u in rong)
+
+    ky = db.query(ReportingPeriod).filter_by(period_key="2026-08").one()
+    u01_id = db.query(OrgUnit).filter_by(code="U01").one().id
+    r01 = db.query(Report).filter_by(org_unit_id=u01_id, period_id=ky.id).one()
+
+    ds = client.get("/api/v1/dashboard/units?period=2026-08", headers=h).json()
+    u01 = next(u for u in ds if u["org_unit"]["code"] == "U01")
+    assert u01["report_id"] == r01.id
