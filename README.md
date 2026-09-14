@@ -74,9 +74,25 @@ npx playwright test                                        # 2 viewport: 1280×8
 ```
 
 Không cần tự chạy `npm run preview`: `playwright.config.ts` khai `webServer` nên nó tự dựng
-`frontend` và tự dọn. Chạy trên môi trường ngoài: `BASE_URL=https://… npx playwright test`
-(lúc đó `webServer` tự tắt và `resetDemo()` từ chối chạy — reset ở đó bằng
-`docker compose exec api python -m scripts.reset_demo --yes`).
+`frontend` và tự dọn.
+
+### Trỏ vào một bản deploy: `BASE_URL`
+
+```bash
+BASE_URL=https://<bản-deploy> npx playwright test
+```
+
+Lúc đó `webServer` tự tắt (server đã có sẵn) và `resetDemo()` **tự bỏ qua** — `.venv` trên máy này
+không nói chuyện được với database của server đó, và xoá dữ liệu trên máy chủ thật là chuyện khác
+hẳn về hậu quả. Bộ test vì vậy chia đôi theo đúng thứ nó CẦN:
+
+| ở chế độ `BASE_URL` | ca |
+|---|---|
+| **chạy** (4) | không cuộn ngang · titlebar · rbac 403 · rbac chưa đăng nhập — đây là bộ khói cho một bản deploy |
+| **bỏ qua**, in rõ lý do (5) | demo phân đoạn 2 · lớp làm mới cache · Ctrl+S · hộp thoại trên lớp dính · rbac người xem — năm ca này cần một báo cáo **nháp sạch** |
+
+Muốn chạy cả năm ca kia trên bản deploy thì reset ở chính máy chủ đó trước
+(`docker compose exec api python -m scripts.reset_demo --yes`) rồi chạy lẻ từng ca bằng `-g`.
 
 - **Phải `--build`.** `docker compose up -d` không tự build lại khi image `infra-api` đã tồn tại, nên
   nó chạy im lặng bằng mã cũ. Một lần như vậy đã làm `GET /status` trả thiếu `report_id` và mọi chip

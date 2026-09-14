@@ -10,7 +10,7 @@ import { execFileSync } from 'node:child_process'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { expect, type APIRequestContext, type Page } from '@playwright/test'
+import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
 
 const GOC_REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const BACKEND = resolve(GOC_REPO, 'backend')
@@ -51,12 +51,43 @@ const LA_LOCAL = BASE_URL.startsWith('http://localhost') || BASE_URL.startsWith(
  *
  *  Chạy đồng bộ (`execFileSync`) có chủ ý: mọi ca sau nó phải thấy DB đã ở trạng thái cuối, và
  *  suite chạy `workers: 1` nên không có gì để song song mà tiết kiệm. */
+/** `true` khi bộ test đang chạy với DB local mà `backend/.env` trỏ tới, tức là `resetDemo()` có
+ *  quyền và có đường xoá-nạp lại. `BASE_URL` từ xa (Vercel/Render, Task 28) thì KHÔNG: cái
+ *  `.venv` trên máy này không nói chuyện được với database của server đó, và kể cả nói được thì
+ *  xoá dữ liệu trên máy chủ thật là một hành động khác hẳn về hậu quả. */
+export const CO_THE_RESET = LA_LOCAL
+
+/** Bỏ qua ca đang chạy khi không reset được.
+ *
+ *  S1 (vòng sửa 1): bản trước `resetDemo()` NÉM LỖI vô điều kiện ở chế độ `BASE_URL` từ xa, nên
+ *  `BASE_URL=https://… npx playwright test` — đường chạy mà brief liệt kê ở "Produces" và README
+ *  mô tả như cách dùng hợp lệ — giết cả 8 ca ngay trong `beforeEach`/`beforeAll`. Task 28 dựng
+ *  demo lên Vercel + Render, và cách duy nhất để biết bản deploy có chạy đúng là trỏ e2e vào nó.
+ *
+ *  Chia đôi bộ test theo đúng thứ chúng CẦN, không theo ý muốn:
+ *  - Bốn ca chỉ ĐỌC (không cuộn ngang · titlebar · rbac 403 · rbac chưa đăng nhập) chạy được ở mọi
+ *    nơi ⇒ đó là bộ khói cho một bản deploy.
+ *  - Bốn ca cần một báo cáo NHÁP sạch (demo phân đoạn 2 · Ctrl+S · hộp thoại · rbac người xem) thì
+ *    gọi hàm này để tự bỏ qua — Playwright in ra "skipped" kèm nguyên văn lý do, không im lặng và
+ *    cũng không xanh giả. */
+export function boQuaNeuKhongResetDuoc(): void {
+  test.skip(
+    !CO_THE_RESET,
+    `Ca này cần DB ở trạng thái demo sạch (một báo cáo nháp của ${DON_VI_U22} kỳ ${KY_DEMO}). ` +
+      `BASE_URL=${BASE_URL} là môi trường ngoài nên resetDemo() không chạy được. Reset ở đó bằng ` +
+      '`docker compose exec api python -m scripts.reset_demo --yes` rồi chạy lẻ ca này.',
+  )
+}
+
 export function resetDemo(): void {
-  if (!LA_LOCAL) {
-    throw new Error(
-      `resetDemo() chỉ chạy được với DB local. BASE_URL=${BASE_URL} là môi trường ngoài — ` +
-        'chạy reset ở đó bằng `docker compose exec api python -m scripts.reset_demo --yes`.',
+  if (!CO_THE_RESET) {
+    // Không ném: nơi gọi đã tự bỏ qua bằng `boQuaNeuKhongResetDuoc()` nếu nó thật sự cần trạng
+    // thái sạch. Nói ra một lần cho người chạy biết chắc chắn là ĐÃ BỎ QUA, không phải đã reset.
+    console.warn(
+      `[e2e] BỎ QUA resetDemo(): BASE_URL=${BASE_URL} là môi trường ngoài. ` +
+        'Các ca cần trạng thái sạch sẽ tự báo "skipped" kèm lý do.',
     )
+    return
   }
   execFileSync(PYTHON, ['-m', 'scripts.reset_demo', '--yes'], {
     cwd: BACKEND,
@@ -128,6 +159,28 @@ export async function idBaoCao(
   const bc = ds.find((r) => r.org_unit.code === orgCode && r.id !== null)
   if (bc === undefined) throw new Error(`không có báo cáo ${orgCode} kỳ ${period} (đã reset chưa?)`)
   return bc.id
+}
+
+/** Nộp một báo cáo bằng API — DỰNG CẢNH, không phải thứ đang được kiểm.
+ *
+ *  Dùng ở ca Q1 (dashboard đổi số không tải lại trang): ca đó canh LỚP LÀM MỚI CACHE của trình
+ *  duyệt, nên bước đưa báo cáo về `submitted` phải nhanh và tất định, và quan trọng hơn: phải xảy
+ *  ra NGOÀI trình duyệt đang đo, để không có lượt `invalidateReportQueries` nào của chính nó lẫn
+ *  vào phép đo. Đường nộp bằng giao diện đã có ca riêng canh (ca demo phân đoạn 2). */
+export async function nopBaoCaoQuaApi(
+  request: APIRequestContext,
+  token: string,
+  reportId: number,
+): Promise<void> {
+  const headers = { Authorization: `Bearer ${token}` }
+  const xem = await request.get(`/api/v1/reports/${reportId}`, { headers })
+  expect(xem.ok(), `GET /reports/${reportId} lỗi ${xem.status()}`).toBeTruthy()
+  const { state, version } = (await xem.json()) as { state: string; version: number }
+  const res = await request.post(`/api/v1/reports/${reportId}/transition`, {
+    headers,
+    data: { action: 'submit', expected_state: state, version },
+  })
+  expect(res.ok(), `nộp báo cáo ${reportId} lỗi ${res.status()}: ${await res.text()}`).toBeTruthy()
 }
 
 /** Số pixel trang bị TRÀN ngang. > 0 nghĩa là thanh cuộn ngang của CẢ TRANG xuất hiện — khác hẳn

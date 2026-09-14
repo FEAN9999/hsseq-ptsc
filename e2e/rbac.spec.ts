@@ -7,13 +7,17 @@
 // đang xanh vì lý do sai.
 import { expect, test } from '@playwright/test'
 
-import { DON_VI_U22, dangNhap, idBaoCao, resetDemo, tokenApi } from './helpers'
+import { CO_THE_RESET, DON_VI_U22, boQuaNeuKhongResetDuoc, dangNhap, idBaoCao, resetDemo, tokenApi } from './helpers'
 
 /** `beforeAll` chứ không `beforeEach`: không ca nào trong file này làm đổi dữ liệu, nên một lượt
  *  reset là đủ — và `reset_demo.py` xoá rồi nạp lại toàn bộ bảng `report`, chạy thừa là mất thời
- *  gian thật chứ không phải phòng xa. */
+ *  gian thật chứ không phải phòng xa.
+ *
+ *  S1 (vòng sửa 1): KHÔNG gọi `test.skip()` ở đây — trong `beforeAll` nó bỏ qua CẢ TỆP, kể cả hai
+ *  ca chỉ-đọc vốn chạy được ở mọi môi trường. Ca duy nhất cần trạng thái sạch (người xem, phải có
+ *  một báo cáo NHÁP) tự khai báo bỏ qua trong thân nó. */
 test.beforeAll(() => {
-  resetDemo()
+  if (CO_THE_RESET) resetDemo()
 })
 
 test('người nộp mở báo cáo đơn vị khác thì thấy trang 403 (và trang của chính mình vẫn mở được)', async ({
@@ -55,6 +59,7 @@ test('người xem không có nút Lưu hay Nộp trên chính báo cáo mà ng�
   page,
   request,
 }) => {
+  boQuaNeuKhongResetDuoc()
   // Báo cáo phải đang ở trạng thái SỬA ĐƯỢC (nháp). Chọn một báo cáo đã duyệt thì `suaDuoc` false
   // vì TRẠNG THÁI, và ca sẽ xanh mà không nói gì về quyền — đúng kiểu "ca chỉ chứng minh một thứ
   // tồn tại" mà sáu vòng của Task 26 phải trả giá.

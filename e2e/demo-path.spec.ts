@@ -12,8 +12,10 @@ import { expect, test, type Locator, type Page } from '@playwright/test'
 
 import {
   DON_VI_U22,
+  boQuaNeuKhongResetDuoc,
   dangNhap,
   idBaoCao,
+  nopBaoCaoQuaApi,
   resetDemo,
   tokenApi,
   tranNgang,
@@ -77,6 +79,7 @@ test.describe('phân đoạn 2 của buổi demo', () => {
     browser,
     request,
   }) => {
+    boQuaNeuKhongResetDuoc()
     const nguoiNop = await browser.newContext()
     const admin = await browser.newContext()
     const p1 = await nguoiNop.newPage()
@@ -173,7 +176,15 @@ test.describe('phân đoạn 2 của buổi demo', () => {
     await p1.getByRole('dialog').getByRole('button', { name: 'Nộp' }).click()
     await expect(p1.getByText('Đã nộp lại 08/2026')).toBeVisible()
 
-    // ── 8. Admin duyệt, dashboard đổi số NGAY, không một lần sleep nào ─────────────────────────
+    // ── 8. Admin duyệt, dashboard ra 22 ───────────────────────────────────────────────────────
+    // `reload()` ở đây là thao tác THẬT của người duyệt (báo cáo vừa được nộp lại từ tab khác,
+    // trình duyệt này chưa biết) và nó vẫn được giữ. NHƯNG phải nói đúng cái nó KHÔNG làm:
+    //
+    // Q1 (vòng sửa 1): `reload()` dựng lại `QueryClient` từ số không, nên mọi khẳng định sau đây
+    // đọc từ một lượt fetch NGUỘI. Chúng KHÔNG nói được gì về `invalidateReportQueries` — người
+    // soát chứng minh bằng M5b (vô hiệu hoá toàn bộ lớp làm mới cache) mà cả 5 ca vẫn xanh.
+    // Comment cũ ở đây tự nhận là canh lớp cache; đó là một lời hứa sai và đã bị gỡ.
+    // Lớp cache nay có ca RIÊNG ngay bên dưới, chạy trên cảnh KHÔNG có reload.
     await p2.reload()
     await p2.getByRole('button', { name: 'Duyệt' }).click()
     await p2.getByRole('dialog').getByRole('button', { name: 'Duyệt' }).click()
@@ -182,15 +193,79 @@ test.describe('phân đoạn 2 của buổi demo', () => {
     await p2.getByRole('link', { name: 'Xem dashboard' }).click()
     await p2.waitForURL('**/dashboard')
 
-    // KHÔNG waitForTimeout: invalidateReportQueries phải làm dashboard đổi số ngay.
     await expect(p2.getByText('Tổng từ 22 báo cáo đã duyệt')).toBeVisible()
-    // Và đổi ĐÚNG LƯỢNG: "không còn là 21" chưa đủ, con số phải cộng thêm đúng LTI của đơn vị vừa
-    // được duyệt. Đây là chỗ phân biệt "cache đã làm mới" với "cache trả về số nào cũng được".
+    // Đổi ĐÚNG LƯỢNG: "không còn là 21" chưa đủ, con số phải cộng thêm đúng LTI của đơn vị vừa
+    // được duyệt — vế này canh phép cộng phía server, không canh cache.
     await expect(oKpi(p2, 'LTI trong kỳ')).not.toContainText('—')
     expect(await soKpi(p2, 'LTI trong kỳ')).toBe((ltiTruoc ?? 0) + (ltiP05 ?? 0))
 
     await nguoiNop.close()
     await admin.close()
+  })
+
+  // ────────────────────────────────────────────────────────────────────────────────────────────
+  // Q1 (vòng sửa 1) — lớp LÀM MỚI CACHE, đo trên cảnh KHÔNG tải lại trang.
+  //
+  // Vì sao phải có ca riêng: ca demo ở trên gọi `p2.reload()` trước khi duyệt, mà `reload()` dựng
+  // lại `QueryClient` từ số không. Sau đó mọi con số đọc được đều là fetch nguội, nên vô hiệu hoá
+  // TOÀN BỘ `invalidateReportQueries` vẫn 5/5 xanh (M5b). Dạng mù (b): một lớp ở giữa che mất
+  // đúng thứ đang cần đo.
+  //
+  // Cảnh dưới đây là cảnh khán giả buổi demo sẽ nhìn: một tab duy nhất, không F5 lần nào —
+  // admin đứng ở dashboard (số 21 đã nằm trong cache), đi duyệt, rồi bấm "Xem dashboard" quay về.
+  // `staleTime: 30_000` (app/queryClient.ts) giữ nguyên con số 21 trên màn suốt 30 giây; thứ DUY
+  // NHẤT làm nó thành 22 trong khoảng đó là một lượt invalidate. Không có invalidate ⇒ ca ĐỎ.
+  // ────────────────────────────────────────────────────────────────────────────────────────────
+  test('Q1 — duyệt xong, dashboard đổi 21→22 NGAY mà KHÔNG tải lại trang (lớp làm mới cache)', async ({
+    page,
+    request,
+  }) => {
+    boQuaNeuKhongResetDuoc()
+    const idP05 = await idBaoCao(request, await tokenApi(request, 'admin@ptsc.local'), DON_VI_U22)
+    // Dựng cảnh NGOÀI trình duyệt đang đo: nếu nộp bằng chính tab này thì lượt
+    // `invalidateReportQueries` của cú nộp cũng lẫn vào phép đo.
+    await nopBaoCaoQuaApi(request, await tokenApi(request, 'u22@ptsc.local'), idP05)
+
+    await dangNhap(page, 'admin@ptsc.local')
+    await page.waitForURL('**/dashboard')
+    await expect(page.getByText('Tổng từ 21 báo cáo đã duyệt')).toBeVisible()
+    const ltiTruoc = await soKpi(page, 'LTI trong kỳ')
+    expect(ltiTruoc).not.toBeNull()
+    // Mốc tính tuổi cache: từ giây này, `['dashboard','summary','2026-08']` mang con số 21 và còn
+    // TƯƠI trong 30 s.
+    const mocCache = Date.now()
+
+    await page.getByRole('link', { name: 'Duyệt báo cáo' }).click()
+    await page.waitForURL('**/reports')
+    await expect(page.locator('tbody tr')).toHaveCount(1)
+    await hangKy(page, '08/2026').getByRole('link', { name: 'Mở' }).click()
+    await page.waitForURL(`**/reports/${idP05}`)
+
+    // Báo cáo đang `submitted` ⇒ không sửa được ⇒ ô là `<td>` chỉ-đọc, đọc bằng innerText.
+    const ltiP05 = doSoVi(await oChiTieu(page, 'B-2.2', 'Tháng này').innerText())
+    expect(ltiP05).not.toBeNull()
+
+    await page.getByRole('button', { name: 'Duyệt' }).click()
+    await page.getByRole('dialog').getByRole('button', { name: 'Duyệt' }).click()
+    await page.getByRole('link', { name: 'Xem dashboard' }).click()
+    await page.waitForURL('**/dashboard')
+
+    // KHÔNG `reload()`, KHÔNG `waitForTimeout`. Mọi thứ trên màn lúc này đi qua cùng một
+    // `QueryClient` đã cầm sẵn con số 21.
+    await expect(page.getByText('Tổng từ 22 báo cáo đã duyệt')).toBeVisible()
+    await expect(page.getByText('Tổng từ 21 báo cáo đã duyệt')).toHaveCount(0)
+    expect(await soKpi(page, 'LTI trong kỳ')).toBe((ltiTruoc ?? 0) + (ltiP05 ?? 0))
+
+    // Bằng chứng ca này CÓ THỂ giết được đột biến, không phải xanh nhờ may: nếu cả đoạn trên chạy
+    // lâu hơn `staleTime` thì react-query tự refetch lúc mount và con số 22 sẽ tới nơi dù
+    // `invalidateReportQueries` có là no-op hay không — lúc đó ca thành xanh giả. Chốt lại bằng
+    // một trần thời gian có lề rộng.
+    const troi = Date.now() - mocCache
+    expect(
+      troi,
+      `đoạn đo mất ${troi}ms — phải ở xa dưới staleTime 30 000ms, nếu không con số 22 có thể đến ` +
+        'từ một lượt refetch vì hết hạn chứ không phải từ invalidateReportQueries',
+    ).toBeLessThan(20_000)
   })
 
   // C1 + C-T25/1: vòng lặp phải có `/reports/:id` (form FM01 — màn RỘNG NHẤT) và `/dashboard`
@@ -265,6 +340,7 @@ test.describe('phân đoạn 2 của buổi demo', () => {
     page,
     request,
   }) => {
+    boQuaNeuKhongResetDuoc()
     const idP05 = await idBaoCao(request, await tokenApi(request, 'admin@ptsc.local'), DON_VI_U22)
     await dangNhap(page, 'u22@ptsc.local')
     await page.goto(`/reports/${idP05}`)
@@ -313,76 +389,111 @@ test.describe('phân đoạn 2 của buổi demo', () => {
     await expect(khung).toBeVisible()
   })
 
-  test('C-T24/2 — hộp thoại z-50 nằm trên MỌI lớp dính, đo bằng phép bắn tia trên pixel', async ({
+  // Q2 + Q4 (vòng sửa 1). Hai thứ đổi so với bản đầu:
+  //
+  // Q2 — bản đầu khẳng định `zIndex === '50'` và tìm lớp phủ bằng selector `div.fixed.inset-0.z-50`.
+  // Cả hai đóng băng HIỆN TRẠNG: đổi `z-50` thành `z-[70]` — một bản sửa ĐÚNG HƠN, đẩy hộp thoại
+  // lên cao hơn nữa — làm ca ĐỎ (M6c). Đó là dạng mù (d): ca phạt đúng người sửa đúng. Tính chất
+  // thật cần canh là "lớp phủ thắng phép bắn tia ở mọi lớp dính", không phải một con số. Nay lớp
+  // phủ được tìm bằng ĐỊNH NGHĨA (tổ tiên `position: fixed` gần nhất của `<dialog open>`) và con
+  // số z-index chỉ còn đi kèm trong thông điệp lỗi để người sửa đọc, không còn bị khẳng định.
+  //
+  // Q4 — tên ca cũ hứa "trên MỌI lớp dính" trong khi chỉ bắn tia HAI điểm tự chọn tay. Nay các lớp
+  // dính được LIỆT KÊ ĐỘNG: mọi phần tử có `position: sticky|fixed`, đang thấy được, và tự chứng
+  // minh là lớp trên cùng tại điểm của nó TRƯỚC khi hộp thoại mở. Thêm một lớp dính mới vào form
+  // thì ca này tự phủ luôn, không phải sửa. Lớp `Toast` KHÔNG có trong danh sách vì nó tự tắt sau
+  // 4 s (`Toast.TOAST_MS`) nên không sống tới lúc hộp thoại mở — xem task-27-report.md "Vòng sửa 1"
+  // mục Q4 cho số đo và lý do không dựng một ca đua với đồng hồ.
+  test('C-T24/2 — hộp thoại nằm trên MỌI lớp dính đang hiện, đo bằng phép bắn tia trên pixel', async ({
     page,
     request,
   }) => {
+    boQuaNeuKhongResetDuoc()
     const idP05 = await idBaoCao(request, await tokenApi(request, 'admin@ptsc.local'), DON_VI_U22)
     await dangNhap(page, 'u22@ptsc.local')
     await page.goto(`/reports/${idP05}`)
     await expect(page.locator('tbody tr')).toHaveCount(62)
 
-    // "Chỉ tiêu" chứ không phải "Tháng này": ở viewport 1024×640, bảng rộng hơn khung
-    // `overflow-auto` của nó nên cột "Tháng này" nằm NGOÀI phần đang thấy — `boundingBox()` vẫn
-    // trả hộp của nó (Playwright không cắt theo khung cha), và điểm giữa hộp đó rơi trúng mục lục
-    // bên phải. Cột đầu luôn nằm trong tầm nhìn ở cả hai viewport, và nó cũng `sticky top-0 z-20`
-    // y hệt — vẫn đúng lớp cần đo.
-    const headerDinh = page.getByRole('columnheader', { name: 'Chỉ tiêu' })
-    const thanhDinh = page.getByRole('button', { name: 'Nộp báo cáo' })
-    await expect(headerDinh).toBeInViewport()
-    await expect(thanhDinh).toBeInViewport()
-    const diem = async (l: Locator) => {
-      const h = await l.boundingBox()
-      if (h === null) throw new Error('không lấy được hộp bao')
-      return { x: Math.round(h.x + h.width / 2), y: Math.round(h.y + h.height / 2) }
-    }
-    const diemHeader = await diem(headerDinh)
-    const diemThanh = await diem(thanhDinh)
+    const nutNop = page.getByRole('button', { name: 'Nộp báo cáo' })
+    await expect(nutNop).toBeInViewport()
 
-    // ĐỐI CHỨNG ÂM trước: khi CHƯA mở hộp thoại, hai điểm đó phải trúng đúng hai lớp dính. Không
-    // có bước này thì phép đo sau chỉ chứng minh "toạ độ trỏ vào chỗ trống".
-    const truoc = await page.evaluate(
-      ([a, b]) => {
-        const ten = (e: Element | null) => (e ? `${e.tagName.toLowerCase()}:${(e.textContent ?? '').slice(0, 24)}` : 'null')
-        return [
-          ten(document.elementFromPoint(a.x, a.y)),
-          ten(document.elementFromPoint(b.x, b.y)),
-        ]
-      },
-      [diemHeader, diemThanh],
-    )
-    expect(truoc[0], 'điểm đo không trúng header cột dính').toContain('Chỉ tiêu')
-    expect(truoc[1], 'điểm đo không trúng thanh dưới dính').toContain('Nộp báo cáo')
+    // BƯỚC 1 — liệt kê lớp dính và TỰ KIỂM từng lớp bằng chính phép bắn tia, khi chưa có hộp thoại.
+    // Lớp nào không tự chứng minh được là "trên cùng tại điểm của nó" thì bị loại (đang bị che, bị
+    // cắt khỏi khung `overflow`, hoặc nằm ngoài tầm nhìn) — giữ nó lại chỉ tạo ra một khẳng định
+    // trỏ vào chỗ trống.
+    const lopDinh = await page.evaluate(() => {
+      const rong = document.documentElement.clientWidth
+      const cao = document.documentElement.clientHeight
+      const ra: { x: number; y: number; ten: string; viTri: string; z: string }[] = []
+      for (const el of Array.from(document.querySelectorAll<HTMLElement>('body *'))) {
+        const cs = getComputedStyle(el)
+        if (cs.position !== 'sticky' && cs.position !== 'fixed') continue
+        const r = el.getBoundingClientRect()
+        // Cắt hộp theo tầm nhìn rồi mới lấy tâm: `getBoundingClientRect` KHÔNG bị khung
+        // `overflow` của cha cắt, nên tâm hộp thô có thể rơi hẳn ra ngoài màn.
+        const x = Math.round((Math.max(r.left, 0) + Math.min(r.right, rong)) / 2)
+        const y = Math.round((Math.max(r.top, 0) + Math.min(r.bottom, cao)) / 2)
+        if (Math.min(r.right, rong) - Math.max(r.left, 0) < 4) continue
+        if (Math.min(r.bottom, cao) - Math.max(r.top, 0) < 4) continue
+        const tren = document.elementFromPoint(x, y)
+        if (tren === null || !(el === tren || el.contains(tren))) continue
+        ra.push({
+          x,
+          y,
+          ten: `${el.tagName.toLowerCase()} "${(el.textContent ?? '').trim().slice(0, 20)}"`,
+          viTri: cs.position,
+          z: cs.zIndex,
+        })
+      }
+      return ra
+    })
 
-    await thanhDinh.click()
-    const hop = page.getByRole('dialog')
-    await expect(hop).toBeVisible()
+    // Không có lớp nào thì ca này không canh gì cả — phải đổ, không được xanh rỗng.
+    expect(
+      lopDinh.length,
+      'không tìm thấy lớp dính nào đang hiện — form FM01 phải có header cột dính và thanh dưới dính',
+    ).toBeGreaterThanOrEqual(3)
+    // Và phải có đủ CẢ HAI loại mà C-T24/2 gọi tên: header cột (sticky, z dương) và thanh dưới.
+    expect(lopDinh.some((l) => l.ten.includes('Chỉ tiêu')), `lớp dính đo được: ${JSON.stringify(lopDinh)}`).toBe(true)
+    expect(lopDinh.some((l) => l.ten.includes('Nộp báo cáo')), `lớp dính đo được: ${JSON.stringify(lopDinh)}`).toBe(true)
 
-    // Phép đo thật: phần tử NẰM TRÊN CÙNG tại đúng hai điểm đó phải thuộc lớp phủ của hộp thoại.
-    // `Dialog` cố ý KHÔNG gọi `showModal()` nên không có top-layer — `z-50` là thứ duy nhất giữ nó
-    // trên `z-20` của header dính và trên thanh dưới (`z-auto`). Trước nay chỉ được kiểm bằng suy
-    // luận trên CSS; đây là phép đo trên pixel.
-    const ketQua = await page.evaluate(
-      ([a, b]) => {
-        const lop = document.querySelector('div.fixed.inset-0.z-50')
-        const trong = (x: number, y: number) => {
-          const el = document.elementFromPoint(x, y)
+    // BƯỚC 2 — mở hộp thoại, bắn tia lại vào ĐÚNG những điểm vừa tự kiểm.
+    await nutNop.click()
+    await expect(page.getByRole('dialog')).toBeVisible()
+
+    const ketQua = await page.evaluate((diem) => {
+      // Lớp phủ tìm theo ĐỊNH NGHĨA, không theo tên lớp CSS: tổ tiên `position: fixed` gần nhất của
+      // hộp thoại đang mở. Đổi `z-50` thành bất cứ giá trị nào cũng không làm phép tìm này hỏng.
+      const hop = document.querySelector('dialog[open]')
+      let lop: HTMLElement | null = hop?.parentElement ?? null
+      while (lop !== null && getComputedStyle(lop).position !== 'fixed') lop = lop.parentElement
+      return {
+        coLopPhu: lop !== null,
+        zLopPhu: lop === null ? null : getComputedStyle(lop).zIndex,
+        diem: diem.map((d) => {
+          const el = document.elementFromPoint(d.x, d.y)
           return {
+            ...d,
             thuocLopPhu: lop !== null && el !== null && lop.contains(el),
-            the: el ? `${el.tagName.toLowerCase()}:${(el.textContent ?? '').slice(0, 24)}` : 'null',
+            tren: el === null ? 'null' : `${el.tagName.toLowerCase()} "${(el.textContent ?? '').trim().slice(0, 20)}"`,
           }
-        }
-        return { header: trong(a.x, a.y), thanh: trong(b.x, b.y), zIndex: lop ? getComputedStyle(lop).zIndex : null }
-      },
-      [diemHeader, diemThanh],
-    )
-    expect(ketQua.zIndex, 'lớp phủ hộp thoại phải có z-index tường minh').toBe('50')
-    expect(ketQua.header.thuocLopPhu, `header cột dính vẫn nổi trên hộp thoại: ${ketQua.header.the}`).toBe(true)
-    expect(ketQua.thanh.thuocLopPhu, `thanh dưới dính vẫn nổi trên hộp thoại: ${ketQua.thanh.the}`).toBe(true)
+        }),
+      }
+    }, lopDinh)
+
+    expect(ketQua.coLopPhu, 'hộp thoại phải nằm trong một lớp phủ position:fixed').toBe(true)
+    for (const d of ketQua.diem) {
+      expect(
+        d.thuocLopPhu,
+        `lớp dính ${d.ten} (${d.viTri}, z=${d.z}) tại (${d.x},${d.y}) vẫn nổi trên hộp thoại ` +
+          `(z=${ketQua.zLopPhu}) — tia trúng ${d.tren}`,
+      ).toBe(true)
+    }
 
     // Và phần tử bên dưới KHÔNG CÒN bấm được — vế "nút của nó làm gì" của lớp phủ. Bấm vào đúng
     // toạ độ nút "Nộp báo cáo" lúc này không được mở thêm hộp thoại thứ hai.
-    await page.mouse.click(diemThanh.x, diemThanh.y)
+    const diemNut = lopDinh.find((l) => l.ten.includes('Nộp báo cáo'))!
+    await page.mouse.click(diemNut.x, diemNut.y)
     await expect(page.getByRole('dialog')).toHaveCount(1)
 
     await page.keyboard.press('Escape')
