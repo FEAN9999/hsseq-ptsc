@@ -12,7 +12,17 @@ import { useToast } from '../../components/ui/Toast'
 export function useCopyMissing() {
   const hienToast = useToast()
   return async function saoChepDanhSachChuaNop(tenDonViChuaNop: string[]): Promise<void> {
-    await navigator.clipboard.writeText(tenDonViChuaNop.join('\n'))
-    hienToast(`Đã sao chép ${tenDonViChuaNop.length} đơn vị`)
+    // task-26-fix-1.md Q7 [NHẸ]: `writeText` reject là chế độ hỏng CÓ TÀI LIỆU của API này (mất
+    // focus tài liệu, ngữ cảnh không bảo mật, người dùng chặn quyền) — không phải tình huống bịa.
+    // Đã `await` (tức đã quyết định quan tâm tới kết quả) nên phải xử lý trọn vẹn, không bỏ dở nửa
+    // chừng: bọc try/catch để (1) người dùng luôn thấy toast dù thành công hay hỏng, và (2) Promise
+    // trả về KHÔNG BAO GIỜ reject nữa — nơi gọi (Status.tsx: `onClick={() => saoChep(...)}`) vứt bỏ
+    // Promise này an toàn, không còn unhandled rejection.
+    try {
+      await navigator.clipboard.writeText(tenDonViChuaNop.join('\n'))
+      hienToast(`Đã sao chép ${tenDonViChuaNop.length} đơn vị`)
+    } catch {
+      hienToast('Không sao chép được, thử lại')
+    }
   }
 }

@@ -29,9 +29,10 @@ beforeEach(() => {
 })
 
 // ---- Fixture: 4 kỳ (06..09/2026, is_open ĐÚNG như seed thật — 08 VÀ 09 cùng true, "kỳ đang mở"
-// phải là kỳ CUỐI trong số đó — carry C7), 4 đơn vị. U22 "PTSC Đình Vũ" + U23 "PTSC Quảng Ngãi"
+// phải là kỳ CUỐI trong số đó — carry C7), 5 đơn vị. U22 "PTSC Đình Vũ" + U23 "PTSC Quảng Ngãi"
 // chưa nộp ở kỳ đang mở (2026-09) — đúng NGUYÊN VĂN hai tên brief đòi trong ca sao chép clipboard.
-// U05 có is_late=true ở 2026-08 cho ca "Đã nộp (muộn)". ----
+// U05 có is_late=true ở 2026-08 cho ca "Đã nộp (muộn)". P05 "Ban dự án Lô B" (task-26-fix-1.md Q6)
+// mang draft (06-08) và returned (09) — hai trạng thái trước đây CHƯA TỪNG render trong ca nào. ----
 
 const PERIODS = [
   { period_key: '2026-06', is_open: false },
@@ -89,6 +90,24 @@ const DEFAULT_UNITS: StatusUnit[] = [
       o('2026-07', 'approved', 'seed', false, 723),
       o('2026-08', 'approved', 'seed', false, 823),
       o('2026-09', null, null, null, null), // chưa nộp ở kỳ đang mở
+    ],
+  },
+  // task-26-fix-1.md Q6: `returned` (Trả lại) CHƯA TỪNG được render trong bất kỳ ca nào của lưới
+  // trước bản vá này — DEFAULT_UNITS chỉ có approved/submitted/null. "Trả lại" nằm ngay trong kịch
+  // bản cổng ra Phase 2 của chính brief này (admin trả lại -> sửa -> nộp lại -> duyệt), và /status
+  // là màn DUY NHẤT hiển thị trạng thái đó theo chiều ngang thời gian. Thêm ở ĐÚNG cột "kỳ đang mở"
+  // (2026-09) — "đúng cột người xem demo nhìn nhiều nhất" theo lời người soát — cùng `draft` ở ba kỳ
+  // trước để mẫu không chỉ có MỘT trạng thái mới. `report_id` khác null ở MỌI kỳ (kể cả draft/trả
+  // lại): cả hai đều là báo cáo CÓ THẬT (đã tạo/đã nộp rồi bị trả lại), khác "chưa nộp" — không lẫn
+  // vào danh sách nút Sao chép hay ô "không bấm được".
+  {
+    code: 'P05',
+    name: 'Ban dự án Lô B',
+    cells: [
+      o('2026-06', 'draft', 'live', false, 610),
+      o('2026-07', 'draft', 'live', false, 710),
+      o('2026-08', 'draft', 'live', false, 810),
+      o('2026-09', 'returned', 'live', false, 910), // kỳ đang mở — cột người xem demo nhìn nhiều nhất
     ],
   },
 ]
@@ -157,6 +176,20 @@ describe('/status', () => {
     expect(await screen.findByText('Đã sao chép 2 đơn vị')).toBeTruthy()
   })
 
+  // task-26-fix-1.md Q7 [NHẸ]: `writeText` reject (mất focus tài liệu, ngữ cảnh không bảo mật,
+  // người dùng chặn quyền — chế độ hỏng CÓ TÀI LIỆU, không phải tình huống bịa) trước bản vá này im
+  // lặng hoàn toàn: không toast, không báo lỗi, một unhandled rejection quan sát được ngay trong
+  // Vitest (`useCopyMissing.ts` đã `await` nhưng nơi gọi `onClick={() => saoChep(...)}` vứt bỏ
+  // Promise). Ca này khoá: người dùng phải thấy MỘT toast báo lỗi, không im lặng.
+  it('Q7: clipboard bị từ chối — hiện toast báo lỗi, không im lặng và không unhandled rejection', async () => {
+    moiApi()
+    const viet = vi.fn().mockRejectedValue(new Error('không có quyền clipboard'))
+    vi.stubGlobal('navigator', { clipboard: { writeText: viet } })
+    renderStatus()
+    await userEvent.click(await screen.findByRole('button', { name: /Sao chép danh sách chưa nộp/ }))
+    expect(await screen.findByText('Không sao chép được, thử lại')).toBeTruthy()
+  })
+
   // C2 (task-26-carry.md): thay hai khẳng định className-mù của brief bằng resolveCascadeWinner.
   it('chip viền rỗng = nạp từ file, chip đặc = nộp sống', async () => {
     moiApi()
@@ -165,6 +198,18 @@ describe('/status', () => {
     expect(resolveCascadeWinner(o1.className, 'background-color')).toBe('bg-transparent')
     const o2 = screen.getByTestId('o-U22-2026-08') // approved + live -> KHÔNG outline
     expect(resolveCascadeWinner(o2.className, 'background-color')).not.toBe('bg-transparent')
+  })
+
+  // task-26-fix-1.md Q5 (Phần D2 báo cáo soát, mở status.html gốc): nửa ĐẦU dòng "Chú giải" mockup
+  // là chìa khoá DUY NHẤT trên toàn màn cho ký hiệu viền rỗng/đặc — bỏ nó là mất thông tin thật
+  // (KIND_BG.missing của Chip.tsx cũng bg-transparent, nên có HAI loại chip nền trong suốt trên
+  // màn, chỉ khác màu viền, không gì giải thích nếu thiếu dòng này). Nửa sau (liệt màu trạng thái)
+  // vẫn ĐÚNG là bỏ — không ca nào đòi lại nó.
+  it('Q5: hiện lại câu giải thích viền rỗng = nạp từ file, đặc = nộp trên hệ thống', async () => {
+    moiApi()
+    renderStatus()
+    expect(await screen.findByText(/nạp từ file tổng hợp/)).toBeTruthy()
+    expect(screen.getByText(/nộp trên hệ thống/)).toBeTruthy()
   })
 
   it('is_late hiện Đã nộp (muộn)', async () => {
@@ -209,6 +254,33 @@ describe('/status', () => {
     expect(o1.closest('a')).toBeNull()
   })
 
+  // task-26-fix-1.md Q4: HAI nguồn chân lý "chưa nộp" trên CÙNG một trang trước bản vá này —
+  // StatusGrid.tsx dùng report_id (carry C8, ca ngay trên), donViChuaNop (Status.tsx) lại dùng
+  // state. Hai vị từ luôn trùng ở dữ liệu THẬT (cùng ra từ một hàng Report outer-join) nên không ca
+  // cũ nào phân biệt được — dựng lại đúng cảnh lệch cố ý của ca C8 trên (state khác null, report_id
+  // null) nhưng ở kỳ ĐANG MỞ: trước bản vá, `state==='approved'` khiến donViChuaNop LOẠI đơn vị
+  // này, nút Sao chép còn không hiện (donViChuaNop.length === 0). Sau bản vá, report_id null khiến
+  // nó VẪN nằm trong danh sách — cùng nguồn chân lý report_id với lưới, khớp đúng những gì lưới hiện
+  // ("Chưa nộp, không bấm được").
+  it('Q4: report_id null nhưng state khác null ở kỳ đang mở — đơn vị VẪN nằm trong danh sách Sao chép (cùng nguồn chân lý report_id với lưới)', async () => {
+    const donViLa: StatusUnit[] = [
+      {
+        code: 'U99',
+        name: 'Đơn vị lạ',
+        cells: [o('2026-06', 'approved', 'seed', false, null)],
+      },
+    ]
+    const viet = vi.fn().mockResolvedValue(undefined)
+    vi.stubGlobal('navigator', { clipboard: { writeText: viet } })
+    moiApi({
+      periods: [{ period_key: '2026-06', is_open: true }],
+      trangThai: { periods: ['2026-06'], units: donViLa },
+    })
+    renderStatus()
+    await userEvent.click(await screen.findByRole('button', { name: /Sao chép danh sách chưa nộp/ }))
+    expect(viet).toHaveBeenCalledWith('Đơn vị lạ')
+  })
+
   it('KHÔNG có cột Nộp muộn và KHÔNG có nút xuất file', async () => {
     moiApi()
     renderStatus()
@@ -237,7 +309,7 @@ describe('/status', () => {
     const tieuDe = (await screen.findAllByRole('columnheader')).map((h) => h.textContent)
     const dongTong = screen.getByText('Tổng theo kỳ').closest('tr')!
     const oCells = within(dongTong).getAllByRole('cell').map((c) => c.textContent)
-    expect(oCells[tieuDe.indexOf('06/2026')]).toBe('4 duyệt')
+    expect(oCells[tieuDe.indexOf('06/2026')]).toBe('4 duyệt · 1 nháp')
   })
 
   // Tự phát hiện qua mutation-test: tự mutate thứ tự khai NHOM_TONG (StatusGrid.tsx, đổi chỗ
@@ -251,8 +323,24 @@ describe('/status', () => {
     const tieuDe = (await screen.findAllByRole('columnheader')).map((h) => h.textContent)
     const dongTong = screen.getByText('Tổng theo kỳ').closest('tr')!
     const oCells = within(dongTong).getAllByRole('cell').map((c) => c.textContent)
-    // U01 duyệt(seed), U05 nộp(live,muộn), U22 duyệt(live), U23 duyệt(seed) -> 3 duyệt · 1 nộp
-    expect(oCells[tieuDe.indexOf('08/2026')]).toBe('3 duyệt · 1 nộp')
+    // U01 duyệt(seed), U05 nộp(live,muộn), U22 duyệt(live), U23 duyệt(seed), P05 nháp -> 3 duyệt ·
+    // 1 nộp · 1 nháp
+    expect(oCells[tieuDe.indexOf('08/2026')]).toBe('3 duyệt · 1 nộp · 1 nháp')
+  })
+
+  // task-26-fix-1.md Q6: KHÔNG ca nào trước bản vá này đọc cột "kỳ đang mở" (09/2026) của dòng Tổng
+  // — đúng cột người xem demo nhìn nhiều nhất. Đột biến Đ10 (đổi nhãn nhóm 'chưa' thành rác) SỐNG vì
+  // lẽ đó: 06/2026 và 08/2026 (hai cột duy nhất có ca trước đây) không đơn vị nào null ở đó, nên
+  // nhóm 'chưa' chưa từng xuất hiện trong bất kỳ khẳng định nào. Ca này khoá đúng cột đó, với ĐỦ NĂM
+  // nhóm cùng khác 0 một lượt (P05 'trả lại' mới thêm đứng vào đúng vị trí thứ tư theo NHOM_TONG).
+  it('Q6: dòng Tổng theo kỳ ở CỘT KỲ ĐANG MỞ (09/2026) — đủ cả "trả lại" và "chưa", đúng thứ tự NHOM_TONG', async () => {
+    moiApi()
+    renderStatus()
+    const tieuDe = (await screen.findAllByRole('columnheader')).map((h) => h.textContent)
+    const dongTong = screen.getByText('Tổng theo kỳ').closest('tr')!
+    const oCells = within(dongTong).getAllByRole('cell').map((c) => c.textContent)
+    // U01 duyệt, U05 nộp, U22 chưa, U23 chưa, P05 trả lại -> 1 duyệt · 1 nộp · 1 trả lại · 2 chưa
+    expect(oCells[tieuDe.indexOf('09/2026')]).toBe('1 duyệt · 1 nộp · 1 trả lại · 2 chưa')
   })
 
   // ---- Ngoài brief — carry C6/C7: from/to suy từ GET /templates/FM01/periods, không khoá cứng.
@@ -326,11 +414,38 @@ describe('/status', () => {
     expect(theo('09/2026')).toBe('Đã nộp')
   })
 
-  // ---- Ba số đo NGUYÊN VĂN của brief Step 2 (không phải đếm/mù — width/height không có utility
-  // nào khác cùng thuộc tính cạnh tranh trên CHÍNH các phần tử này nên className.toContain hợp lệ,
-  // khác tình huống C2 của Chip nơi outline+kind cộng dồn hai utility background-color).
+  // task-26-fix-1.md Q6: đột biến Đ9 (bỏ 'returned' khỏi kindTrangThai — StatusGrid.tsx) SỐNG vì
+  // không ca nào trước bản vá này render một ô 'returned': hậu quả thật của Đ9 là ô hiện SAI chip
+  // "Chưa nộp" trong khi VẪN bấm được (report_id khác null — hai cơ chế độc lập, kindTrangThai chỉ
+  // quyết định NHÃN, report_id quyết định CLICK được hay không). Ca này khoá cả hai cùng lúc trên
+  // ĐÚNG một ô: nhãn phải là "Trả lại" (không phải "Chưa nộp") VÀ ô đó phải là <a> thật.
+  it('Q6: ô "Trả lại" hiện đúng nhãn (không lẫn "Chưa nộp") và VẪN bấm được', async () => {
+    moiApi()
+    renderStatus()
+    const tieuDe = (await screen.findAllByRole('columnheader')).map((h) => h.textContent)
+    const dong = screen.getByText('Ban dự án Lô B').closest('tr')!
+    const oCells = within(dong).getAllByRole('cell').map((c) => c.textContent)
+    const theo = (ky: string) => oCells[tieuDe.indexOf(ky)]
+    expect(theo('06/2026')).toBe('Nháp')
+    expect(theo('07/2026')).toBe('Nháp')
+    expect(theo('08/2026')).toBe('Nháp')
+    expect(theo('09/2026')).toBe('Trả lại')
+    const oTraLai = screen.getByTestId('o-P05-2026-09')
+    expect(oTraLai.closest('a')).not.toBeNull()
+    expect(oTraLai.getAttribute('aria-disabled')).not.toBe('true')
+  })
 
-  it('cột Đơn vị rộng đúng 260px và dính trái (sticky) — brief Step 2', async () => {
+  // ---- Ba ca "số đo" brief Step 2 — task-26-fix-1.md Q8/[B-8]: TÊN CŨ ("rộng đúng 260px", "cao
+  // đúng 40px") tự xưng là số đo BỐ CỤC, nhưng jsdom KHÔNG có layout engine — ba ca này chỉ đọc
+  // được CHUỖI `className` có chứa đúng utility hay không (`w-[260px]`/`h-10`/…), không đọc được
+  // pixel THẬT trên màn hình (getBoundingClientRect trong jsdom luôn trả 0). Khác tình huống C2 của
+  // Chip (outline+kind cộng dồn hai utility CÙNG thuộc tính, className.toContain hoá mù vì utility
+  // thắng cuối mới là cái thật thắng) — ở đây mỗi phần tử chỉ có ĐÚNG MỘT utility mỗi thuộc tính
+  // width/height nên đọc chuỗi không mù theo kiểu đó, nhưng vẫn KHÔNG PHẢI đo bố cục thật. Đổi tên
+  // đúng thứ ba ca này THẬT SỰ khẳng định, để không ai đọc tên rồi tưởng bố cục đã có người canh —
+  // Task 27 (Playwright) sở hữu việc đo pixel thật, không sửa thành ca thật ở vòng này.
+
+  it('className cột Đơn vị chứa w-[260px]/sticky/left-0 (brief Step 2 — CHỈ đọc chuỗi class, KHÔNG đo bố cục thật, xem Task 27)', async () => {
     moiApi()
     renderStatus()
     const th = await screen.findByRole('columnheader', { name: 'Đơn vị' })
@@ -339,14 +454,14 @@ describe('/status', () => {
     expect(th.className).toContain('left-0')
   })
 
-  it('mỗi cột kỳ rộng đúng 104px — brief Step 2', async () => {
+  it('className mỗi cột kỳ chứa w-[104px] (brief Step 2 — CHỈ đọc chuỗi class, KHÔNG đo bố cục thật, xem Task 27)', async () => {
     moiApi()
     renderStatus()
     const th = await screen.findByRole('columnheader', { name: '06/2026' })
     expect(th.className).toContain('w-[104px]')
   })
 
-  it('dòng lưới cao đúng 40px (h-10) — brief Step 2', async () => {
+  it('className dòng lưới chứa h-10 (brief Step 2 — CHỈ đọc chuỗi class, KHÔNG đo bố cục thật, xem Task 27)', async () => {
     moiApi()
     renderStatus()
     const dong = (await screen.findByText('PTSC Miền Trung')).closest('tr')!
@@ -375,6 +490,22 @@ describe('/status', () => {
     renderStatus()
     await screen.findByText('PTSC Đình Vũ')
     expect(screen.queryByRole('button', { name: /Sao chép danh sách chưa nộp/ })).toBeNull()
+  })
+
+  // task-26-fix-1.md Q2 — `is_open` là cột boolean quản trị đặt tay (`templates.py:113`), "không
+  // kỳ nào đang mở" là một trạng thái CSDL BÌNH THƯỜNG (giữa hai kỳ, hoặc mẫu vừa seed chưa mở kỳ
+  // nào) chứ không phải tình huống bịa. `kyDangMo` trả `undefined` -> `den` `undefined` -> `enabled`
+  // của `tk` là `false` -> `/status` KHÔNG BAO GIỜ được gọi -> `tk.data` mãi `undefined` -> nhánh
+  // skeleton quay MÃI, không một chữ giải thích. Phải hiện câu tiếng Việt nói đúng chuyện gì xảy ra.
+  it('không kỳ nào đang mở: hiện câu giải thích, KHÔNG quay skeleton vĩnh viễn (Q2/[B-2])', async () => {
+    const periodsChuaMo = [
+      { period_key: '2026-06', is_open: false },
+      { period_key: '2026-07', is_open: false },
+    ]
+    moiApi({ periods: periodsChuaMo })
+    renderStatus()
+    expect(await screen.findByText('Chưa có kỳ nào đang mở để hiển thị tình trạng nộp')).toBeTruthy()
+    expect(screen.queryByTestId('skeleton')).toBeNull()
   })
 
   // ---- Tải/lỗi: khuôn ReportDetail.tsx/Dashboard.tsx, carry C13.
@@ -463,6 +594,44 @@ describe('/status', () => {
     await waitFor(() => expect(goiThu).toBeGreaterThan(2))
     expect(screen.getByText('PTSC Đình Vũ')).toBeTruthy()
     expect(screen.queryByText('Không tải được dữ liệu')).toBeNull()
+  })
+
+  // task-26-fix-1.md Q1 [CHẶN] — lớp lỗi "lỗi nền phá màn đang có dữ liệu" (carry C13 mục 2) lần
+  // thứ TƯ, qua một cửa MỚI: `tu`/`den` suy từ `ky.data` rồi nhét vào `queryKey` của `tk`. Khi
+  // `/templates/FM01/periods` làm mới Ở NỀN và danh sách kỳ ĐỔI (quản trị mở kỳ mới — việc hằng
+  // tháng), `den` đổi -> `queryKey` của `tk` đổi -> đó là MỘT QUERY MỚI, `tk.data` thành `undefined`
+  // -> rơi thẳng vào nhánh skeleton, nuốt mất lưới người dùng đang đọc. Khác C13 mục 2 (đường lỗi,
+  // đã có tấm chắn `loi && chưa có dữ liệu`): đây là đường TẢI LẠI, không đi qua `loi` một chút nào.
+  it('quản trị mở kỳ mới ở NỀN trong lúc người dùng đang xem: LƯỚI VẪN CÒN, không bị skeleton nuốt (Q1/[B-1])', async () => {
+    let goiThu = 0
+    const PERIODS_MOI = [...PERIODS, { period_key: '2026-10', is_open: true }] // kỳ mới vừa mở
+    const f = vi.fn((url: string) => {
+      goiThu++
+      const laLanDau = goiThu <= 2
+      if (url.includes('/templates/FM01/periods')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => (laLanDau ? PERIODS : PERIODS_MOI),
+        })
+      }
+      if (url.includes('/status?')) {
+        return Promise.resolve({ ok: true, status: 200, json: async () => DEFAULT_STATUS })
+      }
+      throw new Error(`URL không lường trước: ${url}`)
+    })
+    vi.stubGlobal('fetch', f)
+    renderStatus()
+    expect(await screen.findByText('PTSC Đình Vũ')).toBeTruthy()
+
+    await act(async () => {
+      window.dispatchEvent(new Event('visibilitychange'))
+    })
+    await waitFor(() => expect(goiThu).toBeGreaterThan(2))
+    // `den` vừa đổi 09 -> 10 (queryKey của `tk` đổi thật) — lưới PHẢI còn nguyên, không phải
+    // skeleton, dù query thứ hai kỹ thuật là MỘT QUERY MỚI với cache rỗng.
+    expect(screen.getByText('PTSC Đình Vũ')).toBeTruthy()
+    expect(screen.queryByTestId('skeleton')).toBeNull()
   })
 
   // ---- 403 (thiếu status.view — vd. reporter gõ thẳng URL /status).

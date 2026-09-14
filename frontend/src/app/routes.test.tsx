@@ -498,10 +498,15 @@ describe('C3 + C5 (task-26-carry.md): mọi đích điều hướng dẫn tới 
   // toàn đích hợp lệ, ca it.each dưới vẫn xanh dù đã bỏ sót — chỉ so khớp CHÍNH XÁC tập này mới lộ
   // ra thiếu sót đó. `/reports/${cell.report_id}` (StatusGrid.tsx) và `/reports` (Status.tsx, lối
   // thoát 403) là hai đích MỚI Task 26 thêm — cả hai chuẩn hoá trùng vào hai phần tử đã có sẵn từ
-  // trước (không sinh phần tử mới), nên tập kỳ vọng dưới đây KHÔNG đổi so với trước Task 26.
+  // trước (không sinh phần tử mới).
+  // task-26-fix-1.md Q3: `/dashboard` là phần tử MỚI kể từ khi routeScan.ts quét thêm file `.ts`
+  // (trước đây chỉ `.tsx`) — `useChuyenTrangThai.ts:190` có `navigate('/dashboard')` THẬT, từng bị
+  // bỏ sót hoàn toàn. Trước bản vá này, ca này khoá đúng LỖ THỦNG (thiếu `/dashboard`) chứ không
+  // khoá hành vi đúng — nới rộng bộ quét ra đúng mà ca lại đỏ, tự chặn chính bản vá của nó. Tập kỳ
+  // vọng dưới đây cập nhật CÙNG LÚC với bản vá routeScan.ts, không tách rời.
   it('nguồn 4: routeScan.ts quét đúng TẬP đích hiện có (khoá tránh regex hẹp lại mà không ai biết)', () => {
     expect(new Set(DUONG_DAN_TRONG_TRANG)).toEqual(
-      new Set(['/reports', '/reports/1', '/reports/1?from=dashboard&period=1#1']),
+      new Set(['/reports', '/reports/1', '/reports/1?from=dashboard&period=1#1', '/dashboard']),
     )
   })
 

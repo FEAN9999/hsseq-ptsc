@@ -15,13 +15,18 @@ import { fileURLToPath } from 'node:url'
 // frontend/src/app/routeScan.ts -> lên 1 cấp là frontend/src/
 const SRC_DIR = join(dirname(fileURLToPath(import.meta.url)), '..')
 
-function moiFileTsx(dir: string): string[] {
+// task-26-fix-1.md Q3/[B-3]: TÊN CŨ `moiFileTsx` + bộ lọc chỉ `.tsx` đang phát biểu đúng một GIỚI
+// HẠN SAI — carry C5 nguồn 4 viết nguyên văn "quét navigate( và <Link to= trong src/pages và
+// src/features", không nói "trong các file .tsx". File `.ts` (hook, không phải component) vẫn có
+// thể gọi `navigate(...)` y hệt — `features/report/useChuyenTrangThai.ts:190` có
+// `navigate('/dashboard')` THẬT, từng bị bỏ trắng hoàn toàn vì lọc cũ chỉ nhận đuôi `.tsx`.
+function moiFileNguon(dir: string): string[] {
   const ra: string[] = []
   for (const ten of readdirSync(dir)) {
     const p = join(dir, ten)
     if (statSync(p).isDirectory()) {
-      ra.push(...moiFileTsx(p))
-    } else if (ten.endsWith('.tsx') && !ten.endsWith('.test.tsx')) {
+      ra.push(...moiFileNguon(p))
+    } else if (/\.tsx?$/.test(ten) && !/\.test\.tsx?$/.test(ten)) {
       ra.push(p)
     }
   }
@@ -35,9 +40,10 @@ function chuanHoa(duongDanTho: string): string {
   return duongDanTho.replace(/\$\{[^}]*\}/g, '1')
 }
 
-// Bắt CẢ BA kiểu trích dẫn (`, ', ") cho navigate(...) và <Link to=...> — dự án hiện chỉ dùng
-// template literal (`) nhưng không giới hạn theo lịch sử hiện tại: một trang sau đổi sang chuỗi
-// thường ('...'/"...") vẫn phải bắt được, đúng tinh thần "đừng chép tay".
+// Bắt CẢ BA kiểu trích dẫn (`, ', ") cho navigate(...) và <Link to=...> — cả ba đã CÓ THẬT trong
+// dự án (task-26-fix-1.md Q3: `<Link to="/reports">` dấu nháy kép ở Dashboard.tsx:63,
+// ReportDetail.tsx:51/84, Status.tsx:76; dấu nháy đơn ở useChuyenTrangThai.ts), không phải chỉ
+// template literal — bình luận cũ khẳng định sai. Quét cả ba đúng tinh thần "đừng chép tay".
 // Chỉ khớp khi đối số ĐẦU là một chuỗi/template literal (bắt đầu bằng dấu trích dẫn) — navigate(x)
 // với biến động (Login.tsx: navigate(noiBo, ...)) không khớp, ĐÚNG Ý: những đích đó không phải hằng
 // số tĩnh để quét, chúng thuộc "nguồn 2" (đăng nhập) — kiểm bằng chạy THẬT đường đăng nhập, không
@@ -48,7 +54,7 @@ const RE_LINK_TO = /<Link\s[^>]*?\bto=\{?\s*[`'"]([^`'"]*)[`'"]/g
 /** Mọi đích `navigate()`/`<Link to=>` TĨNH trong src/pages + src/features, đã chuẩn hoá — dùng để
  * khẳng định carry C3/C5 (nguồn 4): mỗi đích phải khớp một route thật trong `routeObjects`. */
 export function duongDanDieuHuongTrongTrang(): string[] {
-  const files = [...moiFileTsx(join(SRC_DIR, 'pages')), ...moiFileTsx(join(SRC_DIR, 'features'))]
+  const files = [...moiFileNguon(join(SRC_DIR, 'pages')), ...moiFileNguon(join(SRC_DIR, 'features'))]
   const ra = new Set<string>()
   for (const f of files) {
     const noiDung = readFileSync(f, 'utf-8')

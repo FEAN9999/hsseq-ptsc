@@ -14,9 +14,10 @@
 // kỳ cùng is_open=true (08 và 09/2026) và "kỳ đang mở" theo brief phải là kỳ MỚI NHẤT (09/2026),
 // không phải kỳ open sớm nhất.
 import { Link } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { keepPreviousData, useQuery } from '@tanstack/react-query'
 
 import { api, ApiError } from '../api/client'
+import { Chip } from '../components/ui/Chip'
 import { InlineError } from '../components/ui/InlineError'
 import { Skeleton } from '../components/ui/Skeleton'
 import { StatusGrid, type StatusUnit } from '../features/status/StatusGrid'
@@ -55,10 +56,19 @@ export function Status() {
   const tu = ky.data?.[0]?.period_key
   const den = ky.data ? kyDangMo(ky.data) : undefined
 
+  // task-26-fix-1.md Q1 [CHẶN] (carry C13 mục 2 — lớp lỗi "lỗi nền phá màn đang có dữ liệu", lần
+  // thứ TƯ, qua cửa `queryKey` chứ không qua `error`): `tu`/`den` suy từ `ky.data`, nên khi
+  // `/templates/FM01/periods` làm mới Ở NỀN và danh sách kỳ đổi (quản trị mở kỳ mới), `den` đổi ->
+  // `queryKey` của CHÍNH query này đổi -> không có `placeholderData` thì đó là một query MỚI với
+  // cache rỗng, `data` về `undefined`, nhánh skeleton nuốt mất lưới đang hiển thị. `keepPreviousData`
+  // (TanStack v5, cùng công cụ Dashboard.tsx/useUnits.ts dùng cho đường đổi kỳ) giữ dữ liệu CỦA
+  // queryKey CŨ hiển thị tiếp trong lúc queryKey MỚI đang tải — không ảnh hưởng lần tải ĐẦU (chưa
+  // có gì để giữ) hay nhánh lỗi/403 (đó là hai đường khác, không liên quan `data`).
   const tk = useQuery({
     queryKey: ['status', TEMPLATE, tu, den],
     queryFn: () => api.get<StatusOut>(`/status?template=${TEMPLATE}&from=${tu}&to=${den}`),
     enabled: tu !== undefined && den !== undefined,
+    placeholderData: keepPreviousData,
   })
 
   const saoChep = useCopyMissing()
@@ -100,6 +110,21 @@ export function Status() {
     )
   }
 
+  // task-26-fix-1.md Q2: `is_open` là cột boolean quản trị đặt tay (templates.py:113), "không kỳ
+  // nào đang mở" là trạng thái CSDL BÌNH THƯỜNG (giữa hai kỳ, hoặc mẫu vừa seed chưa mở kỳ nào) —
+  // không phải tình huống không thể xảy ra. Không có nhánh này thì `den === undefined` mãi mãi giữ
+  // `enabled` của `tk` ở `false`, `/status` không bao giờ được gọi, và nhánh skeleton bên dưới quay
+  // VĨNH VIỄN không một chữ giải thích. Đặt TRƯỚC nhánh skeleton — khác nhánh đó (chờ MỘT LẦN rồi
+  // xong), tình huống này sẽ KHÔNG BAO GIỜ tự hết bằng cách chờ.
+  if (ky.data !== undefined && den === undefined) {
+    return (
+      <div>
+        <TieuDe>Tình trạng nộp · {TEMPLATE}</TieuDe>
+        <p className="mt-4 text-table text-sec">Chưa có kỳ nào đang mở để hiển thị tình trạng nộp</p>
+      </div>
+    )
+  }
+
   if (ky.data === undefined || tk.data === undefined) {
     return (
       <div>
@@ -113,8 +138,13 @@ export function Status() {
 
   const data = tk.data
   const kyCuoi = data.periods.at(-1) ?? ''
+  // task-26-fix-1.md Q4: `report_id === null`, KHÔNG `state === null` — cùng nguồn chân lý
+  // StatusGrid.tsx đã dùng (carry C8: report_id, không phải state, quyết định "ô bấm được"/"có báo
+  // cáo"). Hai vị từ trùng nhau ở dữ liệu hiện có (cùng ra từ một hàng Report outer-join) nhưng lệch
+  // nhau là CÓ THỂ — dùng khác vị từ ở hai chỗ cùng một khái niệm trên cùng một trang sẽ để lưới và
+  // nút Sao chép bất đồng về đúng CÙNG một ô.
   const donViChuaNop = data.units.filter(
-    (u) => u.cells.find((c) => c.period_key === kyCuoi)?.state === null,
+    (u) => u.cells.find((c) => c.period_key === kyCuoi)?.report_id === null,
   )
 
   return (
@@ -133,6 +163,18 @@ export function Status() {
       </div>
       <p className="text-sec text-table mb-5">
         Từ {formatPeriod(data.periods[0])} (kỳ đầu có dữ liệu) đến {formatPeriod(kyCuoi)} (kỳ đang mở)
+      </p>
+      {/* task-26-fix-1.md Q5 (Phần D2 báo cáo soát): CHỈ khôi phục nửa ĐẦU dòng "Chú giải" mockup —
+          nửa sau (liệt màu từng trạng thái) dư thừa thật vì mỗi chip đã tự mang chữ của nó, bỏ đúng.
+          Nửa đầu là CHÌA KHOÁ DUY NHẤT trên toàn màn cho ký hiệu viền rỗng/đặc — không có dòng này,
+          người xem thấy hai chip cùng đọc "Đã duyệt", một rỗng một đặc, không một chữ nào giải
+          thích vì sao (nặng hơn: Chip.tsx KIND_BG.missing cũng bg-transparent, nên có tới HAI loại
+          chip nền trong suốt trên màn, chỉ khác màu viền). Dùng <Chip> THẬT (không phải hình vẽ) để
+          mẫu ví dụ tự động khớp đúng hành vi outline thật của StatusGrid.tsx, không lệch nếu Chip.tsx
+          đổi cách vẽ outline sau này. */}
+      <p className="flex items-center gap-1.5 text-sec text-table mb-5">
+        <Chip kind="approved" outline /> = nạp từ file tổng hợp · <Chip kind="approved" /> = nộp trên
+        hệ thống
       </p>
       <StatusGrid periods={data.periods} units={data.units} />
     </div>
