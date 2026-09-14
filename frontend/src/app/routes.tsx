@@ -8,11 +8,10 @@
 //   /reports  → <Reports/>, bọc <RequireAuth><AppShell>…</AppShell></RequireAuth> (Task 20, C3)
 //   /reports/:id → <ReportDetail/>, bọc y hệt (Task 22, task-22-carry.md C6)
 //   /dashboard → <Dashboard/>, bọc y hệt (Task 25, task-25-carry.md C6)
+//   /status   → <Status/>, bọc y hệt (Task 26, task-26-carry.md C4/C11) — trang CUỐI CÙNG của kế
+//              hoạch; không còn task nào sau để nối tiếp mảng này.
 //   /         → điều hướng về /login
 //   *         → <NotFound/>
-// Task sau (thêm /status) sẽ nối tiếp vào CHÍNH mảng `routeObjects`
-// này, mỗi trang bọc <RequireAuth><AppShell>…</AppShell></RequireAuth> (xem RequireAuth ở
-// ./router).
 //
 // `App` xuất ra component gộp — nhận `router` làm prop thay vì tự tạo `createBrowserRouter` bên
 // trong — để routes.test.tsx dựng lại bằng `createMemoryRouter` (kiểm được route ở một URL ban
@@ -32,6 +31,7 @@ import { NotFound } from '../pages/NotFound'
 import { Reports } from '../pages/Reports'
 import { ReportDetail } from '../pages/ReportDetail'
 import { Dashboard } from '../pages/Dashboard'
+import { Status } from '../pages/Status'
 
 export const routeObjects: RouteObject[] = [
   { path: '/login', element: <Login /> },
@@ -62,6 +62,16 @@ export const routeObjects: RouteObject[] = [
       <RequireAuth>
         <AppShell>
           <ReportDetail />
+        </AppShell>
+      </RequireAuth>
+    ),
+  },
+  {
+    path: '/status',
+    element: (
+      <RequireAuth>
+        <AppShell>
+          <Status />
         </AppShell>
       </RequireAuth>
     ),

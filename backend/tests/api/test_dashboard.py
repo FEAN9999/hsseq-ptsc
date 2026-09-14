@@ -337,7 +337,11 @@ def test_status_o_trong_khi_chua_co_bao_cao(client, db):
     assert st["periods"] == ["2026-09"]
     assert len(st["units"]) == 22
     o = {u["code"]: u["cells"][0] for u in st["units"]}
-    assert o["U01"] == {"period_key": "2026-09", "state": None, "source": None, "is_late": None}
+    # report_id (task-26-carry.md C8, cùng lý do Task 25 carry C1/Ruling 304):
+    # chưa có báo cáo thì report_id cũng phải None, không riêng state.
+    assert o["U01"] == {
+        "period_key": "2026-09", "state": None, "source": None, "is_late": None,
+        "report_id": None}
 
 
 def test_status_source_seed_cho_fixture_live_cho_bao_cao_moi(client, db):
@@ -352,14 +356,25 @@ def test_status_source_seed_cho_fixture_live_cho_bao_cao_moi(client, db):
     r = client.post("/api/v1/reports", json={"template": "FM01", "period_key": "2026-09"},
                     headers=hu)
     assert r.status_code == 201    # report.source = "live" ngay lúc tạo (D21)
+    rid = r.json()["id"]
 
     st = client.get("/api/v1/status?template=FM01&from=2026-08&to=2026-09",
                     headers=ha).json()
     theo_ky = {u["code"]: {c["period_key"]: c for c in u["cells"]} for u in st["units"]}
+
+    # report_id (carry C8, Ruling 304): khẳng định CẢ HAI chiều bằng ID THẬT
+    # (không chỉ "khác None") — seed tra lại DB, live dùng id vừa POST trả về.
+    from app.models import OrgUnit, Report, ReportingPeriod
+    u01_id = db.query(OrgUnit).filter_by(code="U01").one().id
+    ky08 = db.query(ReportingPeriod).filter_by(period_key="2026-08").one()
+    r08 = db.query(Report).filter_by(org_unit_id=u01_id, period_id=ky08.id).one()
+
     assert theo_ky["U01"]["2026-08"] == {
-        "period_key": "2026-08", "state": "approved", "source": "seed", "is_late": False}
+        "period_key": "2026-08", "state": "approved", "source": "seed", "is_late": False,
+        "report_id": r08.id}
     assert theo_ky["U01"]["2026-09"] == {
-        "period_key": "2026-09", "state": "draft", "source": "live", "is_late": False}
+        "period_key": "2026-09", "state": "draft", "source": "live", "is_late": False,
+        "report_id": rid}
 
 
 def test_status_loc_theo_pham_vi_hep(client, db):

@@ -47,6 +47,11 @@ class StatusCellOut(ApiModel):
     state: str | None
     source: str | None
     is_late: bool | None
+    # carry C8 (task-26-carry.md), cùng lý do Task 25 carry C1/Ruling 304: FE
+    # cần id để dựng '/reports/{id}' cho ô đã nộp trong lưới — KHÔNG suy từ
+    # `state` (hai thứ trùng nhau ở dữ liệu hiện có, nhưng report_id mới là
+    # thứ link thật sự cần).
+    report_id: int | None
 
 
 class StatusUnitOut(ApiModel):
@@ -100,7 +105,7 @@ def ma_tran_trang_thai(
 
     q = (
         db.query(OrgUnit.code, OrgUnit.name, ReportingPeriod.period_key,
-                 WorkflowState.code, Report.source, Report.is_late)
+                 WorkflowState.code, Report.source, Report.is_late, Report.id)
         .select_from(tu_ke)
         .filter(ReportingPeriod.template_id == tpl.id,
                 ReportingPeriod.period_key >= tu_ky, ReportingPeriod.period_key <= den_ky,
@@ -119,12 +124,13 @@ def ma_tran_trang_thai(
     thu_tu_don_vi: list[str] = []
     ten_theo_ma: dict[str, str] = {}
     o_theo_don_vi_ky: dict[tuple[str, str], StatusCellOut] = {}
-    for code, name, period_key, state, source, is_late in q.all():
+    for code, name, period_key, state, source, is_late, report_id in q.all():
         if code not in ten_theo_ma:
             ten_theo_ma[code] = name
             thu_tu_don_vi.append(code)
         o_theo_don_vi_ky[(code, period_key)] = StatusCellOut(
-            period_key=period_key, state=state, source=source, is_late=is_late)
+            period_key=period_key, state=state, source=source, is_late=is_late,
+            report_id=report_id)
 
     units = [
         StatusUnitOut(

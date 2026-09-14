@@ -48,7 +48,23 @@ const KIND_BORDER: Record<ChipKind, string> = {
   missing: 'border-hair',
 }
 
-export function Chip({ kind, outline }: { kind: ChipKind; outline?: boolean }) {
+// Task 26: testId/ariaDisabled — hai prop TUỲ CHỌN, mặc định không render thuộc tính nào (không
+// đổi hành vi các nơi gọi cũ — Reports.tsx/UnitsTable.tsx không truyền, không lệch). Lưới /status
+// cần định vị TỪNG Ô qua data-testid `o-<mã đơn vị>-<kỳ>` và đánh dấu ô "Chưa nộp" không bấm được
+// ngay trên CHÍNH phần tử mang màu nền (StatusGrid.tsx) — không dựng thêm một <span> bọc ngoài chỉ
+// để gắn hai thuộc tính này (sẽ tách "phần tử có nền" khỏi "phần tử có testid/aria-disabled" thành
+// hai phần tử khác nhau, làm mù ca test giống lỗi C2 đã sửa).
+export function Chip({
+  kind,
+  outline,
+  testId,
+  ariaDisabled,
+}: {
+  kind: ChipKind
+  outline?: boolean
+  testId?: string
+  ariaDisabled?: boolean
+}) {
   // outline (D6: nạp từ file tổng hợp) THAY THẾ viền lẫn nền của kind bằng border-current /
   // bg-transparent, không cộng thêm — nếu cộng thêm sẽ tái tạo đúng lỗi cascade đã sửa (hai
   // utility cùng thuộc tính cùng lúc), như P1 đã chứng minh xảy ra thật với background-color.
@@ -64,5 +80,9 @@ export function Chip({ kind, outline }: { kind: ChipKind; outline?: boolean }) {
     .filter(Boolean)
     .join(' ')
 
-  return <span className={classes}>{LABEL[kind]}</span>
+  return (
+    <span className={classes} data-testid={testId} aria-disabled={ariaDisabled ? 'true' : undefined}>
+      {LABEL[kind]}
+    </span>
+  )
 }
