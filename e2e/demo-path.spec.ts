@@ -70,6 +70,94 @@ function oChiTieu(page: Page, ma: string, cot: 'Lũy kế tháng trước' | 'Th
   return page.getByLabel(new RegExp(`^${ma.replace('.', '\\.')} .*, ${cot}$`))
 }
 
+/** Một lớp DÍNH/NỔI đang hiện, kèm điểm tâm đã cắt theo tầm nhìn. */
+interface LopDinh {
+  x: number
+  y: number
+  ten: string
+  viTri: string
+  z: string
+}
+
+/** CHẠY TRONG TRANG (`page.evaluate`) — không được tham chiếu gì ngoài phạm vi chính nó.
+ *
+ *  Liệt kê mọi phần tử `position: sticky|fixed` đang thật sự hiện, và TỰ KIỂM từng cái bằng chính
+ *  phép bắn tia sẽ dùng ở bước sau: lớp nào không tự chứng minh được là "trên cùng tại điểm của
+ *  nó" thì bị loại (đang bị che, bị cắt khỏi khung `overflow`, hoặc nằm ngoài tầm nhìn). Giữ nó
+ *  lại chỉ tạo ra một khẳng định trỏ vào chỗ trống. */
+function lietKeLopDinh(): LopDinh[] {
+  const rong = document.documentElement.clientWidth
+  const cao = document.documentElement.clientHeight
+  const ra: LopDinh[] = []
+  for (const el of Array.from(document.querySelectorAll<HTMLElement>('body *'))) {
+    const cs = getComputedStyle(el)
+    if (cs.position !== 'sticky' && cs.position !== 'fixed') continue
+    const r = el.getBoundingClientRect()
+    // Cắt hộp theo tầm nhìn rồi mới lấy tâm: `getBoundingClientRect` KHÔNG bị khung `overflow`
+    // của cha cắt, nên tâm hộp thô có thể rơi hẳn ra ngoài màn.
+    const x = Math.round((Math.max(r.left, 0) + Math.min(r.right, rong)) / 2)
+    const y = Math.round((Math.max(r.top, 0) + Math.min(r.bottom, cao)) / 2)
+    if (Math.min(r.right, rong) - Math.max(r.left, 0) < 4) continue
+    if (Math.min(r.bottom, cao) - Math.max(r.top, 0) < 4) continue
+    const tren = document.elementFromPoint(x, y)
+    if (tren === null || !(el === tren || el.contains(tren))) continue
+    ra.push({
+      x,
+      y,
+      ten: `${el.tagName.toLowerCase()} "${(el.textContent ?? '').trim().slice(0, 20)}"`,
+      viTri: cs.position,
+      z: cs.zIndex,
+    })
+  }
+  return ra
+}
+
+/** CHẠY TRONG TRANG. Bắn tia vào từng điểm đã liệt kê khi hộp thoại ĐANG MỞ, rồi hỏi: thứ trúng
+ *  tia có thuộc "màn chắn" của hộp thoại không.
+ *
+ *  R4 (vòng sửa 2) — MÀN CHẮN TÌM THEO TÍNH CHẤT QUAN SÁT ĐƯỢC, KHÔNG THEO QUAN HỆ CÂY DOM.
+ *  Bản vòng 1 tìm lớp phủ bằng "tổ tiên `position: fixed` gần nhất của `<dialog open>`". Cách đó
+ *  gỡ được phần đóng băng CON SỐ `z-50`, nhưng vẫn đóng băng một quan hệ CẤU TRÚC: tách nền mờ ra
+ *  thành ANH EM của `<dialog>` (khuôn mẫu modal phổ biến nhất, và là khuôn mẫu BẮT BUỘC nếu sau
+ *  này dựng bằng portal) làm ca đỏ dù tính chất thật vẫn đúng — nền mờ vẫn phủ kín, tia vẫn trúng
+ *  nó. Nay "màn chắn" = chính `<dialog open>` CỘNG mọi phần tử `position: fixed` phủ gần kín khung
+ *  nhìn, bất kể chúng là cha, con hay anh em của nhau.
+ *
+ *  GIỚI HẠN ĐÃ BIẾT, ghi thẳng ra: nếu `Dialog` đổi sang `showModal()` thật (Task 24 cố ý KHÔNG
+ *  dùng — xem task-24 carry), hộp thoại lên TOP LAYER và `::backdrop` không phải một phần tử, nên
+ *  `elementFromPoint` sẽ trả về lớp dính bên dưới và ca này ĐỎ. Lúc đó ca phải được viết lại theo
+ *  `:modal` / `inert` chứ không phải nới trần — thông điệp lỗi nói thẳng điều đó. */
+function banTiaVaoManChan(diem: LopDinh[]) {
+  const rong = document.documentElement.clientWidth
+  const cao = document.documentElement.clientHeight
+  const hop = document.querySelector('dialog[open]')
+  const manChan: Element[] = []
+  if (hop !== null) manChan.push(hop)
+  let soManPhuKin = 0
+  for (const el of Array.from(document.querySelectorAll<HTMLElement>('body *'))) {
+    if (getComputedStyle(el).position !== 'fixed') continue
+    const r = el.getBoundingClientRect()
+    if (r.width < rong * 0.95 || r.height < cao * 0.95) continue
+    manChan.push(el)
+    soManPhuKin++
+  }
+  return {
+    coHopThoai: hop !== null,
+    soManPhuKin,
+    taManChan: manChan
+      .map((m) => `${m.tagName.toLowerCase()}[z=${getComputedStyle(m).zIndex}]`)
+      .join(' + '),
+    diem: diem.map((d) => {
+      const el = document.elementFromPoint(d.x, d.y)
+      return {
+        ...d,
+        thuocManChan: el !== null && manChan.some((m) => m === el || m.contains(el)),
+        tren: el === null ? 'null' : `${el.tagName.toLowerCase()} "${(el.textContent ?? '').trim().slice(0, 20)}"`,
+      }
+    }),
+  }
+}
+
 test.describe('phân đoạn 2 của buổi demo', () => {
   test.beforeEach(() => {
     resetDemo()
@@ -226,6 +314,13 @@ test.describe('phân đoạn 2 của buổi demo', () => {
     // `invalidateReportQueries` của cú nộp cũng lẫn vào phép đo.
     await nopBaoCaoQuaApi(request, await tokenApi(request, 'u22@ptsc.local'), idP05)
 
+    // R3 (vòng sửa 2) — đếm mọi lượt gọi `/dashboard/summary` để KHẲNG ĐỊNH tiền đề thứ nhất ở
+    // dưới, thay vì tin nó. Gắn trước cả `dangNhap` để không bỏ sót lượt nào.
+    let soLuotSummary = 0
+    page.on('response', (r) => {
+      if (r.url().includes('/dashboard/summary')) soLuotSummary++
+    })
+
     await dangNhap(page, 'admin@ptsc.local')
     await page.waitForURL('**/dashboard')
     await expect(page.getByText('Tổng từ 21 báo cáo đã duyệt')).toBeVisible()
@@ -234,6 +329,37 @@ test.describe('phân đoạn 2 của buổi demo', () => {
     // Mốc tính tuổi cache: từ giây này, `['dashboard','summary','2026-08']` mang con số 21 và còn
     // TƯƠI trong 30 s.
     const mocCache = Date.now()
+
+    // ── R3, TIỀN ĐỀ 2: "KHÔNG tải lại trang" — cắm một cái mốc chỉ sống được trong MỘT vòng đời
+    // của `window`. Một lượt tải trang thật ở bất cứ đâu trong đoạn đo (kể cả do mã sản phẩm tự
+    // gọi `location.assign`) sẽ xoá nó, và cũng dựng lại `QueryClient` từ số không — đúng cái lỗ
+    // `p2.reload()` mà vòng sửa 1 vừa gỡ khỏi tệp test, chỉ dời chỗ vào mã sản phẩm (N29).
+    await page.evaluate(() => {
+      Object.assign(window, { __e2eMocTrang: 'con-nguyen' })
+    })
+
+    // ── R3, TIỀN ĐỀ 1: cache CÒN TƯƠI qua một vòng điều hướng ─────────────────────────────────
+    // Cả ca này chỉ có sức phân biệt khi `['dashboard','summary']` KHÔNG tự làm mới sau mỗi lần
+    // mount. Hạ `staleTime` xuống 0 là con số 22 ở cuối ca sẽ tới nơi dù `invalidateReportQueries`
+    // có là thân rỗng hay không — ca xanh giả, im lặng (N4). Nên đo thẳng: đi khỏi dashboard rồi
+    // quay lại, KHÔNG có mutation nào ở giữa, và đòi con số không sinh thêm lượt fetch nào.
+    expect(
+      soLuotSummary,
+      'không bắt được lượt gọi `/dashboard/summary` nào — phép đếm dưới đây sẽ rỗng',
+    ).toBeGreaterThanOrEqual(1)
+    const luotTruocVong = soLuotSummary
+    await page.getByRole('link', { name: 'Duyệt báo cáo' }).click()
+    await page.waitForURL('**/reports')
+    await expect(page.locator('tbody tr')).toHaveCount(1)
+    await page.getByRole('link', { name: 'Dashboard', exact: true }).click()
+    await page.waitForURL('**/dashboard')
+    await expect(page.getByText('Tổng từ 21 báo cáo đã duyệt')).toBeVisible()
+    expect(
+      soLuotSummary,
+      `quay lại dashboard đã bắn thêm ${soLuotSummary - luotTruocVong} lượt fetch summary dù không ` +
+        'có mutation nào ở giữa ⇒ cache KHÔNG còn tươi qua một vòng điều hướng, và con số 22 ở cuối ' +
+        'ca này không còn chứng minh được là do `invalidateReportQueries`',
+    ).toBe(luotTruocVong)
 
     await page.getByRole('link', { name: 'Duyệt báo cáo' }).click()
     await page.waitForURL('**/reports')
@@ -266,6 +392,14 @@ test.describe('phân đoạn 2 của buổi demo', () => {
       `đoạn đo mất ${troi}ms — phải ở xa dưới staleTime 30 000ms, nếu không con số 22 có thể đến ` +
         'từ một lượt refetch vì hết hạn chứ không phải từ invalidateReportQueries',
     ).toBeLessThan(20_000)
+
+    // Và cái mốc cắm từ đầu đoạn đo phải còn nguyên: còn nó thì `window` chưa hề bị dựng lại, tức
+    // `QueryClient` cầm con số 21 suốt từ đầu tới giờ vẫn là CHÍNH NÓ.
+    expect(
+      await page.evaluate(() => (window as unknown as { __e2eMocTrang?: string }).__e2eMocTrang ?? null),
+      'mốc cắm ở đầu đoạn đo đã mất ⇒ trang đã bị TẢI LẠI giữa chừng ⇒ `QueryClient` được dựng lại ' +
+        'từ số không và con số 22 đến từ một lượt fetch nguội, không phải từ lớp làm mới cache',
+    ).toBe('con-nguyen')
   })
 
   // C1 + C-T25/1: vòng lặp phải có `/reports/:id` (form FM01 — màn RỘNG NHẤT) và `/dashboard`
@@ -336,7 +470,7 @@ test.describe('phân đoạn 2 của buổi demo', () => {
   // Task 24/25 ghi rõ đây là "chỗ CHƯA ĐO, không phải chỗ đã sạch" — jsdom không có bố cục.
   // ────────────────────────────────────────────────────────────────────────────────────────────
 
-  test('C-T24/1 — Ctrl+S ở một dòng giữa bảng không làm trang nhảy cuộn, và vẫn lưu thật', async ({
+  test('C-T24/1 — Ctrl+S ở một dòng giữa bảng không làm trang nhảy cuộn, và tự nó lưu NGAY', async ({
     page,
     request,
   }) => {
@@ -370,8 +504,17 @@ test.describe('phân đoạn 2 của buổi demo', () => {
     const choLuu = page.waitForResponse(
       (r) => r.url().includes(`/reports/${idP05}/values`) && r.request().method() === 'PUT' && r.ok(),
     )
+    // Đo tới lúc request RỜI trình duyệt, không tới lúc phản hồi về: thời gian server xử lý một
+    // `PUT` 62 dòng (đo được ~500ms) là hằng số chung của cả hai đường, cộng nó vào chỉ làm hai
+    // con số xích lại gần nhau và bóp lề của phép so ở cuối ca.
+    const choReqLuu = page.waitForRequest(
+      (r) => r.url().includes(`/reports/${idP05}/values`) && r.method() === 'PUT',
+    )
     await o.fill('9')
+    const mocCtrlS = Date.now()
     await page.keyboard.press('Control+s')
+    await choReqLuu
+    const treCtrlS = Date.now() - mocCtrlS
     await choLuu
     await expect(page.getByText(/Đã lưu \d{2}:\d{2}/)).toBeVisible()
 
@@ -387,6 +530,47 @@ test.describe('phân đoạn 2 của buổi demo', () => {
     // Ô vẫn giữ focus và giữ chỗ đặt con trỏ — đó là cả lý do `chotODangGo()` gọi focus() lại.
     await expect(o).toBeFocused()
     await expect(khung).toBeVisible()
+
+    // ── R1 (vòng sửa 2): TÁCH HAI ĐƯỜNG `PUT`, nếu không thì nửa "vẫn lưu" là bằng chứng rỗng ──
+    //
+    // Một mình cái `waitForResponse` ở trên KHÔNG chứng minh được phím tắt có lưu: `chotODangGo()`
+    // gọi `o.blur()`, `NumberCell.xuLyBlur` bắn `onCommit`, `useSaveValues.markDirty` hẹn giờ, và
+    // hàng chờ ấy sẽ tự bay đi sau `DO_TRE` — nên `PUT` vẫn tới dù Ctrl+S đã bỏ hẳn lượt gọi
+    // `luuRef.current()` (đột biến N25: ca xanh, lỗ không ai canh).
+    //
+    // Thứ phân biệt được hai đường từ phía trình duyệt là THỜI ĐIỂM, không phải nội dung:
+    //   · đường Ctrl+S  → `saveNow()` → `huyHen()` → gửi NGAY
+    //   · đường rời-ô   → phải đợi hết debounce rồi mới gửi
+    // Gợi ý "Ctrl+S trên một ô KHÔNG đổi giá trị vẫn phải bắn PUT" không dùng được ở sản phẩm
+    // này: `saveNow()` về sớm khi hàng chờ rỗng (useSaveValues.ts — `if (hangCho.current.size === 0
+    // && hangChoChu.current.size === 0) return true`), nên ô không đổi thì KHÔNG có `PUT` nào ở cả
+    // hai đường. Bắt nó bắn sẽ phải sửa mã sản phẩm, mà task này không đụng mã sản phẩm.
+    //
+    // Nên đo CẢ HAI đường trong CÙNG lượt chạy rồi so nhau, thay vì khẳng định một con số tuyệt
+    // đối: hạ `DO_TRE` từ 1500 xuống 300 là một thay đổi hợp lệ và không được làm ca này đỏ.
+    const choLuuRoiO = page.waitForResponse(
+      (r) => r.url().includes(`/reports/${idP05}/values`) && r.request().method() === 'PUT' && r.ok(),
+    )
+    const choReqRoiO = page.waitForRequest(
+      (r) => r.url().includes(`/reports/${idP05}/values`) && r.method() === 'PUT',
+    )
+    await o.fill('8')
+    const mocRoiO = Date.now()
+    // Enter = xuống ô dưới cùng cột (useKeyboardNav) ⇒ ô này blur ⇒ chỉ có lớp tự-lưu-khi-rời-ô
+    // đẩy nó đi, không có lượt gọi `saveNow()` nào.
+    await page.keyboard.press('Enter')
+    await choReqRoiO
+    const treRoiO = Date.now() - mocRoiO
+    await choLuuRoiO
+
+    expect(
+      treRoiO,
+      `Ctrl+S mất ${treCtrlS}ms tới lúc server nhận, còn đường tự-lưu-khi-rời-ô mất ${treRoiO}ms. ` +
+        'Hai số này PHẢI cách nhau thì ca mới phân biệt được "phím tắt tự lưu" với "cú blur do ' +
+        'chính phím tắt gây ra đã lưu hộ". Bằng nhau nghĩa là một trong hai: phím tắt đã thôi gọi ' +
+        'saveNow() (lỗi — sửa mã), hoặc debounce DO_TRE đã bị bỏ (lúc đó không trình duyệt nào ' +
+        'tách được hai đường nữa — phải viết lại ca, đừng nới trần).',
+    ).toBeGreaterThan(3 * treCtrlS)
   })
 
   // Q2 + Q4 (vòng sửa 1). Hai thứ đổi so với bản đầu:
@@ -397,13 +581,14 @@ test.describe('phân đoạn 2 của buổi demo', () => {
   // thật cần canh là "lớp phủ thắng phép bắn tia ở mọi lớp dính", không phải một con số. Nay lớp
   // phủ được tìm bằng ĐỊNH NGHĨA (tổ tiên `position: fixed` gần nhất của `<dialog open>`) và con
   // số z-index chỉ còn đi kèm trong thông điệp lỗi để người sửa đọc, không còn bị khẳng định.
+  // (R4, vòng sửa 2: phép tìm lớp phủ đã bỏ nốt quan hệ CÂY DOM — xem `banTiaVaoManChan`.)
   //
   // Q4 — tên ca cũ hứa "trên MỌI lớp dính" trong khi chỉ bắn tia HAI điểm tự chọn tay. Nay các lớp
   // dính được LIỆT KÊ ĐỘNG: mọi phần tử có `position: sticky|fixed`, đang thấy được, và tự chứng
   // minh là lớp trên cùng tại điểm của nó TRƯỚC khi hộp thoại mở. Thêm một lớp dính mới vào form
-  // thì ca này tự phủ luôn, không phải sửa. Lớp `Toast` KHÔNG có trong danh sách vì nó tự tắt sau
-  // 4 s (`Toast.TOAST_MS`) nên không sống tới lúc hộp thoại mở — xem task-27-report.md "Vòng sửa 1"
-  // mục Q4 cho số đo và lý do không dựng một ca đua với đồng hồ.
+  // thì ca này tự phủ luôn, không phải sửa. Lớp `Toast` không có mặt Ở CA NÀY vì đường đi của ca
+  // này (mở thẳng một báo cáo nháp rồi bấm "Nộp") không sinh toast nào — nó được đo ở ca C-T24/2b
+  // ngay dưới, nơi toast thật sự sống cùng lúc với hộp thoại.
   test('C-T24/2 — hộp thoại nằm trên MỌI lớp dính đang hiện, đo bằng phép bắn tia trên pixel', async ({
     page,
     request,
@@ -421,32 +606,7 @@ test.describe('phân đoạn 2 của buổi demo', () => {
     // Lớp nào không tự chứng minh được là "trên cùng tại điểm của nó" thì bị loại (đang bị che, bị
     // cắt khỏi khung `overflow`, hoặc nằm ngoài tầm nhìn) — giữ nó lại chỉ tạo ra một khẳng định
     // trỏ vào chỗ trống.
-    const lopDinh = await page.evaluate(() => {
-      const rong = document.documentElement.clientWidth
-      const cao = document.documentElement.clientHeight
-      const ra: { x: number; y: number; ten: string; viTri: string; z: string }[] = []
-      for (const el of Array.from(document.querySelectorAll<HTMLElement>('body *'))) {
-        const cs = getComputedStyle(el)
-        if (cs.position !== 'sticky' && cs.position !== 'fixed') continue
-        const r = el.getBoundingClientRect()
-        // Cắt hộp theo tầm nhìn rồi mới lấy tâm: `getBoundingClientRect` KHÔNG bị khung
-        // `overflow` của cha cắt, nên tâm hộp thô có thể rơi hẳn ra ngoài màn.
-        const x = Math.round((Math.max(r.left, 0) + Math.min(r.right, rong)) / 2)
-        const y = Math.round((Math.max(r.top, 0) + Math.min(r.bottom, cao)) / 2)
-        if (Math.min(r.right, rong) - Math.max(r.left, 0) < 4) continue
-        if (Math.min(r.bottom, cao) - Math.max(r.top, 0) < 4) continue
-        const tren = document.elementFromPoint(x, y)
-        if (tren === null || !(el === tren || el.contains(tren))) continue
-        ra.push({
-          x,
-          y,
-          ten: `${el.tagName.toLowerCase()} "${(el.textContent ?? '').trim().slice(0, 20)}"`,
-          viTri: cs.position,
-          z: cs.zIndex,
-        })
-      }
-      return ra
-    })
+    const lopDinh = await page.evaluate(lietKeLopDinh)
 
     // Không có lớp nào thì ca này không canh gì cả — phải đổ, không được xanh rỗng.
     expect(
@@ -461,32 +621,20 @@ test.describe('phân đoạn 2 của buổi demo', () => {
     await nutNop.click()
     await expect(page.getByRole('dialog')).toBeVisible()
 
-    const ketQua = await page.evaluate((diem) => {
-      // Lớp phủ tìm theo ĐỊNH NGHĨA, không theo tên lớp CSS: tổ tiên `position: fixed` gần nhất của
-      // hộp thoại đang mở. Đổi `z-50` thành bất cứ giá trị nào cũng không làm phép tìm này hỏng.
-      const hop = document.querySelector('dialog[open]')
-      let lop: HTMLElement | null = hop?.parentElement ?? null
-      while (lop !== null && getComputedStyle(lop).position !== 'fixed') lop = lop.parentElement
-      return {
-        coLopPhu: lop !== null,
-        zLopPhu: lop === null ? null : getComputedStyle(lop).zIndex,
-        diem: diem.map((d) => {
-          const el = document.elementFromPoint(d.x, d.y)
-          return {
-            ...d,
-            thuocLopPhu: lop !== null && el !== null && lop.contains(el),
-            tren: el === null ? 'null' : `${el.tagName.toLowerCase()} "${(el.textContent ?? '').trim().slice(0, 20)}"`,
-          }
-        }),
-      }
-    }, lopDinh)
+    const ketQua = await page.evaluate(banTiaVaoManChan, lopDinh)
 
-    expect(ketQua.coLopPhu, 'hộp thoại phải nằm trong một lớp phủ position:fixed').toBe(true)
+    expect(ketQua.coHopThoai, 'không có `dialog[open]` nào — phép bắn tia dưới đây sẽ vô nghĩa').toBe(true)
+    expect(
+      ketQua.soManPhuKin,
+      'không tìm thấy màn chắn `position:fixed` nào phủ kín khung nhìn — hộp thoại của app này phải ' +
+        'có một lớp phủ như vậy (nếu đã đổi sang `showModal()` thật thì ca này phải viết lại theo ' +
+        '`:modal`/`inert`, xem chú thích của banTiaVaoManChan)',
+    ).toBeGreaterThanOrEqual(1)
     for (const d of ketQua.diem) {
       expect(
-        d.thuocLopPhu,
+        d.thuocManChan,
         `lớp dính ${d.ten} (${d.viTri}, z=${d.z}) tại (${d.x},${d.y}) vẫn nổi trên hộp thoại ` +
-          `(z=${ketQua.zLopPhu}) — tia trúng ${d.tren}`,
+          `(màn chắn: ${ketQua.taManChan}) — tia trúng ${d.tren}`,
       ).toBe(true)
     }
 
@@ -495,6 +643,77 @@ test.describe('phân đoạn 2 của buổi demo', () => {
     const diemNut = lopDinh.find((l) => l.ten.includes('Nộp báo cáo'))!
     await page.mouse.click(diemNut.x, diemNut.y)
     await expect(page.getByRole('dialog')).toHaveCount(1)
+
+    await page.keyboard.press('Escape')
+    await expect(page.getByRole('dialog')).toHaveCount(0)
+  })
+
+  // R2 (vòng sửa 2) — LỚP `Toast`, nay ĐO chứ không còn suy luận.
+  //
+  // Báo cáo vòng 1 viết rằng cảnh "hộp thoại mở trong khi Toast còn sống" chỉ tới được bằng một
+  // cuộc đua với đồng hồ, vì đo thấy phải chờ ~4,5 s mới bấm được nút "Mở lại". GHI CHÚ ĐÓ SAI, và
+  // cái làm nó sai lại chính là một lỗi: nút "Mở lại" hiện sau 4ms; 4,5 giây kia là do CHÍNH TOAST
+  // CHE MẤT CÁI NÚT (toast `fixed right-6 bottom-6` chồng lên đầu phải thanh nút dính), nên phép
+  // kiểm "điểm bấm không bị che" của Playwright phải đứng đợi toast tự tắt. Mở hộp thoại bằng BÀN
+  // PHÍM không đi qua phép kiểm ấy: 28ms/26ms, toast còn sống — lề 140 lần trên ngân sách 4 s.
+  //
+  // Lỗi UI "toast che thanh nút dính" là một PHÁT HIỆN, đã chuyển sang review tổng; task này không
+  // đụng mã sản phẩm. Ở đây chỉ dựng lại cảnh đó để bắn tia vào TÂM TOAST.
+  test('C-T24/2b — Toast còn sống thì hộp thoại vẫn nằm trên nó (bắn tia vào tâm Toast)', async ({
+    page,
+    request,
+  }) => {
+    boQuaNeuKhongResetDuoc()
+    const idP05 = await idBaoCao(request, await tokenApi(request, 'admin@ptsc.local'), DON_VI_U22)
+    // Nộp NGOÀI trình duyệt đang đo để cảnh bắt đầu đúng ở chỗ cần: admin đứng trước một báo cáo
+    // `submitted`, bấm Duyệt một cái là có toast.
+    await nopBaoCaoQuaApi(request, await tokenApi(request, 'u22@ptsc.local'), idP05)
+    await dangNhap(page, 'admin@ptsc.local')
+    await page.goto(`/reports/${idP05}`)
+    await expect(page.locator('tbody tr')).toHaveCount(62)
+
+    await page.getByRole('button', { name: 'Duyệt' }).click()
+    await page.getByRole('dialog').getByRole('button', { name: 'Duyệt' }).click()
+
+    // Toast "Đã duyệt · Xem dashboard" — khoanh theo chính cái link của nó, vì `role="status"`
+    // còn có ở dải đầu form (FormHeader "Đã lưu…") và ở hai banner của ReportForm.
+    const toast = page.getByRole('status').filter({ hasText: 'Xem dashboard' })
+    await expect(toast).toBeVisible()
+
+    const nutMoLai = page.getByRole('button', { name: 'Mở lại' })
+    await expect(nutMoLai).toBeVisible()
+
+    // Liệt kê KHI TOAST ĐANG SỐNG: nếu toast không lọt vào danh sách thì ca này không đo thứ nó
+    // sinh ra để đo, phải đổ ngay tại đây chứ không xanh rỗng ở dưới.
+    const lopDinh = await page.evaluate(lietKeLopDinh)
+    expect(
+      lopDinh.some((l) => l.ten.includes('Đã duyệt')),
+      `Toast không có trong danh sách lớp nổi đang hiện: ${JSON.stringify(lopDinh)}`,
+    ).toBe(true)
+
+    // Mở bằng BÀN PHÍM có chủ ý: `click()` đòi tâm nút không bị che, mà toast đang che đúng chỗ đó
+    // — Playwright sẽ đứng đợi 4 s cho toast tắt, tức tự tay xoá mất tiền đề của phép đo.
+    await nutMoLai.focus()
+    await page.keyboard.press('Enter')
+    await expect(page.getByRole('dialog')).toBeVisible()
+
+    // TIỀN ĐỀ, đọc ngay lập tức (không `expect` có retry — một khẳng định chờ được thì nó sẽ chờ
+    // toast SỐNG LẠI, chuyện không bao giờ xảy ra, và biến lỗi tiền đề thành một lỗi hết giờ khó
+    // đọc): toast phải CÒN trên màn cùng lúc với hộp thoại.
+    expect(
+      await toast.isVisible(),
+      'Toast đã tắt trước khi hộp thoại kịp mở — mọi khẳng định dưới đây sẽ là bằng chứng rỗng',
+    ).toBe(true)
+
+    const ketQua = await page.evaluate(banTiaVaoManChan, lopDinh)
+    expect(ketQua.coHopThoai, 'không có `dialog[open]` nào — phép bắn tia dưới đây sẽ vô nghĩa').toBe(true)
+    for (const d of ketQua.diem) {
+      expect(
+        d.thuocManChan,
+        `lớp nổi ${d.ten} (${d.viTri}, z=${d.z}) tại (${d.x},${d.y}) vẫn nổi trên hộp thoại ` +
+          `(màn chắn: ${ketQua.taManChan}) — tia trúng ${d.tren}`,
+      ).toBe(true)
+    }
 
     await page.keyboard.press('Escape')
     await expect(page.getByRole('dialog')).toHaveCount(0)

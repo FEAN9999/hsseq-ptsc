@@ -12,8 +12,8 @@
 // đổi trạng thái DB cho ra một kết quả "xanh" không nói lên điều gì về lượt chạy đầu.
 import { defineConfig, devices } from '@playwright/test'
 
-const BASE_URL = process.env.BASE_URL ?? 'http://localhost:5173'
-const LA_LOCAL = BASE_URL.startsWith('http://localhost') || BASE_URL.startsWith('http://127.0.0.1')
+import { BASE_URL, LA_CUC_BO } from './moi-truong'
+
 
 export default defineConfig({
   testDir: '.',
@@ -40,7 +40,7 @@ export default defineConfig({
   // `preview` chứ KHÔNG phải `dev`: `vite.config.ts` ghi rõ (C8, task-19-carry.md) rằng
   // `client.ts` gọi đường dẫn tương đối `/api/v1`, và chỉ `preview.proxy` mới đẩy nó sang cổng
   // 8000. Chạy qua `npm run dev` thì mọi lời gọi API đâm vào chính dev server → 404.
-  webServer: LA_LOCAL
+  webServer: LA_CUC_BO
     ? {
         command: 'npm run preview -- --port 5173 --strictPort',
         cwd: '../frontend',

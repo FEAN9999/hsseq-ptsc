@@ -12,6 +12,8 @@ import { fileURLToPath } from 'node:url'
 
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
 
+import { BASE_URL, LA_CUC_BO } from './moi-truong'
+
 const GOC_REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const BACKEND = resolve(GOC_REPO, 'backend')
 
@@ -42,8 +44,6 @@ export const DON_VI_U22 = 'P05'
  *  Buổi demo thật vẫn cần số thật dán vào file fixture kia. */
 const FIXTURE_E2E = resolve(BACKEND, 'tests/fixtures/full_synthetic.csv')
 
-const BASE_URL = process.env.BASE_URL ?? 'http://localhost:5173'
-const LA_LOCAL = BASE_URL.startsWith('http://localhost') || BASE_URL.startsWith('http://127.0.0.1')
 
 /** Gọi `scripts/reset_demo.py --yes`. `APP_ENV` phải đặt ngay trên dòng lệnh: `.env` KHÔNG tự
  *  export ra biến môi trường tiến trình, và cầu chì của script đọc thẳng `os.environ` (fail-closed
@@ -55,7 +55,7 @@ const LA_LOCAL = BASE_URL.startsWith('http://localhost') || BASE_URL.startsWith(
  *  quyền và có đường xoá-nạp lại. `BASE_URL` từ xa (Vercel/Render, Task 28) thì KHÔNG: cái
  *  `.venv` trên máy này không nói chuyện được với database của server đó, và kể cả nói được thì
  *  xoá dữ liệu trên máy chủ thật là một hành động khác hẳn về hậu quả. */
-export const CO_THE_RESET = LA_LOCAL
+export const CO_THE_RESET = LA_CUC_BO
 
 /** Bỏ qua ca đang chạy khi không reset được.
  *

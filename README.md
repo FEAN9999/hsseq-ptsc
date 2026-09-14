@@ -89,10 +89,15 @@ hẳn về hậu quả. Bộ test vì vậy chia đôi theo đúng thứ nó C�
 | ở chế độ `BASE_URL` | ca |
 |---|---|
 | **chạy** (4) | không cuộn ngang · titlebar · rbac 403 · rbac chưa đăng nhập — đây là bộ khói cho một bản deploy |
-| **bỏ qua**, in rõ lý do (5) | demo phân đoạn 2 · lớp làm mới cache · Ctrl+S · hộp thoại trên lớp dính · rbac người xem — năm ca này cần một báo cáo **nháp sạch** |
+| **bỏ qua**, in rõ lý do (6) | demo phân đoạn 2 · lớp làm mới cache · Ctrl+S · hộp thoại trên lớp dính · hộp thoại trên Toast · rbac người xem — sáu ca này cần một báo cáo **nháp sạch** |
 
-Muốn chạy cả năm ca kia trên bản deploy thì reset ở chính máy chủ đó trước
+Muốn chạy cả sáu ca kia trên bản deploy thì reset ở chính máy chủ đó trước
 (`docker compose exec api python -m scripts.reset_demo --yes`) rồi chạy lẻ từng ca bằng `-g`.
+
+"Máy nhà hay từ xa" được quyết ở `e2e/moi-truong.ts` theo **hostname đã phân tích cú pháp**, không
+theo tiền tố chuỗi: `localhost`, `127.0.0.1`, `0.0.0.0`, `::1` và `*.localhost` là máy nhà, bất kể
+`http`/`https` hay cổng. (`http://0.0.0.0:5173` được xếp đúng là máy nhà, nhưng muốn chạy thật ở
+địa chỉ đó thì `vite preview` phải thêm `--host` — mặc định nó chỉ nghe ở loopback.)
 
 - **Phải `--build`.** `docker compose up -d` không tự build lại khi image `infra-api` đã tồn tại, nên
   nó chạy im lặng bằng mã cũ. Một lần như vậy đã làm `GET /status` trả thiếu `report_id` và mọi chip
