@@ -95,17 +95,32 @@ BASE_URL=https://<vercel-app>.vercel.app API_BASE_URL=https://<render-app>.onren
 Không đặt `API_BASE_URL` ⇒ mặc định bằng chính `BASE_URL` — không đổi hành vi cũ. Lớp phân giải
 này (`apiUrl()` ở `e2e/moi-truong.ts`) là logic thuần, có ca test riêng ở `moi-truong.spec.ts`.
 
+**Chú ý hình dạng — khác `VITE_API_BASE`:** `API_BASE_URL` chỉ là ORIGIN trần, KHÔNG kèm `/api/v1`
+(bốn lời gọi API trong `helpers.ts` tự thêm `/api/v1/...` vào sau qua `goiApi()`, xem ví dụ lệnh ở
+trên). `VITE_API_BASE` (frontend, mục "Deploy" bên dưới) thì NGƯỢC LẠI — **phải** kèm sẵn `/api/v1`
+ở cuối, vì `client.ts` dùng nó làm tiền tố đứng ngay trước path (`/health`, `/auth/login`...). Chép
+nhầm giá trị của biến này sang biến kia ra `.../api/v1/api/v1/...` (lỡ kèm `/api/v1` vào
+`API_BASE_URL`) hoặc thiếu hẳn `/api/v1` (quên kèm vào `VITE_API_BASE`) — hai kiểu hỏng khác nhau,
+dễ nhầm vì tên hai biến rất giống nhau.
+
 Lúc đó `webServer` tự tắt (server đã có sẵn) và `resetDemo()` **tự bỏ qua** — `.venv` trên máy này
 không nói chuyện được với database của server đó, và xoá dữ liệu trên máy chủ thật là chuyện khác
 hẳn về hậu quả. Bộ test vì vậy chia đôi theo đúng thứ nó CẦN:
 
 | ở chế độ `BASE_URL` | ca |
 |---|---|
-| **chạy** (6) | phân loại hostname ×2 (thuần, không cần server) · không cuộn ngang · titlebar · rbac 403 · rbac chưa đăng nhập — đây là bộ khói cho một bản deploy |
+| **chạy** (10) | thuần, không cần server: phân loại hostname ×2 · `apiUrl` ×2 · lớp nối F23 ×2 (`API_ORIGIN` đọc `process.env` thật · `helpers.ts` đi qua `goiApi`) — cộng bốn ca cần trình duyệt: không cuộn ngang · titlebar · rbac 403 · rbac chưa đăng nhập — đây là bộ khói cho một bản deploy |
 | **bỏ qua**, in rõ lý do (6) | demo phân đoạn 2 · lớp làm mới cache · Ctrl+S · hộp thoại trên lớp dính · hộp thoại trên Toast · rbac người xem — sáu ca này cần một báo cáo **nháp sạch** |
+
+Tổng 16 ca/project (32 cho cả hai project `desktop-1280` + `zoom-125`).
 
 Muốn chạy cả sáu ca kia trên bản deploy thì reset ở chính máy chủ đó trước
 (`docker compose exec api python -m scripts.reset_demo --yes`) rồi chạy lẻ từng ca bằng `-g`.
+
+**Riêng `spa-fallback.spec.ts` (2 ca, task-28-review.md P5):** cũng cách ly mạng hoàn toàn (chạy ở
+MỌI chế độ `BASE_URL`, không nằm trong bảng trên) nhưng có điều kiện RIÊNG — cần `frontend/dist` đã
+build sẵn (`npm run build` hoặc `npm test` trong `frontend/`, xem "Chạy test" phía trên). Chưa build
+thì hai ca này tự báo `skipped` kèm lý do, không phải một ca đỏ khó hiểu trên cây vừa clone.
 
 "Máy nhà hay từ xa" được quyết ở `e2e/moi-truong.ts` theo **hostname đã phân tích cú pháp**, không
 theo tiền tố chuỗi: `localhost`, `127.0.0.1`, `0.0.0.0`, `::1` và `*.localhost` là máy nhà, bất kể
@@ -142,16 +157,22 @@ Trên Render, nhớ thêm `APP_ENV=demo`: thiếu biến này thì cầu chì fa
 **`frontend/vercel.json`** (đã có trong repo) khai SPA fallback — thiếu nó thì F5 (tải lại trang) ở
 một route con như `/reports/12` trả 404, vì Vercel không biết đó là một route phía client.
 
-**`VITE_API_BASE`** đặt ở biến môi trường project trên Vercel — KHÔNG đặt bằng file
-`.env.production` trong repo (file đó bị đọc ở MỌI lần build production, kể cả
-`npm run build && npm run preview` mà local/CI dùng để test, nên ghi cứng URL Render vào đó sẽ khiến
-phép đo local vô tình gọi sang cloud). **Quên đặt biến này thì ứng dụng hỏng NGAY LÚC TẢI TRANG, ở một địa chỉ không phải máy cục bộ (như
-domain Vercel thật)** — `frontend/src/api/client.ts` (nguồn origin API duy nhất; `Login.tsx` import
-lại `BASE` từ đây) ném lỗi rõ tên biến, màn hình trắng — thay vì âm thầm rơi về `/api/v1`, ăn phải
-SPA fallback ở trên (200 kèm HTML), rồi vỡ bằng `SyntaxError` không rõ lý do như trước Task 28. Ở
-máy nhà (`npm run dev`/`npm run preview`, hostname `localhost`) thiếu biến vẫn AN TOÀN — proxy khai
-ở `vite.config.ts` lo phần backend, không có gì để hỏng (vòng sửa 1: ranh giới thật là "có backend
-cùng origin hay không", không phải "có phải bản build production hay không").
+**`VITE_API_BASE`** đặt ở biến môi trường project trên Vercel, dạng origin kèm sẵn `/api/v1` (vd.
+`https://<render-app>.onrender.com/api/v1`) — KHÔNG đặt bằng file `.env.production` trong repo (file
+đó bị đọc ở MỌI lần build production, kể cả `npm run build && npm run preview` mà local/CI dùng để
+test, nên ghi cứng URL Render vào đó sẽ khiến phép đo local vô tình gọi sang cloud).
+
+**Quên đặt biến này (hoặc đặt sai hình dạng, vd. chỉ `/api/v1` — task-28-fix-2.md B4) thì ứng dụng
+hỏng ỒN ÀO khi thật sự gọi API, KHÔNG phải ngay lúc tải trang:** `frontend/src/api/client.ts`
+(nguồn origin API duy nhất; `Login.tsx` import lại `BASE` từ đây) không còn đoán trước "đang đứng ở
+hostname nào" (cơ chế đó đã bị bỏ hẳn ở task-28-fix-2.md P1 sau ba lần vá liên tiếp vẫn còn cửa hở —
+xem "Vòng sửa 2" trong `task-28-report.md`) — thay vào đó, MỌI response 200 nhưng KHÔNG PHẢI JSON
+(dấu hiệu SPA fallback ở trên đang trả `index.html` cho path lẽ ra phải là API) đều bị chặn lại
+ngay tại đó và ném lỗi nói RÕ TÊN BIẾN `VITE_API_BASE`. Trang vẫn dựng được (React vẫn render bình
+thường) — không còn màn trắng trước khi kịp vẽ gì như cơ chế cũ. Cơ chế mới này không cần biết
+hostname là gì nên an toàn ở MỌI nơi có ai đó đứng ra proxy `/api/v1` (máy nhà qua `vite.config.ts`,
+kể cả mở bằng địa chỉ IP LAN hay tên mDNS `.local` khi chạy `vite preview --host`) — không riêng gì
+`localhost`.
 
 **Trỏ e2e vào bản deploy:** xem "Chạy e2e (Playwright)" ở trên — `BASE_URL` (origin frontend) và
 `API_BASE_URL` (origin API, tách riêng từ Task 28) là hai biến ĐỘC LẬP; không đặt `API_BASE_URL` ⇒
