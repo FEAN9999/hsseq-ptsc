@@ -34,6 +34,7 @@ import { FormModeBar, maNeo } from './FormModeBar'
 import { GroupHeader, type NhomMau } from './GroupHeader'
 import { useKeyboardNav } from './useKeyboardNav'
 import { useSaveValues, type KetQuaLuu, type ODoi } from './useSaveValues'
+import { useDraftCache, type DraftValues } from './useDraftCache'
 import { noiDungDialog, useChuyenTrangThai, type LoiChuyen } from './useChuyenTrangThai'
 
 // ---------------------------------------------------------------- hợp đồng API
@@ -188,6 +189,7 @@ type HanhDongForm =
   | { type: 'chuyen-xong'; state: string; version: number }
   | { type: 'xung-dot'; loi: LoiXungDot }
   | { type: 'gia-tri-server'; phienBan: number; values: GiaTriBaoCao[] }
+  | { type: 'khoi-phuc-nhap'; nhap: DraftValues }
 
 function khoiTao(chiTiet: ChiTietBaoCao): TrangThaiForm {
   const nhap: Record<string, ONhap> = {}
@@ -230,6 +232,16 @@ function rutGon(s: TrangThaiForm, h: HanhDongForm): TrangThaiForm {
         tranKhiDan: 0,
         nhap: { ...s.nhap, [h.ma]: { ...cu, [h.cot]: h.value } },
       }
+    }
+    case 'khoi-phuc-nhap': {
+      // Task 29: khôi phục bản nháp lúc mount (đúng một lần — xem effect cạnh `useDraftCache`
+      // trong thân component). Merge THEO Ô, không đè cả dòng: bản nháp có thể chỉ giữ MỘT cột
+      // (`thisPeriod` hoặc `accTotal`), cột còn lại phải giữ nguyên giá trị đọc từ server.
+      const nhap = { ...s.nhap }
+      for (const [ma, o] of Object.entries(h.nhap)) {
+        nhap[ma] = { ...(nhap[ma] ?? { thisPeriod: null, accTotal: null }), ...o }
+      }
+      return { ...s, nhap }
     }
     case 'dan-xong':
       return { ...s, boQuaKhiDan: h.boQua, tranKhiDan: h.tran }
@@ -441,6 +453,42 @@ export function ReportForm({ mau, chiTiet, loiLamMoi = false }: ReportFormProps)
   const quyen = useSession((st) => st.permissions)
   const formRef = useRef<HTMLDivElement>(null)
   const luuGiaTri = useSaveValues(chiTiet.id, chiTiet.version)
+  // task-29-scope.md: hàng đợi lưu (luuGiaTri) trả lời "gửi gì lên server"; cache nháp dưới đây
+  // trả lời "vẽ lại gì sau khi trang chết" (401 — client.ts gọi `location.assign`, xoá sạch state
+  // này). Hai câu khác nhau, CỐ Ý không gộp.
+  const draftCache = useDraftCache(chiTiet.id)
+
+  // Khôi phục ĐÚNG MỘT LẦN lúc mount: gõ dở ở phiên trước (401 giữa chừng) thì phiên này vẽ lại
+  // nguyên số đó trước khi người dùng gõ tiếp — gõ tiếp sau đó đi qua nhánh 'nhap-o' bình thường.
+  useEffect(() => {
+    const draft = draftCache.doc()
+    if (draft) dispatch({ type: 'khoi-phuc-nhap', nhap: draft })
+    // Mảng rỗng có chủ ý: đây là việc của LẦN MOUNT ĐẦU TIÊN, không phải của mỗi lần `draftCache`
+    // đổi tham chiếu (nó đổi ở MỌI lần render vì không được memo hoá) — liệt nó vào deps sẽ khôi
+    // phục lại bản nháp CŨ trên mỗi lần vẽ, kể cả sau khi `xoa()` đã chạy.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Ghi đè bản nháp mỗi lần "số đang gõ" đổi — kể cả ô CHƯA rời để vào hàng chờ lưu. `s.nhap` chỉ
+  // đổi THAM CHIẾU khi có phím gõ thật (nhánh 'nhap-o'/'khoi-phuc-nhap' của rutGon dựng object
+  // mới), nên effect này không chạy vô ích ở những lần render vì lý do khác.
+  //
+  // BỎ QUA LẦN ĐỔI ĐẦU TIÊN (`boQuaLanDau`): lần đó là chính `khoiTao` dựng `nhap` từ
+  // `chiTiet.values` lúc mount — KHÔNG phải người dùng gõ gì. Ghi cả lần đó thì một lượt chỉ MỞ RA
+  // XEM (không gõ chữ nào) cũng để lại một "bản nháp" là bản sao y hệt server lúc mở — vô hại tại
+  // chỗ, nhưng nếu sau đó server đổi thật (người khác sửa, report bị mở lại rồi nộp lại) mà cùng
+  // tab mở lại đúng report này, bản sao chết đó đè lên số MỚI của server. Cùng họ lỗi K2 mặt ÂM
+  // với hiệu ứng "xoá nháp khi lưu xong" ngay dưới — chỉ khác là bắt SỚM HƠN, từ phía ghi.
+  const boQuaLanDau = useRef(true)
+  useEffect(() => {
+    if (boQuaLanDau.current) {
+      boQuaLanDau.current = false
+      return
+    }
+    draftCache.luu(s.nhap)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [s.nhap])
+
   const chuyen = useChuyenTrangThai(chiTiet.id, chiTiet.header, {
     onXong: (kq) => {
       dispatch({ type: 'chuyen-xong', state: kq.state, version: kq.version })
@@ -471,6 +519,12 @@ export function ReportForm({ mau, chiTiet, loiLamMoi = false }: ReportFormProps)
   const giaTriMoi = luuGiaTri.giaTriMoi
   useEffect(() => {
     if (giaTriMoi) dispatch({ type: 'gia-tri-server', phienBan: giaTriMoi.version, values: giaTriMoi.values })
+  }, [giaTriMoi])
+  // task-29-scope.md (bài học K2, mặt ÂM): lưu thành công qua đường THẬT thì XOÁ bản nháp — không
+  // xoá thì lần mở sau đọc nháp cũ đè lên số mới server vừa xác nhận.
+  useEffect(() => {
+    if (giaTriMoi) draftCache.xoa()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [giaTriMoi])
 
   // Hai nguồn nói về trạng thái: prop `chiTiet` (đi theo `GET` nền — mới hơn khi NGƯỜI KHÁC vừa

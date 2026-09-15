@@ -286,6 +286,14 @@ function thanPut(lan: number): {
 
 beforeEach(() => {
   useSession.getState().logout()
+  // Task 29: `useDraftCache` ghi vào sessionStorage theo khoá `draft:<id>` mỗi lần "số đang gõ"
+  // đổi. Đo được: không dọn thì một ca gõ số vào report id mặc định (12) để lại dư âm cho ca kế
+  // — ca sau mount lên, tự khôi phục đúng số dư đó vào ô, rồi gõ TIẾP lên trên (không phải gõ vào
+  // ô trống), "12" hoá "1212". Dọn TRƯỚC mỗi ca, không phải sau: dọn sau không cứu được ca đầu
+  // tiên chạy sau một ca đã lỡ để lại dư âm rồi mới thêm dọn dẹp.
+  for (const k of Object.keys(sessionStorage)) {
+    if (k.startsWith('draft:')) sessionStorage.removeItem(k)
+  }
   putSpy.mockReset()
   putSpy.mockResolvedValue({ version: 9, values: [] })
   postSpy.mockReset()
@@ -3225,5 +3233,48 @@ describe('hộp thoại chuyển trạng thái', () => {
     expect(bao.textContent).toContain('Không lưu được: Dữ liệu không hợp lệ')
     expect(bao.textContent).toContain('B-1.1: Giá trị không được âm')
     expect(bao.textContent).toContain('C1: Nội dung vượt quá 2000 ký tự')
+  })
+})
+
+// ============================================================ giữ số qua phiên chết (Task 29)
+
+// task-29-scope.md: brief chỉ có ca hook một mình (renderHook) — hook không ai gọi thì không giữ
+// được số nào, mà ca đó vẫn xanh (renderHook tự gọi lấy). Khối dưới đây đo ĐƯỜNG THẬT: đi qua
+// chính `ReportForm`, `unmount()` mô phỏng đúng việc `location.assign` (client.ts, đường 401) làm
+// — xoá sạch cây React và mọi state trong bộ nhớ — rồi dựng một cây MỚI, y như đăng nhập lại.
+describe('Task 29 — giữ số đang gõ qua phiên chết (401)', () => {
+  beforeEach(dongHoGia)
+  // Dọn `draft:*` đã chạy ở beforeEach CHUNG của file (trên đầu) trước MỌI ca, kể cả ca đầu của
+  // khối này — không cần lặp lại riêng ở đây.
+
+  it('gõ chưa rời ô, phiên chết như đường 401 rồi dựng lại: số chưa lưu vẫn còn', async () => {
+    const u = nguoiDung()
+    const { unmount } = ve({ state: 'draft', vai: 'reporter' })
+    await u.click(o('B-2.1', 'Tháng này'))
+    await u.keyboard('7')
+    // CHƯA rời ô: hàng chờ lưu (Task 23) còn rỗng. Nếu bằng chứng "số còn" chỉ mượn từ hàng chờ
+    // đó — đúng thứ task-29-scope.md cấm gộp — ca này phải đỏ, vì putSpy chưa hề được gọi.
+    expect(putSpy).not.toHaveBeenCalled()
+    unmount()
+
+    // "Đăng nhập lại": một `ReportForm` MỚI từ đầu, đọc `chiTiet` y hệt lần trước (server chưa hề
+    // nhận ô này).
+    ve({ state: 'draft', vai: 'reporter' })
+    expect(chu(o('B-2.1', 'Tháng này'))).toBe('7')
+  })
+
+  it('lưu thành công qua đường lưu THẬT thì xoá bản nháp — lần mở sau không lấy số cũ đè số mới', async () => {
+    const u = nguoiDung()
+    const { unmount } = ve({ state: 'draft', vai: 'reporter' })
+    await lamBanMotO(u, 'B-2.1', '7')
+    await choDebounce()
+    expect(putSpy).toHaveBeenCalledTimes(1) // đường lưu THẬT đã chạy — không phải gọi tay `xoa()`
+    expect(sessionStorage.getItem('draft:12')).toBeNull()
+    unmount()
+
+    // Dựng lại với server báo một số KHÁC (42): nếu bản nháp (7) không thật sự bị xoá, nó sẽ đè
+    // lên đúng con số này — bài học K2, mặt ÂM (task-29-scope.md).
+    ve({ state: 'draft', vai: 'reporter', values: [{ indicator_code: 'B-2.1', this_period: 42 }] })
+    expect(chu(o('B-2.1', 'Tháng này'))).toBe('42')
   })
 })
