@@ -199,6 +199,60 @@ function banTiaVaoManChan(diem: LopDinh[]) {
   }
 }
 
+/** CHẠY TRONG TRANG (`page.evaluate`) — không được tham chiếu gì ngoài phạm vi chính nó.
+ *
+ *  P3 (final-fix-FE.md, Ruling 425 · final-review-R3-report.md §A1) — NGƯỜI CANH HÌNH HỌC.
+ *
+ *  Câu hỏi KHÔNG phải "Toast đặt ở toạ độ nào cho khỏi đụng" mà "Toast có được phép nằm đè lên
+ *  vùng bấm được không" — KHÔNG. Nên phép đo cũng không được nhắc tới một lớp CSS nào: nó lấy hộp
+ *  của Toast, lấy hộp của MỌI `<button>` đang hiện, và đòi phần giao rỗng. Đổi bố cục kiểu gì —
+ *  đẩy Toast lên `bottom-24`, dựng một thanh dính cao hơn, đổi viewport — cũng đo lại được bằng
+ *  đúng hàm này, không phải viết lại.
+ *
+ *  Tìm Toast bằng NỘI DUNG chứ không bằng thẻ/lớp/`position`: `role="status"` còn có ở dải đầu
+ *  form ("Đã lưu…") và hai banner của ReportForm, nên phải khoanh; mà khoanh bằng `position:fixed`
+ *  thì phép đo lại giả định sẵn lời giải (một bản vá đưa Toast ra khỏi `fixed` sẽ làm ca XANH RỖNG
+ *  vì không tìm thấy gì để đo). `coToast` là tiền đề, chốt riêng ở nơi gọi.
+ *
+ *  Cả hai hộp đều lấy bằng `getBoundingClientRect` TRONG CÙNG một lượt chạy, nên cùng hệ toạ độ
+ *  khung nhìn — không có chỗ cho lệch cuộn giữa hai phép đo. */
+function doGiaoToastVoiNut(chuKhoa: string) {
+  const hienRa = (el: Element): boolean => {
+    const cs = getComputedStyle(el)
+    if (cs.visibility === 'hidden' || cs.display === 'none' || cs.opacity === '0') return false
+    const r = el.getBoundingClientRect()
+    return r.width > 0 && r.height > 0
+  }
+  const ten = (el: Element): string => (el.textContent ?? '').trim().slice(0, 30)
+  const toast = Array.from(document.querySelectorAll('[role="status"]')).find(
+    (el) => (el.textContent ?? '').includes(chuKhoa) && hienRa(el),
+  )
+  if (toast === undefined) return { coToast: false, hopToast: '', soNut: 0, tenNut: [] as string[], giao: [] as string[] }
+  const t = toast.getBoundingClientRect()
+  const tenNut: string[] = []
+  const giao: string[] = []
+  for (const nut of Array.from(document.querySelectorAll('button'))) {
+    if (!hienRa(nut)) continue
+    tenNut.push(ten(nut))
+    const r = nut.getBoundingClientRect()
+    const rongGiao = Math.min(t.right, r.right) - Math.max(t.left, r.left)
+    const caoGiao = Math.min(t.bottom, r.bottom) - Math.max(t.top, r.top)
+    if (rongGiao > 0 && caoGiao > 0) {
+      giao.push(
+        `"${ten(nut)}" [${Math.round(r.left)},${Math.round(r.top)},${Math.round(r.right)},${Math.round(r.bottom)}]` +
+          ` chồng ${Math.round(rongGiao)}×${Math.round(caoGiao)}px`,
+      )
+    }
+  }
+  return {
+    coToast: true,
+    hopToast: `[${Math.round(t.left)},${Math.round(t.top)},${Math.round(t.right)},${Math.round(t.bottom)}]`,
+    soNut: tenNut.length,
+    tenNut,
+    giao,
+  }
+}
+
 /** Hai khẳng định dùng chung cho C-T24/2 và C-T24/2b — viết một chỗ để hai ca không trôi khỏi nhau. */
 function chotManChan(ketQua: ReturnType<typeof banTiaVaoManChan>, tenCa: string): void {
   expect(ketQua.coHopThoai, `${tenCa}: không tìm thấy hộp thoại nào đang mở — phép bắn tia sẽ vô nghĩa`).toBe(true)
@@ -762,8 +816,9 @@ test.describe('phân đoạn 2 của buổi demo', () => {
   // kiểm "điểm bấm không bị che" của Playwright phải đứng đợi toast tự tắt. Mở hộp thoại bằng BÀN
   // PHÍM không đi qua phép kiểm ấy: 28ms/26ms, toast còn sống — lề 140 lần trên ngân sách 4 s.
   //
-  // Lỗi UI "toast che thanh nút dính" là một PHÁT HIỆN, đã chuyển sang review tổng; task này không
-  // đụng mã sản phẩm. Ở đây chỉ dựng lại cảnh đó để bắn tia vào TÂM TOAST.
+  // Lỗi UI "toast che thanh nút dính" ĐÃ ĐÓNG ở P3 (Ruling 425) — xem ca C-T24/2c ngay dưới, nơi
+  // phép đo hình học canh nó. Ca này giữ nguyên nhiệm vụ gốc: bắn tia vào TÂM TOAST để chốt hộp
+  // thoại vẫn nằm TRÊN Toast; chỉ đổi cách mở hộp thoại từ bàn phím sang chuột.
   test('C-T24/2b — Toast còn sống thì hộp thoại vẫn nằm trên nó (bắn tia vào tâm Toast)', async ({
     page,
     request,
@@ -796,10 +851,18 @@ test.describe('phân đoạn 2 của buổi demo', () => {
       `Toast không có trong danh sách lớp nổi đang hiện: ${JSON.stringify(lopDinh)}`,
     ).toBe(true)
 
-    // Mở bằng BÀN PHÍM có chủ ý: `click()` đòi tâm nút không bị che, mà toast đang che đúng chỗ đó
-    // — Playwright sẽ đứng đợi 4 s cho toast tắt, tức tự tay xoá mất tiền đề của phép đo.
-    await nutMoLai.focus()
-    await page.keyboard.press('Enter')
+    // P3 (Ruling 425): bấm bằng CHUỘT — đường người trình bày thật sự dùng trước Ban ATCL.
+    //
+    // Bản trước phải mở bằng bàn phím (`focus()` + `Enter`) vì `click()` của Playwright đòi tâm nút
+    // không bị che, mà Toast đang che đúng chỗ đó ⇒ nó đứng đợi 4 giây cho Toast tắt, tức tự tay
+    // xoá mất tiền đề của chính phép đo. Đường vòng ấy là một ca test ĐÃ BIẾT lỗi và đi vòng qua
+    // thay vì tố nó. Sau khi Toast thôi nằm đè lên vùng bấm được, `click()` ăn ngay.
+    //
+    // ĐỪNG coi dòng này là người canh của P3 — ĐÃ ĐO: đột biến trả thanh dính về `bottom-0` (Toast
+    // chồng lại 74×20px, `C-T24/2c` đỏ ngay ở cả hai viewport) thì `click()` ở đây VẪN ăn. Phép
+    // kiểm "nhận được sự kiện" của Playwright không tương đương phép giao hai hộp. Người canh của
+    // P3 là `C-T24/2c`; dòng này chỉ trả ca về đúng đường người dùng đi.
+    await nutMoLai.click({ timeout: 2_000 })
     await expect(page.getByRole('dialog')).toBeVisible()
 
     // TIỀN ĐỀ, đọc ngay lập tức (không `expect` có retry — một khẳng định chờ được thì nó sẽ chờ
@@ -815,6 +878,54 @@ test.describe('phân đoạn 2 của buổi demo', () => {
 
     await page.keyboard.press('Escape')
     await expect(page.getByRole('dialog')).toHaveCount(0)
+  })
+
+  // P3 (final-fix-FE.md, Ruling 425 · final-review-R3-report.md §A1) — LỖI SẢN PHẨM, nay có người
+  // canh HÌNH HỌC.
+  //
+  // Kịch bản demo nguyên văn: admin bấm Duyệt → Toast "Đã duyệt · Xem dashboard" hiện góc dưới
+  // phải → người trình bày bấm nút tiếp theo trên thanh dính (`Mở lại`, `Lưu`) và **không ăn suốt
+  // 4 giây**, vì Toast (`fixed right-6 bottom-6`) chồng đúng lên cụm nút bên phải của thanh dính
+  // (`sticky bottom-0 justify-between`).
+  //
+  // Khẳng định là HÌNH HỌC chứ không phải một lớp CSS, có chủ ý: `bottom-24` hay bất cứ toạ độ nào
+  // khác chỉ dời cửa sang một thanh dính cao hơn / một viewport thấp hơn. Ca này chạy trên CẢ HAI
+  // project (1280×800 và 1024×640 — chính viewport đo được lỗi), nên một bản vá chỉ đúng ở màn to
+  // sẽ đỏ ở màn nhỏ.
+  test('C-T24/2c — Toast không đè lên BẤT KỲ nút nào đang hiện (giao hai hộp = ∅)', async ({
+    page,
+    request,
+  }) => {
+    boQuaNeuKhongResetDuoc()
+    const idP05 = await idBaoCao(request, await tokenApi(request, 'admin@ptsc.local'), DON_VI_U22)
+    await nopBaoCaoQuaApi(request, await tokenApi(request, 'u22@ptsc.local'), idP05)
+    await dangNhap(page, 'admin@ptsc.local')
+    await page.goto(`/reports/${idP05}`)
+    await expect(page.locator('tbody tr')).toHaveCount(62)
+
+    await page.getByRole('button', { name: 'Duyệt' }).click()
+    await page.getByRole('dialog').getByRole('button', { name: 'Duyệt' }).click()
+
+    const toast = page.getByRole('status').filter({ hasText: 'Xem dashboard' })
+    await expect(toast).toBeVisible()
+    // Thanh dính phải ĐANG có nút — sau khi duyệt, `Mở lại…` thế chỗ `Duyệt`. Không có khẳng định
+    // này thì một trang không còn nút nào cũng cho "giao rỗng" và ca xanh rỗng.
+    await expect(page.getByRole('button', { name: 'Mở lại' })).toBeVisible()
+
+    const do_ = await page.evaluate(doGiaoToastVoiNut, 'Xem dashboard')
+
+    // Ba tiền đề, đọc NGAY (không `expect` có retry — một khẳng định chờ được sẽ chờ Toast sống
+    // lại, chuyện không bao giờ xảy ra, và biến lỗi tiền đề thành lỗi hết giờ khó đọc).
+    expect(do_.coToast, 'Không tìm thấy Toast đang hiện — mọi khẳng định dưới đây là bằng chứng rỗng').toBe(true)
+    expect(
+      do_.soNut,
+      `Không có <button> nào đang hiện để đo — giao rỗng lúc này không chứng minh gì (nút: ${JSON.stringify(do_.tenNut)})`,
+    ).toBeGreaterThanOrEqual(2)
+
+    expect(
+      do_.giao,
+      `Toast ${do_.hopToast} đang nằm ĐÈ lên vùng bấm được: ${do_.giao.join(' · ')}`,
+    ).toEqual([])
   })
 
   test('C-T25/2 — đo khoảng cách dưới titlebar của /status, /dashboard và /reports trên pixel', async ({

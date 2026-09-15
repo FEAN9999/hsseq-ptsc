@@ -21,7 +21,11 @@ export function AppShell({ children }: { children: ReactNode }) {
   return (
     <div className="min-h-screen flex bg-canvas">
       <Sidebar />
-      <main className="flex-1 min-w-0 p-6">{children}</main>
+      {/* P3 (Ruling 425): `pb-[var(--toast-cao)]` chừa sẵn dải Toast ở ĐÁY VÙNG NỘI DUNG, không chỉ
+          cho thanh dính. Một trang dài cuộn xuống có thể đặt BẤT KỲ nút nào vào góc dưới phải, nên
+          luật "Toast không nằm đè lên vùng bấm được" phải đặt ở tầng khung, không phải từng thanh.
+          Biến mặc định `0px` (index.css) nên khi không có Toast, bố cục không đổi một pixel nào. */}
+      <main className="flex-1 min-w-0 p-6 pb-[calc(1.5rem+var(--toast-cao))]">{children}</main>
     </div>
   )
 }

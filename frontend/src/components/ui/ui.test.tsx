@@ -1,8 +1,9 @@
-import { render, screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { act, render, screen } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { Chip } from './Chip'
 import { Tile } from './Tile'
+import { Toast, useToast } from './Toast'
 // Vòng sửa 2: mọi assert nói về giá trị THIẾT KẾ HIỂN THỊ (màu nền/viền/chữ, margin) phải hỏi
 // resolver "lớp nào thắng cascade trong CSS thật đã build", không hỏi className có chứa chuỗi gì —
 // xem giải thích đầy đủ trong cascade.ts.
@@ -225,5 +226,73 @@ describe('Tile', () => {
     render(<Tile label="LTI trong kỳ" value={2} unit="vụ" danger />)
     const cls = screen.getByText('vụ').className
     expect(resolveCascadeWinner(cls, 'color')).toBe('text-danger')
+  })
+})
+
+// ---- P3 (final-fix-FE.md, Ruling 425 · final-review-R3-report.md §A1) ----
+//
+// Người canh CHÍNH của mục này là khẳng định HÌNH HỌC ở e2e (`C-T24/2c`: giao hộp Toast với hộp mọi
+// <button> đang hiện = ∅) — jsdom không có layout nên không đo nổi phép giao đó.
+//
+// Hai ca dưới đây canh nửa CƠ CHẾ mà jsdom đo được, và chúng rẻ hơn e2e ~100 lần: Toast có thật sự
+// CÔNG BỐ dải nó chiếm không, và có TRẢ LẠI khi tắt không. Vế thứ hai quan trọng ngang vế thứ nhất:
+// một biến không được dọn để lại dải chừa vĩnh viễn trên MỌI trang về sau, mà không ai biết vì sao
+// thiếu mất bấy nhiêu pixel.
+describe('Toast — dải chừa (P3)', () => {
+  afterEach(() => {
+    document.documentElement.style.removeProperty('--toast-cao')
+    vi.useRealTimers()
+  })
+
+  function Bam({ chu }: { chu: string }) {
+    const hien = useToast()
+    return (
+      <button type="button" onClick={() => hien(chu)}>
+        bật
+      </button>
+    )
+  }
+
+  const bien = () => document.documentElement.style.getPropertyValue('--toast-cao')
+
+  it('Toast đang hiện thì CÔNG BỐ dải nó chiếm qua --toast-cao', async () => {
+    render(
+      <>
+        <Bam chu="Đã duyệt" />
+        <Toast />
+      </>,
+    )
+    expect(bien()).toBe('') // chưa có Toast: không chừa gì, bố cục không đổi một pixel
+    await act(async () => {
+      screen.getByRole('button', { name: 'bật' }).click()
+    })
+    expect(screen.getByRole('status').textContent).toContain('Đã duyệt')
+    // jsdom trả `getBoundingClientRect()` toàn số 0 nên con số ở đây không mang nghĩa hình học —
+    // nó bằng đúng `window.innerHeight`. Chốt DƯƠNG chứ không chỉ "là một độ dài px hợp lệ": một
+    // bản vá công bố `0px` vẫn đặt biến, vẫn khớp `/\d+px/`, mà lại chừa đúng 0 pixel — tức không
+    // sửa gì. Giới hạn đã biết: một bản vá đo bằng `offsetHeight` (bỏ mất khoảng hở dưới) cho 0
+    // trong jsdom nên cũng đỏ ở đây; hình học THẬT đo ở e2e `C-T24/2c`.
+    const px = bien()
+    expect(px).toMatch(/^\d+px$/)
+    expect(Number.parseFloat(px)).toBeGreaterThan(0)
+  })
+
+  it('Toast tắt sau 4 giây thì TRẢ LẠI dải — không để lại chỗ chừa vĩnh viễn', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    render(
+      <>
+        <Bam chu="Đã duyệt" />
+        <Toast />
+      </>,
+    )
+    await act(async () => {
+      screen.getByRole('button', { name: 'bật' }).click()
+    })
+    expect(bien()).not.toBe('')
+    await act(async () => {
+      vi.advanceTimersByTime(4000)
+    })
+    expect(screen.queryByRole('status')).toBeNull()
+    expect(bien()).toBe('')
   })
 })

@@ -1,7 +1,15 @@
 @import "tailwindcss";
 @config "../tailwind.config.ts";
 
-:root { color-scheme: light; }
+:root {
+  color-scheme: light;
+  /* P3 (Ruling 425): dải màn hình mà Toast chiếm, tính từ mép dưới khung nhìn lên. `Toast.tsx` đo
+     chính nó rồi ghi đè biến này khi hiện, trả về 0px khi tắt. Mọi phần tử tương tác dính đáy đọc
+     nó để LÙI LÊN — Toast dành sẵn chỗ chứ không nổi đè lên vùng bấm được. Khai ở đây (chứ không
+     chỉ đặt bằng JS) để `bottom-[var(--toast-cao)]` luôn có giá trị hợp lệ kể cả trước khi
+     `<Toast/>` kịp mount. */
+  --toast-cao: 0px;
+}
 body {
   margin: 0;
   background: #fafaf9;

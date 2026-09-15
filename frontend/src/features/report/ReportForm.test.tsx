@@ -1873,11 +1873,18 @@ describe('bản vẽ: cột lũy kế của counter, màu số, lớp dính', ()
     expect(resolveCascadeWinner(hop.className, 'max-height')).toBe('max-h-[calc(100vh-13rem)]')
   })
 
-  it('thanh chế độ dính đáy màn hình (bản vẽ .bar)', () => {
+  // P3 (final-fix-FE.md, Ruling 425 · final-review-R3-report.md §A1): `bottom-0` đổi thành
+  // `bottom-[var(--toast-cao)]`. Đây KHÔNG phải nới lỏng — biến mặc định là `0px` (index.css) nên
+  // vị trí nghỉ của thanh không đổi một pixel nào; nó chỉ thêm một đường để thanh LÙI LÊN khi Toast
+  // đang chiếm dải đáy, thay vì để Toast nằm đè lên cụm nút suốt 4 giây. Khẳng định vẫn đi qua
+  // `resolveCascadeWinner` (đọc CSS ĐÃ BUILD) nên nó vẫn chốt đúng lớp THẮNG cascade, và vẫn đỏ nếu
+  // ai đó bỏ `sticky` hay trả `bottom` về một hằng số cứng. Người canh HÌNH HỌC của chính lỗi đó
+  // nằm ở e2e (`C-T24/2c`) — jsdom không có layout nên không đo giao hai hộp được.
+  it('thanh chế độ dính đáy màn hình (bản vẽ .bar), lùi theo dải Toast', () => {
     ve({ state: 'draft', vai: 'reporter' })
     const thanh = screen.getByRole('button', { name: 'Lưu' }).parentElement!.parentElement!
     expect(resolveCascadeWinner(thanh.className, 'position')).toBe('sticky')
-    expect(resolveCascadeWinner(thanh.className, 'bottom')).toBe('bottom-0')
+    expect(resolveCascadeWinner(thanh.className, 'bottom')).toBe('bottom-[var(--toast-cao)]')
   })
 
   it('mọi đích nhảy có scroll-margin-top 80px để không nấp dưới header cột dính', () => {

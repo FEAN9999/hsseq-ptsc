@@ -75,7 +75,11 @@ export function FormModeBar({
   const hienThi = thieuBatBuoc.slice(0, MA_HIEN_TOI_DA)
   const cauDan = cauBaoDan(boQuaKhiDan, tranKhiDan)
   return (
-    <div className="sticky bottom-0 -mx-6 -mb-6 mt-3 flex items-center justify-between gap-4 bg-surface border-t border-hair px-5 py-3 text-table">
+    // P3 (final-fix-FE.md, Ruling 425 · final-review-R3-report.md §A1): `bottom-0` cố định làm cụm
+    // nút bên phải nằm ĐÚNG dưới Toast (`fixed right-6 bottom-6`) — bấm Duyệt xong, nút tiếp theo
+    // không ăn suốt 4 giây. `bottom-[var(--toast-cao)]` cho thanh lùi lên đúng dải Toast đang
+    // chiếm; biến mặc định `0px` (index.css) nên khi không có Toast thì thanh đứng y chỗ cũ.
+    <div className="sticky bottom-[var(--toast-cao)] -mx-6 -mb-6 mt-3 flex items-center justify-between gap-4 bg-surface border-t border-hair px-5 py-3 text-table">
       <div>
         {cauDan !== null ? (
           <span className="text-warning">{cauDan}</span>
