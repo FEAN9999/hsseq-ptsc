@@ -11,7 +11,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 
 import { AppShell } from './AppShell'
-import { resolveCascadeWinner } from './ui/cascade'
+import { resolveCascadeWinner, resolveDeclaredValue } from './ui/cascade'
 import { useSession } from '../app/session'
 
 beforeEach(() => useSession.getState().logout())
@@ -136,6 +136,32 @@ describe('Bố cục AppShell (đo bằng cascade CSS thật, không phải toCo
     const main = container.querySelector('main')
     expect(main).toBeTruthy()
     expect(resolveCascadeWinner(main!.className, 'padding')).toBe('p-6')
+  })
+
+  // N2 (final-rereview-report.md): nửa `AppShell` của bản vá P3 KHÔNG có một người canh nào — xoá
+  // `pb-[calc(1.5rem+var(--toast-cao))]` khỏi AppShell.tsx thì 803/803 vẫn xanh. Ca e2e hình học
+  // của P3 canh nửa `FormModeBar`, không canh nửa này, mà chính comment tại chỗ tuyên bố ĐÂY mới
+  // là tầng mang luật chung ("luật ... phải đặt ở tầng khung, không phải từng thanh"). Lỗi nó chặn
+  // — Toast che nút suốt 4 giây — là lỗi CHẠM TỚI ĐƯỢC trong demo, vừa sửa xong; để hở nghĩa là nó
+  // quay lại lặng lẽ trong một lượt dọn Tailwind mà không dòng nào đỏ.
+  //
+  // Hỏi `padding-bottom` (không phải `padding`) là hỏi ĐÚNG utility này: `p-6` sinh ra shorthand
+  // `padding:`, mà resolver CỐ Ý không hiểu shorthand (giới hạn P5 ghi ngay trong cascade.ts). Nên
+  // khi `pb-[calc(...)]` biến mất, không lớp nào còn khai báo `padding-bottom` ⇒ resolver trả
+  // `null` ⇒ ca này đỏ.
+  it('đáy vùng nội dung chừa sẵn dải Toast (nửa AppShell của P3) — N2', () => {
+    const { container } = veVoiQuyen(['dashboard.view'])
+    const main = container.querySelector('main')
+    expect(main).toBeTruthy()
+    expect(resolveCascadeWinner(main!.className, 'padding-bottom')).toBe(
+      'pb-[calc(1.5rem+var(--toast-cao))]',
+    )
+    // Khoá luôn GIÁ TRỊ, không chỉ tên lớp: đệm đáy phải là 24px CỘNG chiều cao dải Toast. Đổi
+    // thành `pb-[var(--toast-cao)]` (lớp này CÓ THẬT trong CSS đã build, FormModeBar đang dùng)
+    // vẫn giữ tên lớp "có vẻ đúng" nhưng làm mất 24px đệm gốc — chỉ so giá trị mới bắt được.
+    expect(resolveDeclaredValue(main!.className, 'padding-bottom')).toBe(
+      'calc(1.5rem + var(--toast-cao))',
+    )
   })
 })
 
