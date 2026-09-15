@@ -7,35 +7,85 @@ khi `APP_ENV` nằm trong tập môi trường an toàn biết trước
 biến, ca hay gặp nhất khi thiếu cấu hình trên server — đều bị từ chối, không
 chỉ riêng `production`.
 
-Không gọi `main(["--yes"])` thật trong suite: hai cầu chì đều thoát TRƯỚC khi
-mở `SessionLocal()` nên test qua `main()` vẫn là thật, nhưng nếu code sai
-(cầu chì bị nới lỏng) và thật sự chạy tới `SessionLocal()`, nó sẽ commit một
-lượt xoá + seed ra ngoài transaction của fixture `db` và làm hỏng các test
-khác — đây chính là ca mutation cần khoá, không phải lý do để né test.
-`test_reset_xoa_sach_ca_nam_bang...` khoá riêng bước xoá của `reset()` (gọi
-trực tiếp, qua fixture `db`, không qua `main()`) bằng cách vô hiệu `seed_all`.
+`main(["--yes"])` được gọi THẬT ở đây, nhưng không còn đạn thật trong súng:
+fixture autouse `chan_lop_dung_db` thay `reset_demo.SessionLocal` bằng một
+phiên giả cho cả module. Trước đây thứ DUY NHẤT giữ cho file test này khỏi xoá
+sạch `$DATABASE_URL` là chính cầu chì mà nó đang kiểm — nên một lượt đột biến
+cầu chì (đúng việc một vòng rà soát phải làm) biến bộ test thành lệnh huỷ dữ
+liệu: `DELETE` + `seed_all` + `commit` vào `hseq_test`, rồi lỗi hiện ra ở 17 ca
+`test_fixture_loader.py` với thông báo chỉ tay sai chỗ hoàn toàn
+(final-review-R1-report.md §1 và §(A4)).
+
+Hai cầu chì vẫn được kiểm y nguyên, và chặt hơn trước: đường TỪ CHỐI khẳng
+định thêm rằng phiên DB chưa hề được mở, đường THỰC THI khẳng định nó ĐÃ đi
+tới lớp đụng DB rồi bị chặn tại đó (`_ChamDB`) — chứ không phải im lặng không
+chạy gì. `test_reset_*` ở cuối file gọi thẳng `reset(db)` qua fixture `db`
+(không qua `main()`), nên không dính phiên giả.
 """
 import pytest
 
 from app.seed import seed_all
 
 
-def test_tu_choi_khi_thieu_co_yes(monkeypatch):
+class _ChamDB(RuntimeError):
+    """`main()` đã đi tới lớp đụng CSDL. Trong suite, lớp đó dừng ở đây."""
+
+
+@pytest.fixture(autouse=True)
+def chan_lop_dung_db(monkeypatch):
+    """Thay `reset_demo.SessionLocal` bằng phiên giả: ghi lại câu SQL đầu tiên
+    rồi ném `_ChamDB`, không chạm Postgres.
+
+    Chỉ thay `SessionLocal` — KHÔNG thay `reset` hay `seed_all`, vì các ca
+    `test_reset_*` gọi thẳng `reset(db)` trên fixture `db` thật và cần cả hai
+    chạy thật.
+
+    Trả về sổ `dau_vet` để test khẳng định main() đã (hoặc chưa) đi tới đây.
+    """
+    import scripts.reset_demo as reset_demo
+
+    dau_vet = {"mo_phien": 0, "sql": []}
+
+    class _PhienGia:
+        def __enter__(self):
+            dau_vet["mo_phien"] += 1
+            return self
+
+        def __exit__(self, *ngoai_le):
+            return False
+
+        def execute(self, cau, *args, **kwargs):
+            dau_vet["sql"].append(str(cau))
+            raise _ChamDB(str(cau))
+
+        def flush(self):
+            raise _ChamDB("flush")
+
+        def commit(self):
+            raise _ChamDB("commit")
+
+    monkeypatch.setattr(reset_demo, "SessionLocal", _PhienGia)
+    return dau_vet
+
+
+def test_tu_choi_khi_thieu_co_yes(monkeypatch, chan_lop_dung_db):
     from scripts.reset_demo import main
     with pytest.raises(SystemExit) as e:
         main([])
     assert e.value.code == 1
+    assert chan_lop_dung_db["mo_phien"] == 0
 
 
-def test_tu_choi_khi_APP_ENV_production(monkeypatch):
+def test_tu_choi_khi_APP_ENV_production(monkeypatch, chan_lop_dung_db):
     from scripts.reset_demo import main
     monkeypatch.setenv("APP_ENV", "production")
     with pytest.raises(SystemExit) as e:
         main(["--yes"])
     assert e.value.code == 1
+    assert chan_lop_dung_db["mo_phien"] == 0
 
 
-def test_tu_choi_khi_APP_ENV_khong_dat(monkeypatch):
+def test_tu_choi_khi_APP_ENV_khong_dat(monkeypatch, chan_lop_dung_db):
     """Thiếu hẳn biến APP_ENV (lỗi cấu hình hay gặp khi dựng server) phải bị
     từ chối giống hệt một giá trị nguy hiểm — mặc định là TỪ CHỐI, không phải
     cho phép. Đây là test carry E3 yêu cầu thêm, brief gốc không có."""
@@ -44,6 +94,7 @@ def test_tu_choi_khi_APP_ENV_khong_dat(monkeypatch):
     with pytest.raises(SystemExit) as e:
         main(["--yes"])
     assert e.value.code == 1
+    assert chan_lop_dung_db["mo_phien"] == 0
 
 
 def test_thong_bao_tu_choi_neu_ro_gia_tri_APP_ENV_hien_tai(monkeypatch, capsys):
@@ -79,28 +130,43 @@ def test_thong_bao_APP_ENV_chi_duong_lenh_dung(monkeypatch, capsys):
     assert "APP_ENV=local" in capsys.readouterr().out
 
 
-def test_APP_ENV_demo_duoc_chap_nhan(monkeypatch):
+def test_APP_ENV_demo_duoc_chap_nhan(monkeypatch, chan_lop_dung_db):
     """demo là môi trường Render thật (Task 28, task-14-fix-brief.md S1) — chính
-    script này sinh ra để reset nó trước mỗi lượt demo. Không chạy reset() thật:
-    monkeypatch SessionLocal và reset() thành no-op, chỉ khẳng định main()
-    KHÔNG ném SystemExit khi APP_ENV=demo."""
+    script này sinh ra để reset nó trước mỗi lượt demo. Với APP_ENV=demo,
+    main() KHÔNG được SystemExit: nó phải đi qua cầu chì tới lớp đụng DB, nơi
+    fixture autouse chặn lại. Khẳng định ĐÃ tới đó, chứ không phải chạy thật."""
     import scripts.reset_demo as reset_demo
 
-    class _PhienGia:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *ngoai_le):
-            return False
-
-        def commit(self):
-            pass
-
     monkeypatch.setenv("APP_ENV", "demo")
-    monkeypatch.setattr(reset_demo, "SessionLocal", _PhienGia)
-    monkeypatch.setattr(reset_demo, "reset", lambda db: None)
 
-    reset_demo.main(["--yes"])  # không raise SystemExit
+    with pytest.raises(_ChamDB):
+        reset_demo.main(["--yes"])
+
+    assert chan_lop_dung_db["mo_phien"] == 1
+
+
+def test_cau_chi_bi_bop_van_khong_xoa_gi(monkeypatch, chan_lop_dung_db):
+    """Ca canh cho chính lưới an toàn của file này (R1 §(A4)).
+
+    Bóp cầu chì `APP_ENV` đúng kiểu một vòng rà soát sẽ làm — nới
+    `MOI_TRUONG_AN_TOAN` cho lọt một giá trị nguy hiểm — rồi gọi
+    `main(["--yes"])` thật. Hai điều phải đúng cùng lúc:
+
+    1. đường thực thi PHẢI chạy tới lớp đụng DB (nếu không, mọi ca "từ chối"
+       ở trên chỉ đang đo một đường chết và `mo_phien == 0` mất hết ý nghĩa);
+    2. câu `DELETE` đầu tiên phải dừng tại phiên giả, KHÔNG tới Postgres — tức
+       cầu chì hỏng thì bộ test vẫn không xoá gì.
+    """
+    import scripts.reset_demo as reset_demo
+
+    monkeypatch.setattr(reset_demo, "MOI_TRUONG_AN_TOAN", {"production"})
+    monkeypatch.setenv("APP_ENV", "production")
+
+    with pytest.raises(_ChamDB):
+        reset_demo.main(["--yes"])
+
+    assert chan_lop_dung_db["mo_phien"] == 1
+    assert chan_lop_dung_db["sql"] == ["DELETE FROM audit_log"]
 
 
 def test_cau_chi_yes_duoc_kiem_truoc_APP_ENV(monkeypatch, capsys):
