@@ -291,8 +291,15 @@ export function useSaveValues(reportId: number, phienBanDau: number): KetQuaLuu 
     return () => {
       window.removeEventListener('beforeunload', chanDongTab)
       window.removeEventListener('online', khiCoMang)
-      // Rời màn hình thì huỷ hẹn: không có ai đọc kết quả nữa, và một PUT bắn ra sau khi form đã
-      // chết chỉ làm mọi tab khác dính 409.
+      // Rời màn hình thì huỷ hẹn. LÝ DO ĐÃ ĐỔI (P4, Ruling 426 — final-review-R3-report.md §A2):
+      // lý do cũ ghi ở đây là "một PUT bắn ra sau khi form đã chết chỉ làm mọi tab khác dính 409",
+      // một GIẢ ĐỊNH; vế đối diện — mất số, câm, không hoàn tác — là CHẮC CHẮN, và nó thắng.
+      //
+      // Nhưng cách sửa KHÔNG phải xả hàng chờ ở đây (`void saveNow()`): bắn ra lúc form đang chết
+      // thì không còn ai nghe lỗi, người dùng đi tiếp và tin là đã lưu — đúng lý do Task 29 bị cắt.
+      // Cửa được đóng ở TẦNG TRÊN: `ReportForm.tsx` dùng `useBlocker` để trang KHÔNG chết khi còn
+      // ô bẩn. Tới được dòng này nghĩa là người dùng đã được hỏi và đã chọn bỏ số — huỷ hẹn lúc đó
+      // là làm đúng điều họ vừa chọn, không còn là một đường câm.
       huyHen()
     }
     // Mảng rỗng có chủ ý: `saveNow` của lần render đầu đọc mọi thứ nó cần qua ref (`hangCho`,

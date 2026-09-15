@@ -292,7 +292,21 @@ describe('useSaveValues — gửi gì, khi nào', () => {
     expect(h.current.dirtyCount).toBe(2)
   })
 
-  it('rời màn hình (unmount) thì huỷ hẹn, không gửi request nữa', async () => {
+  // P4 (final-fix-FE.md, Ruling 426 · final-review-R3-report.md §A2) — CA NÀY VIẾT LẠI THEO MỘT
+  // QUYẾT ĐỊNH ĐÃ BỊ LẬT.
+  //
+  // Bản cũ tên là "rời màn hình (unmount) thì huỷ hẹn, không gửi request nữa" và nó KHOÁ CỨNG đúng
+  // con đường làm mất số: bấm Dashboard ở sidebar trong 1,5 giây debounce ⇒ unmount ⇒ `clearTimeout`
+  // không xả hàng chờ ⇒ `PUT` không bao giờ bay, và dòng "Chưa lưu (1 ô)" biến mất cùng trang nên
+  // không còn dấu vết nào.
+  //
+  // Hành vi của HOOK thì không đổi — và đó là có chủ ý: xả hàng chờ trong cleanup là tấm lưới chỉ
+  // đỡ đôi khi (bắn xong mà hỏng thì không ai nghe lỗi). Cái đổi là NGHĨA của nó: unmount giờ chỉ
+  // xảy ra SAU KHI người dùng được hỏi thẳng và chọn bỏ số — `useBlocker` ở `ReportForm.tsx` chặn
+  // trước. Ca này canh nốt nửa sau ("chọn bỏ thì bỏ thật, không có PUT ma nào bay sau đó"); nửa
+  // trước — "không ai bỏ mà không được hỏi" — canh ở `ReportForm.test.tsx`, describe
+  // "P4 — chặn điều hướng SPA khi còn ô chưa lưu".
+  it('người dùng đã chọn rời trang: unmount huỷ hẹn, KHÔNG có PUT ma bay sau đó', async () => {
     const h = ren()
     act(() => {
       h.current.markDirty('B-2.1', { thisPeriod: 1 })

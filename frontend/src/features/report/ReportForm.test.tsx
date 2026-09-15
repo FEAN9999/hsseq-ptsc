@@ -17,11 +17,11 @@
 //
 // PHẢI `npm run build` trước khi chạy file này: các khẳng định màu banner đọc CSS THẬT đã build
 // (`resolveCascadeWinner`, task-20-carry.md C4) chứ không hỏi `className.includes`.
-import { useState, type ReactElement, type ReactNode } from 'react'
+import { createContext, useContext, useState, type ReactElement, type ReactNode } from 'react'
 import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { MemoryRouter } from 'react-router-dom'
+import { Link, RouterProvider, createMemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ReportForm, type ChiTietBaoCao, type GiaTriBaoCao, type MauBaoCao, type ChiTieuMau, type LoiXungDot } from './ReportForm'
@@ -131,11 +131,30 @@ interface VeOpts {
  * ngay lúc render. Bọc lại cho khớp CÂY THẬT thay vì bẻ mã sản phẩm sang `location.assign` cho
  * vừa test: đó đúng là nguyên nhân của lỗi S1 ở Task 20 (task-20-fix-1.md). Mỗi cây một client
  * RIÊNG — dùng chung là đường cho cache rò từ ca này sang ca kia. */
+// P4 (final-fix-FE.md, Ruling 426): `createMemoryRouter` + `RouterProvider` chứ không
+// `MemoryRouter`. `useBlocker` — thứ giữ cho ô số không chết câm khi điều hướng SPA — CHỈ chạy
+// trong DATA router, đúng loại `app/routes.tsx` dùng (`createBrowserRouter`). Đây là lần thứ hai
+// file này bọc lại cho khớp CÂY THẬT thay vì bẻ mã sản phẩm cho vừa test (lần đầu: S1 của Task 20).
+//
+// Router giữ NGUYÊN DANH TÍNH qua mọi lần render — 9 ca dùng `rerender`/`batLoiLamMoi` để mô phỏng
+// một lượt làm mới nền, và dựng router mới mỗi lần render sẽ thay cả `RouterProvider`, giết state
+// của form ngay giữa phép đo. `children` MỚI đi vào router CŨ qua một context: đổi context thì
+// chính phần tử route phải vẽ lại, không phụ thuộc vào việc `RouterProvider` có chịu vẽ lại hay
+// không.
+const ConCuaBoc = createContext<ReactNode>(null)
+
+function KeoCon() {
+  return <>{useContext(ConCuaBoc)}</>
+}
+
 function BocQuery({ children }: { children: ReactNode }) {
   const [qc] = useState(() => new QueryClient())
+  const [router] = useState(() => createMemoryRouter([{ path: '*', element: <KeoCon /> }]))
   return (
     <QueryClientProvider client={qc}>
-      <MemoryRouter>{children}</MemoryRouter>
+      <ConCuaBoc.Provider value={children}>
+        <RouterProvider router={router} />
+      </ConCuaBoc.Provider>
     </QueryClientProvider>
   )
 }
@@ -3234,3 +3253,132 @@ describe('hộp thoại chuyển trạng thái', () => {
     expect(bao.textContent).toContain('C1: Nội dung vượt quá 2000 ký tự')
   })
 })
+
+// ============================================================ P4 — chặn điều hướng khi còn ô bẩn
+//
+// final-fix-FE.md P4, Ruling 426 · final-review-R3-report.md §(A2).
+//
+// LỖI: gõ số → rời ô → dải đầu hiện "Chưa lưu (1 ô)", hẹn `PUT` sau 1,5 giây. Trong 1,5 giây đó
+// bấm **Dashboard** ở sidebar ⇒ `ReportDetail` unmount ⇒ cleanup của `useSaveValues` gọi `huyHen()`
+// — `clearTimeout` mà KHÔNG xả hàng chờ. `PUT` không bao giờ bay, số MẤT HẲN, và dòng "Chưa lưu
+// (1 ô)" biến mất cùng trang nên không còn một dấu vết nào. `beforeunload` không cứu được: sidebar
+// dùng `NavLink`, điều hướng SPA không bắn sự kiện đó.
+//
+// LẬT BẰNG CHẶN, KHÔNG BẰNG XẢ. `void saveNow()` trong cleanup là một tấm lưới chỉ đỡ ĐÔI KHI:
+// bắn xong mà hỏng thì không còn ai nghe lỗi, người dùng đi tiếp và tin là đã lưu. `useBlocker`
+// đổi CHẤT câu hỏi — đừng đua lưu lúc trang đang chết, đừng để trang chết khi còn ô bẩn.
+//
+// Ca số 4 và 5 là MẶT ÂM và chúng bắt buộc: một `useBlocker(() => true)` chặn mọi lúc cũng làm ba
+// ca đầu xanh, mà nó biến mỗi cú bấm sidebar của buổi demo thành một hộp thoại vô cớ.
+describe('P4 — chặn điều hướng SPA khi còn ô chưa lưu', () => {
+  beforeEach(dongHoGia)
+
+  /** Cây có ĐIỀU HƯỚNG THẬT: hai route + một `<Link>`, chạy trên data router y như app thật. Không
+   *  dùng `BocQuery` (route `*` duy nhất) vì ca này cần một đích để rời ĐI và một cách đo "đã rời
+   *  chưa" trên cây thật, không phải bằng spy. */
+  /** Mẫu một dòng — đủ để làm bẩn một ô mà không dựng 62 dòng cho mỗi ca. */
+  const MOT_DONG = () => mauNho([chiTieu({ code: 'B-1.1' })])
+
+  function veCoLoiRa(opts: VeOpts = {}) {
+    const mau = opts.mau ?? MAU_FM01
+    const quyen =
+      opts.vai === 'admin' ? QUYEN_ADMIN : opts.vai === 'viewer' ? QUYEN_VIEWER : QUYEN_REPORTER
+    useSession.getState().login('tok-test', NGUOI_DUNG, DON_VI, quyen)
+
+    const router = createMemoryRouter(
+      [
+        {
+          path: '/reports/12',
+          element: (
+            <>
+              <Link to="/dashboard">Dashboard</Link>
+              <ReportForm mau={mau} chiTiet={duLieu(opts)} />
+            </>
+          ),
+        },
+        { path: '/dashboard', element: <div>ĐÃ SANG DASHBOARD</div> },
+      ],
+      { initialEntries: ['/reports/12'] },
+    )
+    function Cay() {
+      const [qc] = useState(() => new QueryClient())
+      return (
+        <QueryClientProvider client={qc}>
+          <RouterProvider router={router} />
+        </QueryClientProvider>
+      )
+    }
+    return render(<Cay />)
+  }
+
+  const daSangDashboard = () => screen.queryByText('ĐÃ SANG DASHBOARD') !== null
+
+  it('còn ô bẩn: bấm Dashboard KHÔNG rời trang, mà hỏi một câu rõ ràng', async () => {
+    const u = nguoiDung()
+    veCoLoiRa({ state: 'draft', vai: 'reporter', mau: MOT_DONG() })
+    await lamBanMotO(u)
+    expect(screen.getByText('Chưa lưu (1 ô)')).toBeTruthy()
+
+    await u.click(screen.getByRole('link', { name: 'Dashboard' }))
+
+    expect(daSangDashboard()).toBe(false)
+    const hop = screen.getByRole('dialog')
+    // Câu phải NÓI RA hậu quả và ĐẾM đúng số ô — "Bạn có chắc không?" là một câu câm kiểu khác.
+    expect(hop.textContent).toContain('1 ô')
+    expect(hop.textContent).toMatch(/chưa (được )?lưu|chưa gửi/i)
+  })
+
+  it('bấm Huỷ thì ở lại — và số VẪN được gửi khi hết 1,5 giây (đây là toàn bộ điểm của mục)', async () => {
+    const u = nguoiDung()
+    veCoLoiRa({ state: 'draft', vai: 'reporter', mau: MOT_DONG() })
+    await lamBanMotO(u, 'B-1.1', '12')
+    await u.click(screen.getByRole('link', { name: 'Dashboard' }))
+    await u.click(screen.getByRole('dialog').querySelector('button')!) // nút đầu = "Huỷ"
+
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(daSangDashboard()).toBe(false)
+    expect(screen.getByText('Chưa lưu (1 ô)')).toBeTruthy()
+
+    // Đường thật, không phải spy: hàng chờ còn sống nên hẹn 1,5 giây vẫn nổ và số lên tới server.
+    await choDebounce()
+    expect(putSpy).toHaveBeenCalled()
+    const than = putSpy.mock.calls[0][1] as { values: { indicator_code: string; this_period: number }[] }
+    expect(than.values).toEqual([{ indicator_code: 'B-1.1', this_period: 12 }])
+  })
+
+  it('bấm nút chính thì RỜI trang — người dùng đã được nói rõ là mất số', async () => {
+    const u = nguoiDung()
+    veCoLoiRa({ state: 'draft', vai: 'reporter', mau: MOT_DONG() })
+    await lamBanMotO(u)
+    await u.click(screen.getByRole('link', { name: 'Dashboard' }))
+    const nut = screen.getByRole('dialog').querySelectorAll('button')
+    await u.click(nut[nut.length - 1]) // nút chính, đứng SAU "Huỷ" trong DOM (Dialog.tsx)
+
+    await waitFor(() => expect(daSangDashboard()).toBe(true))
+  })
+
+  // MẶT ÂM 1: không có ô bẩn thì đi thẳng. Thiếu ca này, `useBlocker(() => true)` vẫn xanh ba ca
+  // trên mà biến mọi cú bấm sidebar thành một hộp thoại vô cớ giữa buổi demo.
+  it('mặt âm — không có ô bẩn thì bấm Dashboard đi THẲNG, không hỏi gì', async () => {
+    const u = nguoiDung()
+    veCoLoiRa({ state: 'draft', vai: 'reporter', mau: MOT_DONG() })
+    await u.click(screen.getByRole('link', { name: 'Dashboard' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    await waitFor(() => expect(daSangDashboard()).toBe(true))
+  })
+
+  // MẶT ÂM 2: đã lưu xong thì thôi hỏi. Điều kiện phải đọc `dirtyCount` SỐNG chứ không phải một cờ
+  // "đã từng gõ" — một cờ như thế làm trang hỏi mãi mãi sau ô đầu tiên.
+  it('mặt âm — gõ rồi để hết debounce (đã lưu xong) thì bấm Dashboard đi THẲNG', async () => {
+    const u = nguoiDung()
+    veCoLoiRa({ state: 'draft', vai: 'reporter', mau: MOT_DONG() })
+    await lamBanMotO(u)
+    await choDebounce()
+    expect(putSpy).toHaveBeenCalled()
+
+    await u.click(screen.getByRole('link', { name: 'Dashboard' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    await waitFor(() => expect(daSangDashboard()).toBe(true))
+  })
+})
+

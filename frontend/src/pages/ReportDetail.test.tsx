@@ -12,7 +12,7 @@ import { act, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { RouterProvider, createMemoryRouter } from 'react-router-dom'
 
 import { ReportDetail } from './ReportDetail'
 import { useSession } from '../app/session'
@@ -176,13 +176,16 @@ function ve(quyen: string[] = QUYEN_NGUOI_NOP) {
     .getState()
     .login('tok-1', { id: 1, email: 'u@ptsc.local', full_name: 'Người dùng', position: null }, { id: 2, code: 'U01', name: 'PTSC Miền Trung' }, quyen)
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  // P4 (final-fix-FE.md, Ruling 426): DATA router (`createMemoryRouter` + `RouterProvider`), đúng
+  // loại `app/routes.tsx` dùng. `ReportForm` — dựng bên trong trang này — gọi `useBlocker` để trang
+  // không chết câm khi còn ô chưa lưu, và `useBlocker` CHỈ chạy trong data router. Bọc cho khớp
+  // CÂY THẬT thay vì bẻ mã sản phẩm cho vừa test.
+  const router = createMemoryRouter([{ path: '/reports/:id', element: <ReportDetail /> }], {
+    initialEntries: ['/reports/12'],
+  })
   return render(
     <QueryClientProvider client={qc}>
-      <MemoryRouter initialEntries={['/reports/12']}>
-        <Routes>
-          <Route path="/reports/:id" element={<ReportDetail />} />
-        </Routes>
-      </MemoryRouter>
+      <RouterProvider router={router} />
     </QueryClientProvider>,
   )
 }

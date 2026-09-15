@@ -20,6 +20,7 @@
 // 4. Ô CHỈ ĐỌC LÀ `<td>` CHỮ THƯỜNG, không phải `<input disabled>` (a11y, Pass 6) — và nhờ đó
 //    thứ tự Tab mặc định của trình duyệt đã tự bỏ qua chúng (xem useKeyboardNav.tsx).
 import { useEffect, useMemo, useReducer, useRef } from 'react'
+import { useBlocker } from 'react-router-dom'
 
 import { Banner } from '../../components/ui/Banner'
 import { Dialog } from '../../components/ui/Dialog'
@@ -455,6 +456,26 @@ export function ReportForm({ mau, chiTiet, loiLamMoi = false }: ReportFormProps)
     },
   })
 
+  // P4 (final-fix-FE.md, Ruling 426 · final-review-R3-report.md §A2) — ĐỪNG ĐỂ TRANG CHẾT KHI CÒN
+  // Ô BẨN.
+  //
+  // Trước bản vá: gõ số → rời ô → hẹn `PUT` sau 1,5 giây; trong 1,5 giây đó bấm **Dashboard** ở
+  // sidebar ⇒ `ReportDetail` unmount ⇒ cleanup của `useSaveValues` gọi `huyHen()` (`clearTimeout`
+  // mà KHÔNG xả hàng chờ) ⇒ `PUT` không bao giờ bay, số MẤT HẲN, và dòng "Chưa lưu (1 ô)" biến mất
+  // cùng trang nên không còn một dấu vết nào. `beforeunload` (useSaveValues.ts) chỉ chạy khi đóng
+  // tab / F5 / rời origin — sidebar dùng `NavLink`, điều hướng SPA không bắn sự kiện đó.
+  //
+  // VÌ SAO KHÔNG XẢ (`void saveNow()` trong cleanup): đó là tấm lưới chỉ đỡ ĐÔI KHI — bắn xong mà
+  // hỏng thì không còn ai nghe lỗi, người dùng đi tiếp và tin là đã lưu. Chặn thì không có đường
+  // câm ở CẢ HAI phía: ở lại thì số còn trong hàng chờ và hẹn 1,5 giây vẫn nổ; rời đi thì đã được
+  // nói thẳng là mất mấy ô.
+  //
+  // Điều kiện đúng bằng `dirtyCount > 0`, không thêm phép so `pathname` nào: mọi neo mục lục của
+  // trang này là `<a href="#...">` thuần (ReportForm.tsx:735, FormModeBar.tsx:90) — react-router
+  // KHÔNG chặn thẻ `<a>` thuần, nên không có đường điều hướng nào giữ nguyên `pathname` để mà phải
+  // loại trừ. Thêm phép so đó là mã không đường nào đi tới.
+  const chanRoiTrang = useBlocker(luuGiaTri.dirtyCount > 0)
+
   const luu = () => void luuGiaTri.saveNow()
   // Gắn ở GỐC form chứ không ở riêng khung bảng: Ctrl+S phải chạy cả khi người dùng đang đứng
   // trong textarea nhóm C — vừa gõ xong phần nhận xét là lúc người ta bấm lưu nhiều nhất.
@@ -754,6 +775,20 @@ export function ReportForm({ mau, chiTiet, loiLamMoi = false }: ReportFormProps)
           trong app thật, một nhánh chỉ test đi qua. `dangHoi` gán ra `const` trước: phép
           thu hẹp "khác null" của TypeScript chỉ sống trong closure `onConfirm` khi nó nhìn vào
           một binding không đổi. */}
+      {/* P4: hộp thoại của đường CHẶN. Cùng `Dialog` với bốn chuyển trạng thái — không dựng khuôn
+          hỏi thứ hai. `danger` vì nút chính đúng là phá đi thứ người dùng vừa gõ. Câu nói ra ĐÚNG
+          số ô sẽ mất: "Bạn có chắc không?" chỉ là một câu câm kiểu khác. */}
+      {chanRoiTrang.state === 'blocked' && (
+        <Dialog
+          title="Còn ô chưa lưu"
+          body={`${luuGiaTri.dirtyCount} ô vừa nhập chưa được gửi lên máy chủ. Rời trang bây giờ là mất số đó.`}
+          confirmLabel="Rời trang, bỏ số"
+          danger
+          onConfirm={() => chanRoiTrang.proceed()}
+          onCancel={() => chanRoiTrang.reset()}
+        />
+      )}
+
       {dangHoi !== null && (
         <Dialog
           {...noiDungDialog(dangHoi, chiTiet.header)}
