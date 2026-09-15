@@ -531,3 +531,38 @@ def test_apply_transition_tu_kiem_pham_vi_khi_goi_thang_khong_qua_http(db):
         apply_transition(db, bc.id, "reopen", "Duyệt nhầm", "approved", bc.version, actor)
     assert loi.value.detail == "Bạn không có quyền thực hiện thao tác này trên đơn vị này"
     assert db.query(Report).filter_by(id=bc.id).one().version == bc.version
+
+
+def test_khoa_go_sai_o_transition_bi_tu_choi_422_khong_duyet_bao_cao(client, db):
+    """`TransitionIn` phải siết như mọi thân request khác — không đứng ngoài.
+
+    `TransitionIn` từng kế thừa `BaseModel` TRẦN (mặc định `extra="ignore"`)
+    trong khi `ApiModel` đã `extra="forbid"`: gửi `"notes"` (gõ sai `note`)
+    kèm `approve` đi lọt thành **200, báo cáo ĐƯỢC DUYỆT, `decision_note` =
+    None** — ghi chú duyệt bốc hơi im lặng (final-rereview-report.md §N1).
+    Không có kịch bản hỏng sống (FE không gửi `note` cho `approve`), nhưng
+    một bảo đảm nửa vời là một bảo đảm GIẢ: người đọc `ApiModel
+    extra="forbid"` tin MỌI thân request đều siết, và hai lớp lọt ra ngoài
+    biến niềm tin đó thành cái bẫy.
+
+    Ca song sinh cho `DangNhapRequest`: tests/api/test_auth.py::
+    test_khoa_go_sai_o_login_bi_tu_choi_422_khong_cap_token.
+    """
+    seed_all(db)
+    hu = dang_nhap(client, "u22@ptsc.local")
+    ha = dang_nhap(client, "admin@ptsc.local")
+    bc = _nhap_08(client, hu)
+    v = client.get(f"/api/v1/reports/{bc['id']}", headers=hu).json()["version"]
+    v = _chuyen(client, hu, bc["id"], "submit", "draft", v).json()["version"]
+
+    r = client.post(
+        f"/api/v1/reports/{bc['id']}/transition",
+        json={"action": "approve", "expected_state": "submitted", "version": v,
+              "notes": "Đã đối chiếu số B-8"},   # gõ sai: đúng phải là `note`
+        headers=ha,
+    )
+    assert r.status_code == 422, f"khoá gõ sai đi lọt: {r.status_code} {r.text}"
+
+    sau = client.get(f"/api/v1/reports/{bc['id']}", headers=hu).json()
+    assert sau["state"] == "submitted", "lượt bị từ chối vẫn đổi trạng thái"
+    assert sau["version"] == v, "lượt bị từ chối vẫn đốt version ⇒ 409 oan"

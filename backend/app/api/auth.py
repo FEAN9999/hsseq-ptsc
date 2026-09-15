@@ -1,6 +1,5 @@
 # backend/app/api/auth.py
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.api.deps import CurrentUser, current_user
@@ -8,13 +7,14 @@ from app.core.db import get_db
 from app.core.errors import UnauthorizedError
 from app.core.security import kiem_mat_khau, tao_token
 from app.models import AppUser, OrgUnit, Role, UserRole
+from app.schemas.base import ApiModel
 
 router = APIRouter(prefix="/auth")
 
 SAI_DANG_NHAP = "Sai email hoặc mật khẩu"
 
 
-class DangNhapRequest(BaseModel):
+class DangNhapRequest(ApiModel):
     email: str
     password: str
 

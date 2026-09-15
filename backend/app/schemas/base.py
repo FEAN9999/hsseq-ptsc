@@ -24,4 +24,12 @@ class ApiModel(BaseModel):
     # dung người dùng gõ vào form FM01, nên cửa này mở đúng trên đường nhập
     # liệu chính. Ca canh: tests/api/test_put_values.py::
     # test_khoa_go_sai_bi_tu_choi_422_va_khong_dot_version.
+    #
+    # Bảo đảm này phủ **MỌI** thân request, không chỉ schemas/report.py:
+    # `TransitionIn` (api/reports.py) và `DangNhapRequest` (api/auth.py) từng
+    # kế thừa `BaseModel` trần nên vẫn `extra="ignore"` — một bảo đảm nửa vời
+    # là một bảo đảm GIẢ (final-rereview-report.md §N1). Hai lớp đó nay cũng
+    # qua `ApiModel`; ca canh: tests/api/test_transition.py::
+    # test_khoa_go_sai_o_transition_bi_tu_choi_422_khong_duyet_bao_cao và
+    # tests/api/test_auth.py::test_khoa_go_sai_o_login_bi_tu_choi_422_khong_cap_token.
     model_config = ConfigDict(from_attributes=True, extra="forbid")

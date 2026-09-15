@@ -19,6 +19,7 @@ from app.models import (
     WorkflowState,
     WorkflowTransition,
 )
+from app.schemas.base import ApiModel
 from app.schemas.report import (
     CreateReportIn,
     CreateReportOut,
@@ -154,7 +155,7 @@ def ghi_gia_tri_bao_cao(
     return PutValuesOut(version=version, values=values)
 
 
-class TransitionIn(BaseModel):
+class TransitionIn(ApiModel):
     action: str
     expected_state: str
     version: int

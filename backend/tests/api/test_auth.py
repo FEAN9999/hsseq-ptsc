@@ -375,3 +375,20 @@ def test_token_han_dung_xap_xi_12_gio_khong_bi_am_tham_doi(khung):
     exp = datetime.fromtimestamp(payload["exp"], tz=timezone.utc)
     khoang_cach = exp - truoc
     assert timedelta(hours=11, minutes=59) < khoang_cach <= timedelta(hours=12, seconds=5)
+
+
+def test_khoa_go_sai_o_login_bi_tu_choi_422_khong_cap_token(client, khung):
+    """`DangNhapRequest` phải siết như mọi thân request khác — không đứng ngoài.
+
+    Nửa còn lại của §N1 (final-rereview-report.md): lớp này từng kế thừa
+    `BaseModel` TRẦN nên `extra="ignore"` — mọi khoá lạ đi lọt thành 200 kèm
+    token. Không có trường tuỳ chọn nào để mất nên không có đường câm, nhưng
+    hợp đồng "MỌI thân request đều siết" mà chỉ đúng một nửa thì là hợp đồng
+    giả. Ca song sinh cho `TransitionIn`: tests/api/test_transition.py::
+    test_khoa_go_sai_o_transition_bi_tu_choi_422_khong_duyet_bao_cao.
+    """
+    r = client.post("/api/v1/auth/login",
+                    json={"email": "admin@ptsc.local", "password": "Demo@2026",
+                          "remember_me": True})
+    assert r.status_code == 422, f"khoá gõ sai đi lọt: {r.status_code} {r.text}"
+    assert "access_token" not in r.json(), "khoá lạ đi lọt mà vẫn cấp token"
