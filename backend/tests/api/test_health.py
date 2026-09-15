@@ -39,3 +39,44 @@ def test_ping_db_that_su_goi_engine_khong_phai_no_op(client, monkeypatch):
     r = client.get("/api/v1/health")
     assert r.status_code == 503
     assert r.json() == {"status": "down"}
+
+
+def test_ping_db_chay_that_truy_van_khi_connect_thanh_cong(monkeypatch):
+    """task-28-fix-2.md P7/B1: ca trên chỉ canh được NHÁNH LỖI của `engine.connect()` (cổng không
+    ai lắng nghe) — connect() tự ném TRƯỚC khi kịp chạm dòng `conn.execute(...)`, nên nếu ai đó viết
+    lại `ping_db()` thành `with engine.connect(): pass` (bỏ hẳn `conn.execute(text("SELECT 1"))`),
+    ca trên VẪN đỏ giống hệt, không phân biệt được có hay không có lệnh execute — mutation đó SỐNG.
+
+    Ca này giả một `engine` mà `connect()` LUÔN THÀNH CÔNG (không đụng DB thật), để bắt buộc phải
+    chạm tới `execute()` thật thì assertion mới xanh — đúng phần bổ khuyết mà ca trên không canh
+    tới, không thay thế nó (hai ca canh hai nhánh khác nhau của cùng một hàm).
+    """
+    from sqlalchemy import text
+
+    from app.api import health
+
+    class ConnGia:
+        def __init__(self) -> None:
+            self.cau_lenh: list[object] = []
+
+        def execute(self, cau_lenh: object) -> None:
+            self.cau_lenh.append(cau_lenh)
+
+        def __enter__(self) -> "ConnGia":
+            return self
+
+        def __exit__(self, *_a: object) -> bool:
+            return False
+
+    class EngineGia:
+        def __init__(self) -> None:
+            self.conn = ConnGia()
+
+        def connect(self) -> ConnGia:
+            return self.conn
+
+    engine_gia = EngineGia()
+    monkeypatch.setattr(health, "engine", engine_gia)
+    health.ping_db()
+    assert len(engine_gia.conn.cau_lenh) == 1
+    assert str(engine_gia.conn.cau_lenh[0]) == str(text("SELECT 1"))

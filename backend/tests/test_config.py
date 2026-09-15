@@ -25,5 +25,9 @@ def test_cors_list_tach_dau_phay_bo_khoang_trang_va_muc_rong():
 
 
 def test_cors_list_mot_origin_khong_co_dau_phay():
-    s = _settings(CORS_ORIGINS="http://localhost:5173")
-    assert s.cors_list == ["http://localhost:5173"]
+    # task-28-fix-2.md P7/B2: bản trước dùng ĐÚNG giá trị mặc định của field CORS_ORIGINS
+    # ("http://localhost:5173") — ca vẫn xanh dù đột biến `cors_list` bỏ hẳn CORS_ORIGINS, trả một
+    # hằng số cố định giống giá trị mặc định đó. Đổi sang một origin KHÁC mặc định để buộc phải
+    # THẬT SỰ đọc CORS_ORIGINS thì mới xanh.
+    s = _settings(CORS_ORIGINS="https://hseq-demo.vercel.app")
+    assert s.cors_list == ["https://hseq-demo.vercel.app"]
