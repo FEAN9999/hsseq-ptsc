@@ -9,9 +9,14 @@
 // đặt VITE_API_BASE — đúng bản mặc định `npm test` để lại) theo đúng luật SPA fallback của
 // `vercel.json` (`"/(.*)" → "/index.html"`) — không cần mạng/deploy thật, không mở server nào.
 //
-// Cần `frontend/dist` tồn tại trước (chạy `npm run build` hoặc `npm test` trong `frontend/` —
-// README "Chạy e2e (Playwright)"). Hai ca dưới đây hoàn toàn cách ly mạng — không dùng
-// `LA_CUC_BO`/`BASE_URL`/`webServer` — nên chạy được ở MỌI chế độ, kể cả `BASE_URL` trỏ ra ngoài.
+// Cần `frontend/dist` tồn tại trước. Ở chế độ CỤC BỘ điều đó giờ tự lo: `webServer` của
+// `playwright.config.ts` chạy `npm run build && npm run preview` (task-28-fix-4.md P5) TRƯỚC khi
+// bộ test được nạp — đo được: xoá sạch `frontend/dist` rồi chạy `npx playwright test` thì hai ca
+// dưới đây vẫn CHẠY (38 passed), không bị `test.skip` bên dưới cắt. `test.skip` vì vậy chỉ còn
+// phục vụ chế độ `BASE_URL` từ xa, nơi không có `webServer` nào để build.
+//
+// Hai ca dưới đây hoàn toàn cách ly mạng — không dùng `LA_CUC_BO`/`BASE_URL`/`webServer` — nên
+// chạy được ở MỌI chế độ, kể cả `BASE_URL` trỏ ra ngoài.
 import { existsSync, readFileSync } from 'node:fs'
 import { extname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -60,7 +65,8 @@ test.describe('SPA fallback trên hiện vật đã build (task-28-review.md P5,
   test.skip(
     !existsSync(join(DIST, 'index.html')),
     'frontend/dist chưa build — chạy "npm run build" (hoặc "npm test") trong frontend/ trước khi ' +
-      'chạy ca này (xem README "Chạy e2e (Playwright)").',
+      'chạy ca này (xem README "Chạy e2e (Playwright)"). Ở chế độ cục bộ webServer đã tự build, ' +
+      'nên gặp câu này nghĩa là đang chạy với BASE_URL từ xa.',
   )
 
   test('hostname LAN/mDNS bất kỳ (A1, cửa thứ ba của P1) + có "proxy" trả JSON thật ở /api/v1 thì trang chạy bình thường', async ({

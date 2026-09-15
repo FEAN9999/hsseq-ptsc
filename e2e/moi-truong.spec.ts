@@ -166,3 +166,35 @@ test('helpers.ts — mọi lời gọi request.* tới API đều qua goiApi(...
     expect(doiSo.trim(), `request.${phuongThuc}(${doiSo.trim()}…) không gọi qua goiApi(...)`).toMatch(/^goiApi\(/)
   }
 })
+
+// task-28-fix-4.md P5 (A7') — NGƯỜI CANH cho chính cấu hình `webServer`. Cùng lý do như ca
+// `helpers.ts` ngay trên: đây là một QUY ƯỚC CHẠY TEST, không hiện ra được qua input/output của
+// bất kỳ ca đơn lẻ nào, nên nếu không đọc thẳng cấu hình thì không ai canh nó.
+//
+// Vì sao hai thuộc tính này là mã load-bearing chứ không phải sở thích:
+//   - `command` không có `npm run build` ⇒ `preview` phục vụ `frontend/dist` của lần build TRƯỚC.
+//     Đo được: đột biến `client.ts` mà không build tay ⇒ `spa-fallback.spec.ts` 2/2 XANH trên
+//     bundle cũ (và toàn bộ e2e cần trình duyệt cũng đang đo chính `dist` đó).
+//   - `reuseExistingServer: true` ⇒ Playwright BỎ QUA HẲN `command` khi đã có server nghe ở cổng,
+//     nên một `vite preview` sót lại từ lượt trước làm `npm run build` không bao giờ chạy. Đo
+//     được trên một server sót lại thật: đột biến vẫn xanh 2/2 dù `command` đã có `npm run build`.
+// Hai cửa phải đóng CÙNG LÚC — đóng một cửa vẫn để lọt đúng kịch bản của cửa kia.
+test('webServer — e2e cục bộ phải build lại frontend/dist trước khi preview, và không mượn server cũ', async () => {
+  const { default: cauHinh } = (await import(`./playwright.config.ts?p5-${Date.now()}`)) as {
+    default: typeof import('./playwright.config').default
+  }
+  const may = Array.isArray(cauHinh.webServer) ? cauHinh.webServer[0] : cauHinh.webServer
+  if (may === undefined) {
+    // Chế độ `BASE_URL` từ xa: không có server nào để dựng, cũng không có `frontend/` để build.
+    test.skip(true, 'chế độ BASE_URL từ xa: không có webServer để canh')
+    return
+  }
+  expect(
+    may.command,
+    'webServer.command phải BUILD trước khi preview — không có `npm run build &&` thì e2e đo bundle của lần build TRƯỚC',
+  ).toMatch(/npm run build\s*&&/)
+  expect(
+    may.reuseExistingServer,
+    'reuseExistingServer phải là false — `true` khiến Playwright bỏ qua hẳn command khi có server cũ đang nghe, và bản build mới không bao giờ được dùng',
+  ).toBe(false)
+})
