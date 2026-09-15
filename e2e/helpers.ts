@@ -12,7 +12,11 @@ import { fileURLToPath } from 'node:url'
 
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
 
-import { BASE_URL, LA_CUC_BO } from './moi-truong'
+import { API_ORIGIN, BASE_URL, LA_CUC_BO, apiUrl } from './moi-truong'
+
+/** Alias ngắn cho `apiUrl(API_ORIGIN, BASE_URL, …)` — bốn lời gọi `request.*` dưới đây (F23,
+ *  task-28-scope.md mục 3) đều cần áp ĐÚNG gốc API/frontend của lượt chạy này. */
+const goiApi = (duongDanTuongDoi: string) => apiUrl(API_ORIGIN, BASE_URL, duongDanTuongDoi)
 
 const GOC_REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const BACKEND = resolve(GOC_REPO, 'backend')
@@ -119,10 +123,11 @@ export async function dangNhap(page: Page, email: string, opts: { tuMo?: boolean
   await page.waitForURL((u) => !u.pathname.startsWith('/login'))
 }
 
-/** Token cho các lượt tra cứu bằng API (lấy id báo cáo thật). Đi qua `baseURL` nên cùng một
- *  proxy `/api/v1` mà trình duyệt dùng — không tự đoán cổng backend. */
+/** Token cho các lượt tra cứu bằng API (lấy id báo cáo thật). Mặc định đi qua `baseURL` nên cùng
+ *  một proxy `/api/v1` mà trình duyệt dùng — không tự đoán cổng backend; `goiApi()` (F23) chỉ đổi
+ *  sang URL tuyệt đối khi `API_BASE_URL` được đặt khác `BASE_URL`. */
 export async function tokenApi(request: APIRequestContext, email: string): Promise<string> {
-  const res = await request.post('/api/v1/auth/login', { data: { email, password: MAT_KHAU } })
+  const res = await request.post(goiApi('/api/v1/auth/login'), { data: { email, password: MAT_KHAU } })
   expect(res.ok(), `đăng nhập API ${email} lỗi ${res.status()}`).toBeTruthy()
   return (await res.json()).access_token as string
 }
@@ -140,7 +145,7 @@ export async function dsBaoCao(
   token: string,
   period = KY_DEMO,
 ): Promise<BaoCaoTom[]> {
-  const res = await request.get(`/api/v1/reports?template=FM01&period=${period}`, {
+  const res = await request.get(goiApi(`/api/v1/reports?template=FM01&period=${period}`), {
     headers: { Authorization: `Bearer ${token}` },
   })
   expect(res.ok(), `GET /reports lỗi ${res.status()}`).toBeTruthy()
@@ -173,10 +178,10 @@ export async function nopBaoCaoQuaApi(
   reportId: number,
 ): Promise<void> {
   const headers = { Authorization: `Bearer ${token}` }
-  const xem = await request.get(`/api/v1/reports/${reportId}`, { headers })
+  const xem = await request.get(goiApi(`/api/v1/reports/${reportId}`), { headers })
   expect(xem.ok(), `GET /reports/${reportId} lỗi ${xem.status()}`).toBeTruthy()
   const { state, version } = (await xem.json()) as { state: string; version: number }
-  const res = await request.post(`/api/v1/reports/${reportId}/transition`, {
+  const res = await request.post(goiApi(`/api/v1/reports/${reportId}/transition`), {
     headers,
     data: { action: 'submit', expected_state: state, version },
   })

@@ -19,7 +19,7 @@
 // `BASE_URL` từ xa — đúng chỗ người ta cần chúng nhất.
 import { expect, test } from '@playwright/test'
 
-import { laCucBo } from './moi-truong'
+import { apiUrl, laCucBo } from './moi-truong'
 
 /** Phải trả `false`. Sai ở đây = `resetDemo()` xoá database máy nhà trong lúc test trỏ ra ngoài. */
 const HIEM = [
@@ -97,4 +97,21 @@ test('laCucBo — chiều SÓT: mọi dạng loopback hợp lệ phải được
         'và bộ test mất sức phân biệt trong im lặng thay vì đỏ',
     ).toBe(true)
   }
+})
+
+// F23 (task-28-scope.md mục 3) — LỚP PHÂN GIẢI tách origin API khỏi origin frontend. Hàm THUẦN,
+// nhận cả hai origin làm tham số (như `laCucBo(url)` ở trên) nên test được không cần đụng
+// `process.env` hay nạp lại module.
+test('apiUrl — same-origin (mặc định, không đặt API_BASE_URL) giữ NGUYÊN đường dẫn tương đối', () => {
+  // Đây chính là hành vi CŨ: `request` của Playwright tự nối đường dẫn tương đối vào `baseURL`
+  // của nó — không đổi MỘT KÝ TỰ nào so với trước khi có F23, nên 24/24 ca hiện có phải vẫn xanh.
+  expect(apiUrl('http://localhost:5173', 'http://localhost:5173', '/api/v1/auth/login')).toBe(
+    '/api/v1/auth/login',
+  )
+})
+
+test('apiUrl — hai origin khác nhau (Task 28: Vercel ≠ Render) trả URL TUYỆT ĐỐI trỏ vào gốc API', () => {
+  expect(
+    apiUrl('https://hseq-api.onrender.com', 'https://hseq-demo.vercel.app', '/api/v1/auth/login'),
+  ).toBe('https://hseq-api.onrender.com/api/v1/auth/login')
 })

@@ -41,3 +41,29 @@ export function laCucBo(url: string): boolean {
 
 /** `true` khi `BASE_URL` của lượt chạy này là máy nhà. */
 export const LA_CUC_BO = laCucBo(BASE_URL)
+
+// F23 (task-28-carry.md C-T27c, task-28-scope.md mục 3) — `helpers.ts` gọi API bằng ĐƯỜNG DẪN
+// TƯƠNG ĐỐI qua `request` của Playwright, thứ luôn nối vào DUY NHẤT MỘT `baseURL`
+// (playwright.config.ts: `use.baseURL = BASE_URL`, tức origin FRONTEND). Ở local đúng, vì
+// `vite preview` có proxy `/api/v1` → backend cục bộ (C8, task-19-carry.md). Nhưng Task 28 là
+// Vercel ≠ Render — HAI origin: lúc đó đường dẫn tương đối đi nhầm vào Vercel, gặp SPA fallback
+// (frontend/vercel.json) trả 200 kèm THÂN HTML cho MỌI path kể cả '/api/v1/health', nên
+// `res.ok()` XANH rồi mới vỡ ở `res.json()` — một bộ test xanh-rồi-vỡ ở chỗ không liên quan.
+
+/** Gốc API của lượt chạy này — TÁCH RỜI gốc frontend khi bản deploy có hai origin. Mặc định
+ *  (không đặt biến `API_BASE_URL`) bằng CHÍNH `BASE_URL` — same-origin, ĐÚNG HÀNH VI CŨ, không đổi
+ *  khi không có gì mới trong môi trường. */
+export const API_ORIGIN = process.env.API_BASE_URL ?? BASE_URL
+
+/** Nối một ĐƯỜNG DẪN TƯƠNG ĐỐI ('/api/v1/...') với gốc API. Hàm THUẦN, nhận cả hai origin làm
+ *  tham số — không đọc thẳng `API_ORIGIN`/`BASE_URL` module-level — để test được không cần đụng
+ *  `process.env` hay nạp lại module, cùng lý do `laCucBo(url)` ở trên nhận tham số thay vì đọc
+ *  `BASE_URL` toàn cục.
+ *
+ *  `apiGoc === feGoc` (mặc định, same-origin): trả NGUYÊN đường dẫn tương đối — `request` của
+ *  Playwright tự nối vào `baseURL` của nó, Y HỆT hành vi cũ, không đổi một ký tự nào khi không đặt
+ *  `API_BASE_URL`. Khác nhau (Task 28: Vercel ≠ Render): trả URL TUYỆT ĐỐI trỏ thẳng vào `apiGoc`,
+ *  vì `request` chỉ có MỘT `baseURL` dùng chung cho cả suite. */
+export function apiUrl(apiGoc: string, feGoc: string, duongDanTuongDoi: string): string {
+  return apiGoc === feGoc ? duongDanTuongDoi : `${apiGoc}${duongDanTuongDoi}`
+}
