@@ -94,6 +94,14 @@ export const BASE = baseApi()
  *  đọc được (mock test trần không set `headers`, hoặc server thật không khai) thì rơi xuống
  *  `res.json()` — SyntaxError của chính nó là lưới an toàn thứ hai cho trường hợp đó.
  *
+ *  task-28-fix-5.md P1: so trên bản `toLowerCase()` vì media type trong HTTP KHÔNG phân biệt
+ *  hoa/thường (RFC 9110 §8.3.1) và `Headers.get()` trả NGUYÊN VĂN giá trị server gửi — chỉ TÊN
+ *  header mới được chuẩn hoá. So trên chuỗi thô là đọc sai giao thức: `Application/JSON` (header
+ *  hoàn toàn hợp lệ) bị coi là "không phải JSON" và câu lỗi đi buộc tội `VITE_API_BASE` trên một
+ *  bản deploy LÀNH — cùng họ "thông báo chỉ tay sai chỗ" với bẫy `charset=utf-8`, chỉ khác lối vào.
+ *  THÔNG BÁO vẫn in `loaiNoiDung` THÔ (không phải bản đã hạ chữ): người đọc cần thấy đúng thứ
+ *  server gửi, không phải bản đã bị mã này chế biến.
+ *
  *  task-28-fix-3.md P1: ném `ApiError` (không phải `Error` trần) — `Login.tsx:212`
  *  (`err instanceof ApiError ? err.detail : 'Không kết nối được máy chủ'`) chỉ hiện `detail` cho
  *  `ApiError`; một `Error` trần rơi vào nhánh câu chung, làm mất đúng câu nói tên biến ngay tại nơi
@@ -107,7 +115,7 @@ export const BASE = baseApi()
  *  dùng kẹt ở màn đăng nhập, không bao giờ tới các trang dùng ba chỗ đó — Reports/ReportDetail). */
 async function docJsonHopLe<T>(res: Response): Promise<T> {
   const loaiNoiDung = typeof res.headers?.get === 'function' ? res.headers.get('content-type') : null
-  if (loaiNoiDung && !loaiNoiDung.includes('application/json')) {
+  if (loaiNoiDung && !loaiNoiDung.toLowerCase().includes('application/json')) {
     throw new ApiError(res.status, {
       detail:
         `API trả về "${loaiNoiDung}" thay vì JSON — kiểm tra biến môi trường VITE_API_BASE (hiện ` +

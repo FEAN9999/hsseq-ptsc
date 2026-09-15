@@ -223,6 +223,20 @@ describe('docJsonHopLe — content-type thay cho hostname (task-28-fix-2.md P1)'
     await expect(api.get('/reports/1')).resolves.toEqual({ id: 1 })
   })
 
+  // task-28-fix-5.md P1 — vẫn là mặt ÂM, lối vào thứ hai. Media type trong HTTP KHÔNG phân biệt
+  // hoa/thường (RFC 9110 §8.3.1), còn `Headers.get()` trả NGUYÊN VĂN giá trị server gửi — chỉ TÊN
+  // header mới được chuẩn hoá, giá trị thì không. Nên so `.includes('application/json')` trên chuỗi
+  // THÔ là đang đọc sai giao thức: `Application/JSON` — một header hoàn toàn hợp lệ — bị coi là
+  // "không phải JSON" và ném kèm câu buộc tội `VITE_API_BASE` trên một bản deploy HOÀN TOÀN LÀNH.
+  // Cùng họ lỗi "thông báo chỉ tay sai chỗ" với ca charset ngay trên, chỉ khác lối vào.
+  //
+  // Một ca phủ cả hai chỗ có thể viết hoa (tên media type và tên tham số) vì cùng một phép so xử lý
+  // cả chuỗi — không tách thành hai ca cho cùng một nhánh.
+  it('Content-Type viết HOA (Application/JSON — media type không phân biệt hoa thường) thì KHÔNG ném', async () => {
+    vi.stubGlobal('fetch', tra(200, { id: 1 }, 'Application/JSON; Charset=UTF-8'))
+    await expect(api.get('/reports/1')).resolves.toEqual({ id: 1 })
+  })
+
   // B4: đặt biến SAI HÌNH DẠNG (thiếu origin tuyệt đối, chỉ có phần đường dẫn) lọt qua MỌI danh
   // sách hostname vì bản thân biến đã được "đặt" — chỉ phép kiểm NỘI DUNG response mới bắt được.
   it('B4 — VITE_API_BASE bị đặt sai hình dạng ("/api/v1", thiếu origin) vẫn hỏng ồn ào y hệt lúc thiếu biến', async () => {
