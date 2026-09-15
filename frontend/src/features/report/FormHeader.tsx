@@ -21,6 +21,34 @@ function kindTrangThai(state: string, isLate: boolean): ChipKind {
   return 'missing'
 }
 
+/** P7 (final-fix-FE.md, Ruling 427 · final-review-R2-report.md §A4) — mã nhóm "THÔNG TIN CHUNG".
+ * MỘT nguồn cho cả `id` của khối lẫn phép lọc mục lục ở `ReportForm.tsx`: hai chuỗi 'A' rời nhau
+ * là cách một bên ẩn khối còn bên kia vẫn để lại link trỏ vào chỗ trống. */
+export const MA_NHOM_PHAN_DAU = 'A'
+
+/** Nhóm A có gì để hiện không.
+ *
+ * Năm trường này là một VÒNG TRÒN CHẾT: có cột, có `ReportHeaderOut`, file này vẽ ra màn hình —
+ * nhưng KHÔNG schema đầu vào nào của dự án nhận chúng (đã liệt đủ 5 lớp `*In`), và 66/66 báo cáo
+ * trên DB demo đều NULL. Ban ATCL mở báo cáo thì khối ĐẦU TIÊN — đúng khối định danh của bản giấy
+ * FM01 — hiện năm dấu gạch ngang.
+ *
+ * Ẩn cả khối, KHÔNG suy giá trị từ dữ liệu khác: ba trong năm suy được (`location` ← tên đơn vị,
+ * `report_date` ← `submitted_at`, `reporter_name` ← người nộp), hai cái kia thì không — hiện ba ô
+ * có số hai ô gạch ngang còn TỆ HƠN ẩn cả khối, vì nó trông như dữ liệu bị mất. Còn MỘT trường
+ * non-null thì hiện y như cũ: lúc đó năm dấu gạch không còn là cả khối, và mỗi dấu gạch nói đúng
+ * một điều thật ("ô này trống").
+ */
+export function coPhanDau(dau: DauBaoCao): boolean {
+  return (
+    dau.report_no !== null ||
+    dau.location !== null ||
+    dau.report_date !== null ||
+    dau.reporter_name !== null ||
+    dau.reporter_position !== null
+  )
+}
+
 /** "2026-09-30" (ngày trần của `report.report_date`) → "30/09/2026". KHÔNG dùng `formatDateTime`:
  * hàm đó nhận ISO có giờ; đưa một ngày trần vào nó, `new Date('2026-09-30')` là nửa đêm UTC, đổi
  * sang giờ VN thành 07:00 cùng ngày — đúng ngày nhưng kèm một cái giờ bịa mà ô này không có. */
@@ -114,17 +142,21 @@ export function FormHeader({
       </div>
       {/* `id="A"`: nhóm A của danh mục ("THÔNG TIN CHUNG") không có chỉ tiêu nào nên không sinh
           hàng nào trong bảng — 5 ô phần đầu này CHÍNH LÀ nhóm A, và là đích nhảy `#A` của mục lục
-          (fix-1 S6). `scroll-mt-20` = `scroll-margin-top:80px` như mọi đích nhảy khác. */}
-      <div
-        id="A"
-        className="col-span-2 grid grid-cols-5 gap-x-7 gap-y-1 text-table border-t border-hair pt-2.5 mt-1 scroll-mt-20"
-      >
-        <OPhanDau nhan="Số báo cáo" giaTri={dau.report_no} />
-        <OPhanDau nhan="Địa điểm" giaTri={dau.location} />
-        <OPhanDau nhan="Ngày báo cáo" giaTri={dau.report_date ? ngayVN(dau.report_date) : null} />
-        <OPhanDau nhan="Người lập" giaTri={dau.reporter_name} />
-        <OPhanDau nhan="Chức vụ" giaTri={dau.reporter_position} />
-      </div>
+          (fix-1 S6). `scroll-mt-20` = `scroll-margin-top:80px` như mọi đích nhảy khác.
+          P7 (Ruling 427): cả năm null thì KHÔNG dựng khối — và vì khối không dựng, `#A` cũng không
+          còn tồn tại, nên `ReportForm.tsx` bỏ luôn mục A khỏi mục lục bằng CÙNG vị từ này. */}
+      {coPhanDau(dau) && (
+        <div
+          id={MA_NHOM_PHAN_DAU}
+          className="col-span-2 grid grid-cols-5 gap-x-7 gap-y-1 text-table border-t border-hair pt-2.5 mt-1 scroll-mt-20"
+        >
+          <OPhanDau nhan="Số báo cáo" giaTri={dau.report_no} />
+          <OPhanDau nhan="Địa điểm" giaTri={dau.location} />
+          <OPhanDau nhan="Ngày báo cáo" giaTri={dau.report_date ? ngayVN(dau.report_date) : null} />
+          <OPhanDau nhan="Người lập" giaTri={dau.reporter_name} />
+          <OPhanDau nhan="Chức vụ" giaTri={dau.reporter_position} />
+        </div>
+      )}
     </div>
   )
 }

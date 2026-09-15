@@ -30,7 +30,7 @@ import { parseViNumber } from '../../lib/parseViNumber'
 import { formatDateTime, formatPeriod } from '../../lib/format'
 import { cellPolicy, type AggType, type Cell, type Mode } from './cellPolicy'
 import { NumberCell, dinhDangSoBang, type NumberCellProps } from './NumberCell'
-import { FormHeader } from './FormHeader'
+import { FormHeader, MA_NHOM_PHAN_DAU, coPhanDau } from './FormHeader'
 import { FormModeBar, maNeo } from './FormModeBar'
 import { GroupHeader, type NhomMau } from './GroupHeader'
 import { useKeyboardNav } from './useKeyboardNav'
@@ -730,11 +730,17 @@ export function ReportForm({ mau, chiTiet, loiLamMoi = false }: ReportFormProps)
             vẽ rõ; nhóm C nằm dưới 53 dòng nên mất mục lục là mất đúng cú nhảy một phát (fix-1 S6).
             Lọc `nhomCoDong` chỉ đúng cho HÀNG TIÊU ĐỀ trong bảng, không đúng cho điều hướng trang. */}
         <nav className="sticky top-4 bg-surface border border-hair rounded-tile py-2.5 text-xs">
-          {mau.sections.map((nhom) => (
-            <a key={nhom.code} href={`#${nhom.code}`} className="block px-3 py-1.5 text-soot no-underline hover:bg-mutedbg">
-              {nhom.code}. {nhom.name_vi}
-            </a>
-          ))}
+          {/* P7 (Ruling 427): bỏ ĐÚNG mục A khi `FormHeader` không dựng khối phần đầu — cùng vị từ
+              `coPhanDau`, không phải một điều kiện chép lại. Lọc theo MÃ chứ không theo "nhóm có
+              sinh hàng không": lọc kiểu sau nuốt luôn C (3 ô văn bản dưới bảng), đúng lỗi fix-1 S6
+              đã sửa một lần rồi. */}
+          {mau.sections
+            .filter((nhom) => nhom.code !== MA_NHOM_PHAN_DAU || coPhanDau(chiTiet.header))
+            .map((nhom) => (
+              <a key={nhom.code} href={`#${nhom.code}`} className="block px-3 py-1.5 text-soot no-underline hover:bg-mutedbg">
+                {nhom.code}. {nhom.name_vi}
+              </a>
+            ))}
         </nav>
       </div>
 

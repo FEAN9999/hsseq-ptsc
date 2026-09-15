@@ -123,6 +123,9 @@ interface VeOpts {
   values?: (Partial<GiaTriBaoCao> & { indicator_code: string })[]
   texts?: Record<string, string | null>
   mau?: MauBaoCao
+  /** P7: ghi đè từng trường của `header` — dùng để dựng cảnh 66/66 báo cáo THẬT trên DB demo, nơi
+   * cả năm trường phần đầu đều NULL. */
+  header?: Partial<ChiTietBaoCao['header']>
 }
 
 /** Cây thật bọc form trong `QueryClientProvider` + router (app/routes.tsx): lớp lưu của Task 23
@@ -187,6 +190,7 @@ function duLieu(opts: VeOpts = {}): ChiTietBaoCao {
       submitted_at: '2026-09-30T03:12:00Z',
       decided_at: opts.decided_at === undefined ? '2026-09-04T08:20:00Z' : opts.decided_at,
       decision_note: opts.decision_note ?? null,
+      ...opts.header,
     },
     missing_periods: opts.missing_periods ?? [],
     values: mau.indicators.map((ct) => giaTri({ indicator_code: ct.code, ...deGhiDe.get(ct.code) })),
@@ -1806,9 +1810,13 @@ describe('nhóm C, mục lục và dải đầu', () => {
     expect(screen.getByText(/Lũy kế đã tính tới 12\/2026/)).toBeTruthy()
   })
 
+  // P7 (Ruling 427) — CA NÀY PHẢI ĐỔI DỮ LIỆU, không đổi ý định. Bản cũ dựng CẢ NĂM trường null;
+  // từ nay cảnh đó ẩn hẳn khối nên ca mất đối tượng đo. Giữ đúng thứ nó đang đo (ô TRỐNG hiện "—"
+  // chứ không hiện chuỗi rỗng) bằng cách để `report_no` có giá trị: lúc đó khối vẫn dựng, và bốn ô
+  // còn lại là bốn ô trống THẬT. Ca còn CHẮC HƠN bản cũ — nó chốt thêm rằng ô CÓ giá trị thì hiện
+  // giá trị, thứ năm-ô-cùng-trống không phân biệt được.
   it('ô phần đầu trống hiện — chứ không hiện chuỗi rỗng', () => {
     ve({ state: 'draft', vai: 'reporter' })
-    // `report_no` mặc định có giá trị; ở đây dựng lại với null để đo đúng nhánh trống.
     const mau = mauNho([chiTieu({ code: 'B-1.1' })])
     useSession.getState().login('tok', NGUOI_DUNG, DON_VI, QUYEN_REPORTER)
     const { container } = veCay(
@@ -1825,7 +1833,7 @@ describe('nhóm C, mục lục và dải đầu', () => {
             template_code: 'FM01',
             period_key: '2026-08',
             due_at: '2026-10-05T16:59:59Z',
-            report_no: null,
+            report_no: 'DV-2026-08',
             location: null,
             report_date: null,
             reporter_name: null,
@@ -1840,9 +1848,10 @@ describe('nhóm C, mục lục và dải đầu', () => {
         }}
       />,
     )
-    const phanDau = container.querySelectorAll('.grid-cols-5 > div')
+    const phanDau = [...container.querySelectorAll('.grid-cols-5 > div')]
     expect(phanDau).toHaveLength(5)
-    for (const d of phanDau) expect(d.textContent).toMatch(/—$/)
+    expect(phanDau[0].textContent).toMatch(/DV-2026-08$/)
+    for (const d of phanDau.slice(1)) expect(d.textContent).toMatch(/—$/)
   })
 })
 
@@ -3380,5 +3389,62 @@ describe('P4 — chặn điều hướng SPA khi còn ô chưa lưu', () => {
     expect(screen.queryByRole('dialog')).toBeNull()
     await waitFor(() => expect(daSangDashboard()).toBe(true))
   })
+})
+
+// ============================================================ P7 — nhóm A khi cả năm trường null
+//
+// final-fix-FE.md P7, Ruling 427 · final-review-R2-report.md §(A4).
+//
+// `report_no` · `location` · `report_date` · `reporter_name` · `reporter_position` là một VÒNG TRÒN
+// CHẾT: có cột, có `ReportHeaderOut`, `FormHeader.tsx` vẽ ra màn hình thành nhóm A "THÔNG TIN
+// CHUNG" có đích nhảy `#A` của mục lục — nhưng KHÔNG schema đầu vào nào của dự án nhận chúng (đã
+// liệt đủ 5 lớp `*In`), **66/66 báo cáo trên DB demo đều NULL**, 0 ca test backend nêu tên. Ban
+// ATCL mở báo cáo, khối ĐẦU TIÊN — đúng khối định danh của bản giấy FM01 — hiện **năm dấu gạch
+// ngang**, và mục lục có một mục `A. THÔNG TIN CHUNG` nhảy tới năm dấu gạch đó.
+//
+// Ẩn, không suy ra giá trị: ba trong năm suy được (`location` ← tên đơn vị, `report_date` ←
+// `submitted_at`, `reporter_name` ← người nộp), hai cái kia thì không — hiện ba ô có số hai ô gạch
+// ngang CÒN TỆ HƠN ẩn cả khối, vì nó trông như dữ liệu bị mất.
+//
+// Và không mở đường ghi trước 30/09: đó là quyết định nghiệp vụ, cùng loại với câu hỏi LTI.
+describe('P7 — nhóm A "THÔNG TIN CHUNG" khi cả năm trường đều null', () => {
+  const RONG = {
+    report_no: null,
+    location: null,
+    report_date: null,
+    reporter_name: null,
+    reporter_position: null,
+  }
+
+  it('cả năm null: KHÔNG vẽ khối năm dấu gạch ngang, và KHÔNG còn đích nhảy #A', () => {
+    ve({ state: 'draft', vai: 'reporter', header: RONG })
+    expect(screen.queryByText('Số báo cáo')).toBeNull()
+    expect(screen.queryByText('Chức vụ')).toBeNull()
+    expect(document.getElementById('A')).toBeNull()
+  })
+
+  it('cả năm null: mục lục BỎ luôn mục A — không còn link trỏ vào chỗ trống', () => {
+    ve({ state: 'draft', vai: 'reporter', header: RONG })
+    const href = screen.getAllByRole('link').map((a) => a.getAttribute('href'))
+    expect(href).not.toContain('#A')
+    // Đối chứng: chỉ MỘT mục biến mất, mười mục kia còn nguyên. Một bản vá lọc quá tay (bỏ mọi
+    // nhóm không sinh hàng) sẽ nuốt luôn C — đúng lỗi fix-1 S6 đã sửa một lần rồi.
+    expect(href).toEqual(['#B-1', '#B-2', '#B-3', '#B-4', '#B-5', '#B-6', '#B-7', '#B-8', '#B-9', '#C'])
+  })
+
+  // MẶT ÂM, và nó là mặt quan trọng: "còn một trường nào non-null thì hiện y như hôm nay". Thiếu
+  // ca này, một bản vá ẩn nhóm A VÔ ĐIỀU KIỆN cũng xanh hai ca trên — và lúc dữ liệu thật về thì
+  // khối định danh của FM01 biến mất vĩnh viễn mà không ai biết.
+  it.each(['report_no', 'location', 'report_date', 'reporter_name', 'reporter_position'] as const)(
+    'mặt âm — CHỈ %s có giá trị thì nhóm A vẫn hiện đủ, và #A vẫn còn trong mục lục',
+    (truong) => {
+      const giaTri = truong === 'report_date' ? '2026-09-30' : 'có giá trị'
+      ve({ state: 'draft', vai: 'reporter', header: { ...RONG, [truong]: giaTri } })
+      expect(screen.getByText('Số báo cáo')).toBeTruthy()
+      expect(screen.getByText('Chức vụ')).toBeTruthy()
+      expect(document.getElementById('A')).toBeTruthy()
+      expect(screen.getAllByRole('link').map((a) => a.getAttribute('href'))).toContain('#A')
+    },
+  )
 })
 
