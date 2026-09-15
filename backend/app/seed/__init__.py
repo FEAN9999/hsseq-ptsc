@@ -31,7 +31,7 @@ from app.models import (
     WorkflowTransition,
 )
 from app.seed.catalog_fm01 import INDICATORS, SECTIONS, TEXT_FIELDS
-from app.seed.fixture import load_fixture
+from app.seed.fixture import LoadResult, load_fixture
 
 VN = ZoneInfo("Asia/Ho_Chi_Minh")
 
@@ -258,16 +258,23 @@ def _nhap_don_vi_22(db, tpl) -> None:
     db.flush()
 
 
-def seed_all(db) -> None:
+def seed_all(db) -> LoadResult:
+    """Trả NGUYÊN kết quả của `load_fixture` lên cho người gọi.
+
+    Trước đây hàm này vứt thẳng giá trị trả về: `LoadResult` mang đủ
+    `created_reports`, `skipped`, `warnings` mà không ai nhận, nên
+    `scripts/reset_demo.py` chỉ nói được "xong" — không nói được đã nạp gì.
+    """
     _seed_org(db)
     _seed_rbac(db)
     _seed_users(db)
     tpl = _seed_template(db)
     _seed_workflow(db, tpl)
     _seed_periods(db, tpl)
-    load_fixture(db, tpl)
+    kq = load_fixture(db, tpl)
     _nhap_don_vi_22(db, tpl)
     db.commit()
+    return kq
 
 
 def export_catalog_json(db, path: str) -> None:

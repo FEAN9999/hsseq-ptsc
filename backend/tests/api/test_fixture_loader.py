@@ -478,9 +478,64 @@ def test_file_khong_ton_tai_tra_ve_canh_bao_khong_nem_loi(db, tmp_path):
     assert any("không có file fixture" in w for w in kq.warnings)
 
 
+def test_file_khong_ton_tai_co_log_warning_nhu_nhanh_sha_doi(db, tmp_path, caplog):
+    """(final-fix-du2.md §3) Nhánh CÂM NHẤT mà lại dễ gặp nhất: gõ nhầm tên file
+    / `FIXTURE_CSV` trỏ chỗ khác. Trước đây nó `return` lặng lẽ, không một dòng
+    log — nhánh sha đổi ngay dưới thì log to có khung `===`. Khoá nguyên MỆNH ĐỀ
+    (đường dẫn thật + chỗ cần kiểm), không dò mẩu: một `log.warning("bỏ qua")`
+    trống rỗng vẫn phải ĐỎ."""
+    import logging
+
+    _seed_khung(db)
+    thieu = tmp_path / "khong_ton_tai.csv"
+    caplog.set_level(logging.WARNING, logger="app.seed.fixture")
+    load_fixture(db, _tpl(db), str(thieu))
+
+    dong_warning = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
+    assert dong_warning, "nhánh file không tồn tại vẫn CÂM: không log gì cả"
+    gop = "\n".join(dong_warning)
+    assert f"không có file fixture {thieu}" in gop, gop
+    assert "FIXTURE_CSV" in gop, gop
+
+
+def test_fixture_chi_co_header_khong_im_lang(db, tmp_path, caplog):
+    """(final-fix-du2.md) File đọc được, cấu trúc đúng, nhưng 0 dòng dữ liệu —
+    hôm nay file thật `fm01_2026-06_2026-08.csv` đúng là như vậy. `load_fixture`
+    trả `created_reports == 0` và KHÔNG một cảnh báo nào: người gõ lệnh không có
+    cách nào biết. Phải có cảnh báo nêu đúng nguyên nhân."""
+    import logging
+
+    _seed_khung(db)
+    csv_path = tmp_path / "chi_header.csv"
+    csv_path.write_text(
+        "org_code,period,indicator_code,this_period,acc_prev,acc_total,note\n",
+        encoding="utf-8",
+    )
+    caplog.set_level(logging.WARNING, logger="app.seed.fixture")
+    kq = load_fixture(db, _tpl(db), str(csv_path))
+
+    assert kq.created_reports == 0
+    assert kq.skipped == 0
+    gop_canh_bao = "\n".join(kq.warnings)
+    assert f"file fixture {csv_path} không có dòng dữ liệu nào nạp được" in gop_canh_bao, \
+        gop_canh_bao
+    gop_log = "\n".join(r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING)
+    assert str(csv_path) in gop_log, gop_log
+
+
 # ---------------------------------------------------------------------------
 # seed_all() tự nạp FIXTURE_CSV (full_synthetic.csv trong test, xem conftest)
 # ---------------------------------------------------------------------------
+
+def test_seed_all_tra_ve_ket_qua_cua_load_fixture(db):
+    """(final-fix-du2.md §1) `seed_all` từng gọi `load_fixture` rồi vứt thẳng giá
+    trị trả về — kênh báo cáo nối vào hư không. Khoá bằng CON SỐ thật của
+    full_synthetic.csv (66 báo cáo, xem test ngay dưới), không phải `is not
+    None`: trả về một `LoadResult()` rỗng cho có cũng phải ĐỎ."""
+    kq = seed_all(db)
+    assert kq.created_reports == 66
+    assert kq.warnings == []
+
 
 def test_seed_all_nap_du_66_bao_cao_21_duyet_1_nhap_o_ky_08(db):
     from app.models import Report, ReportingPeriod, ReportTemplate, WorkflowState

@@ -6,6 +6,10 @@ trường của tiến trình (pydantic-settings chỉ đọc `.env` vào `setti
 phải đặt APP_ENV ngay trên dòng lệnh:
 
     APP_ENV=local .venv/bin/python -m scripts.reset_demo --yes
+
+Mã thoát: 0 khi nạp được ít nhất một báo cáo; 1 khi bị cầu chì chặn, HOẶC khi
+chạy trót lọt mà nạp được 0 báo cáo (file fixture không có / sha đổi / fixture
+rỗng) — lệnh này chỉ có một mục đích là nạp dữ liệu demo, nạp 0 luôn là hỏng.
 """
 import os
 import sys
@@ -14,6 +18,7 @@ from sqlalchemy import text
 
 from app.core.db import SessionLocal
 from app.seed import seed_all
+from app.seed.fixture import LoadResult
 
 # report_value/report_text có FK ondelete=CASCADE tới report.id (alembic 0001)
 # nên xoá report cũng tự dọn chúng — có mặt ở đây là để tường minh, không phải
@@ -32,11 +37,11 @@ BANG_XOA = ["audit_log", "report_text", "report_value", "report", "opening_balan
 MOI_TRUONG_AN_TOAN = {"local", "test", "demo"}
 
 
-def reset(db) -> None:
+def reset(db) -> LoadResult:
     for bang in BANG_XOA:
         db.execute(text(f"DELETE FROM {bang}"))
     db.flush()
-    seed_all(db)
+    return seed_all(db)
 
 
 def main(argv: list[str]) -> None:
@@ -67,9 +72,30 @@ def main(argv: list[str]) -> None:
         raise SystemExit(1)
 
     with SessionLocal() as db:
-        reset(db)
+        kq = reset(db)
         db.commit()
-    print("reset_demo xong")
+
+    # Câu hỏi DUY NHẤT người gõ lệnh đang hỏi là "đã nạp được gì", không phải
+    # "đã chạy xong chưa". Bản cũ in đúng một dòng "reset_demo xong" kể cả khi
+    # nạp 0 báo cáo — dashboard trống, và người đi tìm lỗi ở Render/Supabase/CORS.
+    print(f"Đã nạp {kq.created_reports} báo cáo.")
+    if kq.skipped:
+        print(f"Bỏ qua {kq.skipped} dòng chỉ tiêu tự tính (computed) — đúng thiết kế, không lưu.")
+    for canh_bao in kq.warnings:
+        print(f"CẢNH BÁO: {canh_bao}")
+
+    if kq.created_reports == 0:
+        # Lệnh này chỉ có một mục đích: nạp dữ liệu demo. Nạp được 0 báo cáo
+        # luôn là chuyện bất thường ⇒ mã thoát ≠ 0, để cả người lẫn script
+        # deploy đều thấy. Nêu LẠI nguyên nhân ngay trong câu cuối: người đang
+        # cứu hộ giữa buổi demo đọc dòng cuối trước khi đọc các dòng trên.
+        ly_do = "; ".join(kq.warnings) or "fixture không có dòng dữ liệu nào"
+        print(
+            f"KHÔNG nạp được báo cáo nào ({ly_do}) — dashboard sẽ TRỐNG. "
+            f"Sửa file fixture, hoặc trỏ biến FIXTURE_CSV sang đúng file, "
+            f"rồi chạy lại lệnh này."
+        )
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

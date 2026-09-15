@@ -199,6 +199,177 @@ def test_cau_chi_yes_duoc_kiem_truoc_APP_ENV(monkeypatch, capsys):
     assert "APP_ENV" not in out
 
 
+# ---------------------------------------------------------------------------
+# `reset_demo` phải NÓI THẬT nó đã nạp được gì (final-fix-du2.md)
+#
+# Ba nhánh câm — file không tồn tại · sha đổi · fixture rỗng (chỉ header) —
+# đều kết thúc bằng "reset_demo xong" và mã thoát 0. Ba ca dưới dựng `LoadResult`
+# bằng CHÍNH `load_fixture` thật trên `db` thật (không chế tay chuỗi, nếu không
+# ca sẽ xanh cả khi thông điệp của loader rỗng nghĩa), rồi nối nó vào `main()`
+# qua `seed_all` — `reset()` và toàn bộ phần in/mã thoát của `main()` chạy thật.
+# Lớp đụng DB của `main()` vẫn là phiên giả: không một câu DELETE nào tới Postgres.
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def phien_gia_cho_qua(monkeypatch):
+    """Phiên giả NHẬN mọi lệnh (không ném) để `main()` chạy hết tới phần in.
+
+    Khác `chan_lop_dung_db` (ném `_ChamDB` ngay câu SQL đầu) — ở đây cần đo phần
+    SAU khi nạp xong. Vẫn không chạm Postgres: `execute` không làm gì cả.
+    """
+    import scripts.reset_demo as reset_demo
+
+    class _PhienImLang:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *ngoai_le):
+            return False
+
+        def execute(self, cau, *args, **kwargs):
+            return None
+
+        def flush(self):
+            return None
+
+        def commit(self):
+            return None
+
+    monkeypatch.setattr(reset_demo, "SessionLocal", _PhienImLang)
+
+
+def _mau(db):
+    from app.models import ReportTemplate
+    return db.query(ReportTemplate).filter_by(code="FM01").one()
+
+
+def _chay_main(monkeypatch, capsys, kq):
+    """Chạy `main(["--yes"])` với APP_ENV an toàn và `seed_all` trả về `kq`.
+
+    Trả (mã thoát, stdout). Mã thoát None nghĩa là main() về bình thường.
+    """
+    import scripts.reset_demo as reset_demo
+
+    monkeypatch.setenv("APP_ENV", "demo")
+    monkeypatch.setattr(reset_demo, "seed_all", lambda _db: kq)
+    ma = None
+    try:
+        reset_demo.main(["--yes"])
+    except SystemExit as e:
+        ma = e.code
+    return ma, capsys.readouterr().out
+
+
+def test_thieu_file_fixture_thi_noi_ro_nguyen_nhan_va_thoat_1(
+    db, tmp_path, monkeypatch, capsys, phien_gia_cho_qua
+):
+    """Kịch bản 1 của brief: gõ nhầm tên file / `FIXTURE_CSV` trỏ chỗ khác.
+
+    Bản cũ in đúng một dòng "reset_demo xong", mã thoát 0, nạp 0 báo cáo — Chồng
+    yêu mở dashboard thấy trống rồi đi tìm lỗi ở Render, Supabase, CORS. Ca này
+    khoá cả ba: số báo cáo đã nạp, đường dẫn file thiếu, và mã thoát ≠ 0.
+    """
+    from app.seed.fixture import load_fixture
+    from tests.conftest import _seed_khung
+
+    _seed_khung(db)
+    thieu = tmp_path / "go_nham_ten.csv"
+    kq = load_fixture(db, _mau(db), str(thieu))
+    assert kq.created_reports == 0
+
+    ma, out = _chay_main(monkeypatch, capsys, kq)
+
+    assert out.splitlines()[0] == "Đã nạp 0 báo cáo.", out
+    assert f"không có file fixture {thieu}" in out, out
+    assert "FIXTURE_CSV" in out, out
+    # Mỗi cảnh báo phải là MỘT DÒNG riêng, không chỉ lẫn trong câu cuối:
+    # câu cuối nhắc lại nguyên nhân, nhưng dòng CẢNH BÁO mới là kênh đầy đủ
+    # (một cảnh báo đi kèm lần nạp THÀNH CÔNG sẽ không có câu cuối nào nhắc hộ).
+    assert f"CẢNH BÁO: {kq.warnings[0]}" in out.splitlines(), out
+    assert ma == 1, out
+
+
+def test_fixture_da_doi_thi_noi_ro_nguyen_nhan_va_thoat_1(
+    db, monkeypatch, capsys, phien_gia_cho_qua
+):
+    """Kịch bản 2 của brief: sửa CSV, đẩy lên GitHub, Render deploy lại — sha
+    khác sha đã ghi trong `audit_log` ⇒ loader BỎ NẠP. Dòng cảnh báo duy nhất
+    nằm trong log Render, `reset_demo` không in một chữ nào."""
+    from app.seed.fixture import load_fixture
+    from tests.conftest import _seed_khung
+
+    _seed_khung(db)
+    load_fixture(db, _mau(db), "tests/fixtures/mini_ok.csv")
+    kq = load_fixture(db, _mau(db), "tests/fixtures/mini_lech_luy_ke_da_sua.csv")
+    assert kq.created_reports == 0
+
+    ma, out = _chay_main(monkeypatch, capsys, kq)
+
+    assert out.splitlines()[0] == "Đã nạp 0 báo cáo.", out
+    assert "fixture đã đổi" in out, out
+    assert f"CẢNH BÁO: {kq.warnings[0]}" in out.splitlines(), out
+    assert ma == 1, out
+
+
+def test_fixture_rong_thi_noi_ro_nguyen_nhan_va_thoat_1(
+    db, tmp_path, monkeypatch, capsys, phien_gia_cho_qua
+):
+    """Ca của HÔM NAY: `app/seed/fixtures/fm01_2026-06_2026-08.csv` chỉ có một
+    dòng header. Loader đọc trót lọt, ghi sha, tạo 0 báo cáo — không lỗi, không
+    cảnh báo. Đó là câu trả lời SAI cho câu hỏi duy nhất người gõ lệnh đang hỏi."""
+    from app.seed.fixture import load_fixture
+    from tests.conftest import _seed_khung
+
+    _seed_khung(db)
+    csv_path = tmp_path / "chi_header.csv"
+    csv_path.write_text(
+        "org_code,period,indicator_code,this_period,acc_prev,acc_total,note\n",
+        encoding="utf-8",
+    )
+    kq = load_fixture(db, _mau(db), str(csv_path))
+    assert kq.created_reports == 0
+
+    ma, out = _chay_main(monkeypatch, capsys, kq)
+
+    assert out.splitlines()[0] == "Đã nạp 0 báo cáo.", out
+    assert f"file fixture {csv_path} không có dòng dữ liệu nào nạp được" in out, out
+    assert f"CẢNH BÁO: {kq.warnings[0]}" in out.splitlines(), out
+    assert ma == 1, out
+
+
+def test_nap_duoc_thi_in_so_bao_cao_so_dong_bo_qua_va_thoat_0(
+    monkeypatch, capsys, phien_gia_cho_qua
+):
+    """Đường XANH — ca đối chứng của ba ca trên.
+
+    Không có ca này thì một bản "luôn luôn exit 1" vẫn xanh hết ba ca kia. Khoá
+    nguyên hai dòng đầu: "đã nạp N báo cáo" là dòng quan trọng nhất của cả lệnh,
+    và số dòng computed bỏ qua phải nói ra chứ không nuốt.
+    """
+    from app.seed.fixture import LoadResult
+
+    ma, out = _chay_main(
+        monkeypatch, capsys, LoadResult(created_reports=66, skipped=3)
+    )
+
+    dong = out.splitlines()
+    assert dong[0] == "Đã nạp 66 báo cáo.", out
+    assert dong[1].startswith("Bỏ qua 3 dòng chỉ tiêu tự tính"), out
+    assert ma is None, out
+    assert "KHÔNG nạp được" not in out, out
+
+
+def test_reset_tra_ve_ket_qua_nap_len_cho_goi(db):
+    """`reset()` là mắt xích giữa `seed_all` và `main()`: nó nuốt giá trị trả về
+    thì mọi con số ở trên thành vô nghĩa. Khoá bằng con số thật của
+    full_synthetic.csv (66), không phải `is not None`."""
+    from scripts.reset_demo import reset
+
+    seed_all(db)
+    kq = reset(db)
+    assert kq.created_reports == 66
+
+
 def test_reset_giu_catalog_va_tai_khoan_xoa_bao_cao(db):
     from app.models import AppUser, Indicator, OrgUnit, Report
     from scripts.reset_demo import reset

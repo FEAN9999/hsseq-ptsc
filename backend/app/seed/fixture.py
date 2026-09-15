@@ -72,10 +72,23 @@ class _Dong:
     note: str | None
 
 
+def _canh_bao_to(noi_dung: str) -> str:
+    """Log một cảnh báo có khung `===` để không chìm giữa log Render, rồi trả
+    lại nguyên câu cho `LoadResult.warnings` — người gọi (`scripts/reset_demo.py`)
+    in tiếp ra màn hình. Cùng một câu cho cả hai kênh, không lệch nhau."""
+    log.warning("=" * 70 + "\n" + noi_dung + "\n" + "=" * 70)
+    return noi_dung
+
+
 def load_fixture(db, tpl, path: str | None = None) -> LoadResult:
     p = Path(path) if path else Path(os.environ.get("FIXTURE_CSV", MAC_DINH))
     if not p.exists():
-        return LoadResult(warnings=[f"không có file fixture {p}, bỏ qua"])
+        # Nhánh dễ gặp nhất (gõ nhầm tên file, FIXTURE_CSV trỏ chỗ khác) và
+        # trước đây là nhánh CÂM NHẤT: return lặng, không log, không ai biết.
+        return LoadResult(warnings=[_canh_bao_to(
+            f"không có file fixture {p}, bỏ qua — kiểm tra đường dẫn "
+            f"hoặc biến môi trường FIXTURE_CSV"
+        )])
 
     raw = p.read_bytes()
     sha = hashlib.sha256(raw).hexdigest()
@@ -83,10 +96,10 @@ def load_fixture(db, tpl, path: str | None = None) -> LoadResult:
 
     sha_cu = _sha_da_nap(db, tpl)
     if sha_cu and sha_cu != sha:
-        canh_bao = (f"fixture đã đổi (sha256 {sha_cu[:8]} → {sha[:8]}); "
-                    f"chạy scripts/reset_demo.py --yes để nạp lại")
-        log.warning("=" * 70 + "\n" + canh_bao + "\n" + "=" * 70)
-        kq.warnings.append(canh_bao)
+        kq.warnings.append(_canh_bao_to(
+            f"fixture đã đổi (sha256 {sha_cu[:8]} → {sha[:8]}); "
+            f"chạy scripts/reset_demo.py --yes để nạp lại"
+        ))
         return kq
     if sha_cu == sha:
         kq.warnings.append("fixture không đổi, bỏ qua")
@@ -100,6 +113,13 @@ def load_fixture(db, tpl, path: str | None = None) -> LoadResult:
 
     kq.created_reports = _ghi(db, tpl, rows)
     kq.skipped = so_bo_qua
+    if kq.created_reports == 0:
+        # File đọc được, cấu trúc đúng, nhưng không có dòng nào để nạp (chỉ
+        # header, hoặc mọi dòng đều là chỉ tiêu computed). Không phải lỗi cấu
+        # trúc nên không ném FixtureError — nhưng cũng tuyệt đối không được im.
+        kq.warnings.append(_canh_bao_to(
+            f"file fixture {p} không có dòng dữ liệu nào nạp được, tạo 0 báo cáo"
+        ))
     _ghi_audit_sha(db, tpl, sha)
     return kq
 
