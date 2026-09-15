@@ -433,6 +433,36 @@ def test_status_from_to_sai_dinh_dang_tra_422(client, db):
                       headers=h).status_code == 200
 
 
+def test_status_ky_phai_dung_neo_va_chi_nhan_chu_so_ASCII(client, db):
+    """Ca canh cho hai cái NEO `^`/`$` của `KY_PATTERN` và cho LỚP CHỮ SỐ.
+
+    `test_status_from_to_sai_dinh_dang_tra_422` ở trên không canh được hai cái
+    neo: `undefined` và `2026-13` bị **cả bốn biến thể** của pattern (đủ neo /
+    thiếu `^` / thiếu `$` / thiếu cả hai) từ chối, nên sức phân biệt của nó với
+    neo bằng 0 — bỏ `^` hay bỏ `$` đều 305/305 XANH (final-review-R1-report.md
+    §(A2), M1 và M2). Đúng họ lỗi "so một giá trị với chính cái mặc định nó rơi
+    về". Chuỗi phân biệt được là chuỗi mà pattern CÓ neo thì từ chối còn pattern
+    MẤT neo thì nhận.
+
+    Vế thứ hai: `\\d` khớp cả **chữ số Unicode**, nên `from=٢٠٢٦-06` (chữ số Ả
+    Rập) từng lọt pattern và trả **200 kèm thân rỗng** — `period_key >=
+    '٢٠٢٦-06'` là FALSE với mọi kỳ ASCII, tức máy chủ trả lời "không có gì"
+    bằng một mã thành công và FE không phân biệt được với câu trả lời thật.
+    Đúng lớp lỗi W1b sinh ra để đóng, chỉ hẹp cửa lại chứ chưa đóng.
+    """
+    seed_all(db)
+    h = dang_nhap(client, "admin@ptsc.local")
+    for ky, vi_sao in (
+        ("x2026-06", "mất neo ^ thì nhận"),
+        ("2026-06x", "mất neo $ thì nhận"),
+        ("\u0662\u0660\u0662\u0666-06", "chữ số Ả Rập — \\d khớp chữ số Unicode"),
+        ("\uff12\uff10\uff12\uff16-06", "chữ số toàn rộng — \\d khớp chữ số Unicode"),
+    ):
+        r = client.get("/api/v1/status",
+                       params={"template": "FM01", "from": ky, "to": "2026-09"}, headers=h)
+        assert r.status_code == 422, f"{ky!r} lọt pattern ({vi_sao}) → {r.status_code} {r.text[:120]}"
+
+
 def test_status_template_khong_ton_tai_tra_404(client, db):
     seed_all(db)
     h = dang_nhap(client, "admin@ptsc.local")

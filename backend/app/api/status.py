@@ -37,7 +37,14 @@ router = APIRouter(prefix="/status")
 # trong `tests/api/test_dashboard.py`; ca `test_reporter_khong_xem_duoc_status`
 # gọi KHÔNG kèm `from`/`to` nên không đụng pattern (và vẫn 403, xem docstring
 # module về bẫy 422-thắng-403).
-KY_PATTERN = r"^\d{4}-(0[1-9]|1[0-2])$"
+# `[0-9]` chứ KHÔNG phải `\d`: `\d` khớp cả chữ số Unicode, nên
+# `from=٢٠٢٦-06` (chữ số Ả Rập) hay `from=２０２６-06` (toàn rộng) lọt
+# pattern rồi rơi vào chính phép so chuỗi ở trên — `period_key >= '٢٠٢٦-06'` là
+# FALSE với mọi kỳ ASCII ⇒ **200 kèm thân rỗng**, đúng lớp lỗi W1b sinh ra
+# để đóng (final-review-R1-report.md §(A2)). Hai cái neo `^`/`$` cũng là
+# thật, không trang trí: ca canh ở tests/api/test_dashboard.py::
+# test_status_ky_phai_dung_neo_va_chi_nhan_chu_so_ASCII.
+KY_PATTERN = r"^[0-9]{4}-(0[1-9]|1[0-2])$"
 
 
 def _pham_vi(u: CurrentUser = Depends(require_permission("status.view"))) -> set[int] | None:
