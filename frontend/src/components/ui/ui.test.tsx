@@ -7,7 +7,7 @@ import { Toast, useToast } from './Toast'
 // Vòng sửa 2: mọi assert nói về giá trị THIẾT KẾ HIỂN THỊ (màu nền/viền/chữ, margin) phải hỏi
 // resolver "lớp nào thắng cascade trong CSS thật đã build", không hỏi className có chứa chuỗi gì —
 // xem giải thích đầy đủ trong cascade.ts.
-import { resolveCascadeWinner } from './cascade'
+import { resolveCascadeWinner, resolveDeclaredValue } from './cascade'
 
 describe('Chip', () => {
   it.each([
@@ -136,6 +136,71 @@ describe('Chip', () => {
     const { container } = render(<Chip kind={kind as never} outline={outline as boolean} />)
     const cls = container.firstElementChild?.className ?? ''
     expect(cls.match(/\bbg-\S+/g)?.length ?? 0).toBe(1)
+  })
+
+  // ---- P6 (final-fix-FE.md · final-review-R3-report.md §A4) — MẶT THỨ BA của đúng cái lỗ đã ship
+  // HAI lỗi thật.
+  //
+  // Mặt (1) *nền* và mặt (2) *viền* đã có người canh ở ngay trên, và dự án đã trả giá cho cả hai ở
+  // hai vòng liên tiếp (S1: viền; P1: nền). Mặt (3) *màu chữ* vẫn mở: cộng thêm `text-ink` cạnh
+  // `KIND_TEXT[kind]` ở `Chip.tsx:78` ⇒ **750/750 XANH**. Trên bundle thật, hai utility cùng khai
+  // `color` có cùng độ đặc hiệu, cái đứng SAU trong CSS thắng ⇒ chip "Đã duyệt" mất màu xanh,
+  // "Trả lại" mất màu đỏ, **cả sáu kind tụt về một màu**. Màu chip là NGÔN NGỮ CHÍNH của `/status`
+  // (lưới 22 × N ô) và `/reports` — mất nó là mất thông tin, không phải mất thẩm mỹ.
+  //
+  // Làm y hai mặt kia: một cặp assert KẾT QUẢ + ĐẾM. Hai câu hỏi này bổ sung nhau, không thay thế
+  // nhau — "kết quả" xác nhận cascade thắng đúng cho những gì ĐANG có; "đếm" xác nhận không có gì
+  // THỪA cùng thuộc tính để tạo cuộc đua từ đầu.
+  it.each([
+    ['approved', false, 'text-success'],
+    ['submitted', false, 'text-warning'],
+    ['late', false, 'text-warning'],
+    ['returned', false, 'text-danger'],
+    ['draft', false, 'text-draft'],
+    ['missing', false, 'text-sec'],
+    ['approved', true, 'text-success'],
+    ['submitted', true, 'text-warning'],
+    ['late', true, 'text-warning'],
+    ['returned', true, 'text-danger'],
+    ['draft', true, 'text-draft'],
+    ['missing', true, 'text-sec'],
+  ])('kind=%s outline=%s → cascade cho color phải thắng đúng %s (P6, mặt thứ ba)', (kind, outline, mauChu) => {
+    const { container } = render(<Chip kind={kind as never} outline={outline as boolean} />)
+    const cls = container.firstElementChild?.className ?? ''
+    expect(resolveCascadeWinner(cls, 'color')).toBe(mauChu)
+  })
+
+  // ĐẾM — và đếm bằng CHÍNH CSS ĐÃ BUILD, không bằng regex trên tên lớp.
+  //
+  // `/\btext-\S+/` là cái bẫy mà báo cáo nêu đích danh: `text-xs` (font-size) cũng khớp, nên một
+  // phép đếm thô luôn ra 2 và phải chốt `toBe(2)` — lúc đó thêm `text-ink` thành 3 thì bắt được,
+  // nhưng thêm một utility màu KHÔNG mang tiền tố `text-` thì không. Đúng dạng "danh sách đóng" mà
+  // vòng 2 của mặt *viền* đã bị bắt.
+  //
+  // Hỏi thẳng CSS: lớp nào trong className thật sự khai `color` ở trạng thái nghỉ. `text-xs` khai
+  // `font-size`/`line-height` nên tự rụng; `border-current` khai `border-color` nên cũng rụng. Đếm
+  // này không có danh sách nào để lách qua.
+  it.each([
+    ['approved', false],
+    ['submitted', false],
+    ['late', false],
+    ['returned', false],
+    ['draft', false],
+    ['missing', false],
+    ['approved', true],
+    ['submitted', true],
+    ['late', true],
+    ['returned', true],
+    ['draft', true],
+    ['missing', true],
+  ])('kind=%s outline=%s → đúng MỘT utility khai `color`, không utility nào dư (đếm mở, P6)', (kind, outline) => {
+    const { container } = render(<Chip kind={kind as never} outline={outline as boolean} />)
+    const cls = container.firstElementChild?.className ?? ''
+    const khaiColor = cls
+      .split(/\s+/)
+      .filter(Boolean)
+      .filter((c) => resolveDeclaredValue(c, 'color') !== null)
+    expect(khaiColor).toHaveLength(1)
   })
 
   it('missing (Chưa nộp) có viền hairline thật #e8e6e5, không phải transparent bị cascade đè', () => {
