@@ -125,6 +125,35 @@ describe('/login', () => {
     expect(screen.queryByTestId('dich-den')).toBeNull()
   })
 
+  // task-28-fix-3.md P1 — "người canh": ca này khẳng định CÂU HIỂN THỊ TRÊN MÀN HÌNH (không phải
+  // câu trong throw), đi qua ĐÚNG ĐƯỜNG người dùng đi (bấm Đăng nhập, không gọi thẳng client.ts) —
+  // nếu chỉ khẳng định ở tầng client.ts (client.test.ts) thì đó là dạng mù (b): lớp ở giữa
+  // (xuLySubmit, Login.tsx:212) mới là chỗ có thể âm thầm nuốt mất thông báo trước khi nó tới màn
+  // hình, và một ca chỉ nhìn client.ts sẽ không bao giờ thấy được điều đó.
+  it('backend giả trả 200 kèm HTML (BASE trỏ nhầm) lúc đăng nhập thì câu hiện trên MÀN HÌNH phải nói tên VITE_API_BASE, không phải câu chung chung', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string) => {
+        if (url.includes('/health')) return Promise.resolve(okJson({ status: 'ok' }))
+        // /auth/login: 200 kèm HTML — đúng chữ ký SPA fallback (vercel.json) khi VITE_API_BASE
+        // trỏ nhầm về chính origin frontend, task-28-fix-2.md P1.
+        return Promise.resolve({
+          ok: true, status: 200,
+          headers: { get: () => 'text/html' },
+          json: async () => { throw new SyntaxError('Unexpected token <') },
+        })
+      }),
+    )
+    renderLogin()
+    await userEvent.type(screen.getByLabelText('Email'), 'u01@ptsc.local')
+    await userEvent.type(screen.getByLabelText('Mật khẩu'), 'Demo@2026')
+    await userEvent.click(screen.getByRole('button', { name: 'Đăng nhập' }))
+    expect(await screen.findByText(/VITE_API_BASE/)).toBeTruthy()
+    // Chốt chống hồi quy: câu CHUNG CHUNG cũ (chỉ tay sai chỗ — Render vẫn chạy bình thường, cái
+    // sai nằm ở Vercel) không còn được phép xuất hiện thay cho câu nói tên biến.
+    expect(screen.queryByText('Không kết nối được máy chủ')).toBeNull()
+  })
+
   it('không có link quên mật khẩu, không có đăng ký', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(okJson({})))
     renderLogin()

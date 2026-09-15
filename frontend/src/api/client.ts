@@ -92,23 +92,37 @@ export const BASE = baseApi()
  *  thật. Chỉ ném NGAY khi có tín hiệu DƯƠNG TÍNH rõ ràng (Content-Type khai hẳn một loại khác
  *  JSON, đủ để bắt SPA fallback — trình duyệt thật LUÔN có header này); Content-Type vắng/không
  *  đọc được (mock test trần không set `headers`, hoặc server thật không khai) thì rơi xuống
- *  `res.json()` — SyntaxError của chính nó là lưới an toàn thứ hai cho trường hợp đó. */
+ *  `res.json()` — SyntaxError của chính nó là lưới an toàn thứ hai cho trường hợp đó.
+ *
+ *  task-28-fix-3.md P1: ném `ApiError` (không phải `Error` trần) — `Login.tsx:212`
+ *  (`err instanceof ApiError ? err.detail : 'Không kết nối được máy chủ'`) chỉ hiện `detail` cho
+ *  `ApiError`; một `Error` trần rơi vào nhánh câu chung, làm mất đúng câu nói tên biến ngay tại nơi
+ *  người dùng nhìn thấy — "hỏng ồn ào" mà không ai đọc được thì cũng như câm, chỉ khác lớp áo. Đã
+ *  grep cả 12 chỗ `instanceof ApiError` trong `src/` (không tính comment) để xác nhận không tác
+ *  dụng phụ: hai chỗ hiện `detail` (đúng thứ muốn); bốn chỗ lọc theo `status` (401/403/404) —
+ *  response ở đây luôn 2xx nên không khớp nhánh nào, hành vi y hệt trước (khi còn là `Error` trần,
+ *  `instanceof` đã sai ngay từ đầu — cùng kết quả "bỏ qua nhánh"); hai hook
+ *  `useChuyenTrangThai`/`useSaveValues` và `queryClient` (retry 4xx) đổi hành vi kỹ thuật nhưng
+ *  KHÔNG chạm được trong kịch bản BASE sai (build hỏng khiến mọi request đều hỏng như nhau, người
+ *  dùng kẹt ở màn đăng nhập, không bao giờ tới các trang dùng ba chỗ đó — Reports/ReportDetail). */
 async function docJsonHopLe<T>(res: Response): Promise<T> {
   const loaiNoiDung = typeof res.headers?.get === 'function' ? res.headers.get('content-type') : null
   if (loaiNoiDung && !loaiNoiDung.includes('application/json')) {
-    throw new Error(
-      `API trả về "${loaiNoiDung}" thay vì JSON — kiểm tra biến môi trường VITE_API_BASE (hiện là ` +
-        `"${BASE}"), rất có thể đang trỏ nhầm về chính origin frontend thay vì backend thật (SPA ` +
-        'fallback trả trang HTML cho mọi đường dẫn).',
-    )
+    throw new ApiError(res.status, {
+      detail:
+        `API trả về "${loaiNoiDung}" thay vì JSON — kiểm tra biến môi trường VITE_API_BASE (hiện ` +
+        `là "${BASE}"), rất có thể đang trỏ nhầm về chính origin frontend thay vì backend thật ` +
+        '(SPA fallback trả trang HTML cho mọi đường dẫn).',
+    })
   }
   try {
     return (await res.json()) as T
   } catch {
-    throw new Error(
-      'API không trả về JSON hợp lệ — kiểm tra biến môi trường VITE_API_BASE ' +
+    throw new ApiError(res.status, {
+      detail:
+        'API không trả về JSON hợp lệ — kiểm tra biến môi trường VITE_API_BASE ' +
         `(hiện là "${BASE}"), rất có thể đang trỏ nhầm về chính origin frontend thay vì backend thật.`,
-    )
+    })
   }
 }
 

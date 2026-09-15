@@ -191,6 +191,16 @@ describe('docJsonHopLe — content-type thay cho hostname (task-28-fix-2.md P1)'
     await expect(api.get('/reports/1')).rejects.toThrow(/VITE_API_BASE/)
   })
 
+  // task-28-fix-3.md P1: PHẢI là ApiError, không phải Error trần — Login.tsx:212
+  // (err instanceof ApiError ? err.detail : 'Không kết nối được máy chủ') chỉ hiện `detail` cho
+  // đúng loại này. Một Error trần vẫn khớp `.rejects.toThrow(/VITE_API_BASE/)` ở ca trên (vì
+  // `.message` cũng chứa chuỗi đó) nhưng bị NUỐT MẤT ở màn hình thật — ca `toThrow` không phân biệt
+  // được hai loại lỗi, phải khẳng định riêng bằng `toBeInstanceOf`.
+  it('lỗi content-type-sai PHẢI là ApiError (không phải Error trần) — nếu không, Login.tsx nuốt mất câu nói tên biến', async () => {
+    vi.stubGlobal('fetch', tra(200, '<!doctype html><body>index.html</body>', 'text/html'))
+    await expect(api.get('/reports/1')).rejects.toBeInstanceOf(ApiError)
+  })
+
   it('res.ok kèm Content-Type application/json thì vẫn trả JSON như cũ, không ném', async () => {
     vi.stubGlobal('fetch', tra(200, { id: 1 }, 'application/json'))
     await expect(api.get('/reports/1')).resolves.toEqual({ id: 1 })
@@ -216,5 +226,22 @@ describe('docJsonHopLe — content-type thay cho hostname (task-28-fix-2.md P1)'
       } as unknown as Response),
     )
     await expect(api.get('/reports/1')).rejects.toThrow(/VITE_API_BASE/)
+  })
+
+  // Cùng lý do như ca dòng ~199: `.toThrow` không phân biệt được ApiError với Error trần vì cả hai
+  // đều có `.message` chứa chuỗi VITE_API_BASE. `docJsonHopLe` sửa CẢ HAI nhánh throw sang ApiError
+  // (task-28-fix-3.md P1) — nhánh content-type-sai đã có `toBeInstanceOf` riêng, nhánh
+  // JSON-parse-failure này cũng cần, nếu không đây là đúng gap "mù dạng (b)" fix-3.md cảnh báo,
+  // chỉ khác là ở nhánh còn lại của cùng hàm.
+  it('lỗi JSON-không-parse-được CŨNG PHẢI là ApiError (không phải Error trần), cùng lý do như nhánh content-type-sai ở trên', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true, status: 200,
+        headers: { get: () => 'application/json' },
+        json: async () => { throw new SyntaxError('Unexpected end of JSON input') },
+      } as unknown as Response),
+    )
+    await expect(api.get('/reports/1')).rejects.toBeInstanceOf(ApiError)
   })
 })
