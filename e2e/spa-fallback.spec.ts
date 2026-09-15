@@ -100,15 +100,25 @@ test.describe('SPA fallback trên hiện vật đã build (task-28-review.md P5,
     // Bấm thật (không chỉ đợi /health tự chạy) để cũng THI HÀNH chỗ chạm thứ hai của P1
     // (client.ts: docJsonHopLe trong nhánh request() thành công) trên CHÍNH hiện vật đã build này
     // — POST /auth/login cũng ăn SPA fallback (200 kèm HTML) y hệt, rơi vào docJsonHopLe() chứ
-    // không phải nhánh !res.ok (502/503) đã có từ trước Task 28. LƯU Ý GIỚI HẠN: assertion dưới
-    // đây chỉ khoá được "trang không sập/treo" — KHÔNG phân biệt được lỗi cụ thể của docJsonHopLe()
-    // (nói rõ tên VITE_API_BASE) với một SyntaxError trần giả định nào khác, vì `xuLySubmit()`
-    // (Login.tsx, ngoài "hai chỗ phải chạm" của P1) bắt MỌI lỗi không phải ApiError và rơi về CÙNG
-    // một câu chung 'Không kết nối được máy chủ' — thông điệp cụ thể của docJsonHopLe() được
-    // mutation-test ở tầng unit (client.test.ts), không phải ở đây.
+    // không phải nhánh !res.ok (502/503) đã có từ trước Task 28.
+    //
+    // task-28-fix-3.md P1: docJsonHopLe() giờ ném ApiError (không phải Error trần), nên
+    // xuLySubmit() (Login.tsx:212, `err instanceof ApiError ? err.detail : '…chung…'`) hiện ĐÚNG
+    // câu nói tên VITE_API_BASE ở banner loiDangNhap — banner NÀY khác banner loiKetNoi (câu
+    // chung ở assertion phía trên, còn nguyên trên DOM vì loiKetNoi không bị xoá lúc submit): hai
+    // banner độc lập, `getByText(/VITE_API_BASE/)` chỉ khớp banner loiDangNhap vì loiKetNoi không
+    // chứa chuỗi đó (xem Login.tsx dòng ~263-278). Trước fix-3, docJsonHopLe() ném Error trần nên
+    // xuLySubmit() rơi vào nhánh câu chung — assertion cũ ở đây từng khoá được đúng câu chung đó,
+    // "mù dạng (b)" trước đúng lỗi P1 sửa vì trùng với banner loiKetNoi đã hiện sẵn phía trên.
+    //
+    // BẤT ĐỐI XỨNG CÒN LẠI (KHÔNG thuộc phạm vi fix-3, xem "KHÔNG làm trong vòng này" của
+    // task-28-fix-3.md — chỉ đụng đường xuLySubmit, không đụng thuGoiHealth): banner loiKetNoi ở
+    // assertion phía trên VẪN hiện câu chung "Không kết nối được máy chủ", vì thuGoiHealth()
+    // không đi qua docJsonHopLe/ApiError — đường health-check tự động lúc mở trang chưa được P1
+    // xử lý, chỉ đường bấm Đăng nhập (xuLySubmit) mới được xử lý ở vòng sửa này.
     await page.getByLabel('Email').fill('u01@ptsc.local')
     await page.getByLabel('Mật khẩu').fill('Demo@2026')
     await page.getByRole('button', { name: 'Đăng nhập' }).click()
-    await expect(page.getByText(/Không kết nối được máy chủ/).first()).toBeVisible()
+    await expect(page.getByText(/VITE_API_BASE/)).toBeVisible()
   })
 })
