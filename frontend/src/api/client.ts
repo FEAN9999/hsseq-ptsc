@@ -87,6 +87,31 @@ function baseApi(): string {
 
 export const BASE = baseApi()
 
+/** *"Content-Type này có nói JSON không?"* — vị từ DÙNG CHUNG của hai nơi hỏi đúng cùng câu đó:
+ *  `docJsonHopLe()` ngay dưới (nhánh gọi API thật) và `thuGoiHealth()` ở `pages/Login.tsx` (lời gọi
+ *  /health lúc mở trang).
+ *
+ *  task-28-fix-6.md — vì sao GỘP chứ không vá hai chỗ: `task-28-scope.md` mục 2 đã bắt gộp hai bản
+ *  chép của dòng `BASE` về một nguồn vì "hai chỗ sẽ lệch nhau". Phép so content-type rơi vào ĐÚNG
+ *  cái bẫy đó, trong cùng Task 28: vòng sửa 5 thêm `.toLowerCase()` ở đây mà bản chép bên
+ *  `Login.tsx` không có, và hai bản chép lệch nhau THẬT — một bản đọc đúng giao thức, một bản
+ *  không. Vá lần hai thì vẫn còn hai bản chép để lệch lần ba.
+ *
+ *  Hai quy ước GIỮ NGUYÊN, không đổi nhân lúc gộp:
+ *  - **Thiếu header thì coi như JSON** (`null`, chuỗi rỗng, hoặc `headers.get` không gọi được).
+ *    Chỉ trả `false` khi có tín hiệu DƯƠNG TÍNH rõ ràng — server thật không khai, hay mock test
+ *    trần không set `headers`, đều được cho qua. Đây là hành vi sẵn có ở CẢ HAI nơi trước khi gộp.
+ *  - **So sau `toLowerCase()`** (task-28-fix-5.md P1): media type trong HTTP không phân biệt
+ *    hoa/thường (RFC 9110 §8.3.1), còn `Headers.get()` trả NGUYÊN VĂN giá trị server gửi — chỉ TÊN
+ *    header mới được chuẩn hoá. So trên chuỗi thô là đọc sai giao thức.
+ *
+ *  KHÔNG gộp phần `res.ok` — đó là phần KHÁC nhau của hai nơi gọi, mỗi nơi giữ riêng:
+ *  `docJsonHopLe` đã nằm sẵn trong nhánh `res.ok` của `request()`, còn `thuGoiHealth` phải tự kết
+ *  hợp vì hợp đồng của nó là "502/503 lúc cold-start vẫn tính là đã thức". */
+export function noiLaJson(loaiNoiDung: string | null | undefined): boolean {
+  return !loaiNoiDung || loaiNoiDung.toLowerCase().includes('application/json')
+}
+
 /** Ném lỗi nói rõ tên biến khi response `res.ok` nhưng KHÔNG phải JSON — dấu hiệu BASE đang trỏ
  *  nhầm về chính origin frontend (SPA fallback trả 200 kèm HTML cho mọi đường dẫn) thay vì backend
  *  thật. Chỉ ném NGAY khi có tín hiệu DƯƠNG TÍNH rõ ràng (Content-Type khai hẳn một loại khác
@@ -94,13 +119,8 @@ export const BASE = baseApi()
  *  đọc được (mock test trần không set `headers`, hoặc server thật không khai) thì rơi xuống
  *  `res.json()` — SyntaxError của chính nó là lưới an toàn thứ hai cho trường hợp đó.
  *
- *  task-28-fix-5.md P1: so trên bản `toLowerCase()` vì media type trong HTTP KHÔNG phân biệt
- *  hoa/thường (RFC 9110 §8.3.1) và `Headers.get()` trả NGUYÊN VĂN giá trị server gửi — chỉ TÊN
- *  header mới được chuẩn hoá. So trên chuỗi thô là đọc sai giao thức: `Application/JSON` (header
- *  hoàn toàn hợp lệ) bị coi là "không phải JSON" và câu lỗi đi buộc tội `VITE_API_BASE` trên một
- *  bản deploy LÀNH — cùng họ "thông báo chỉ tay sai chỗ" với bẫy `charset=utf-8`, chỉ khác lối vào.
- *  THÔNG BÁO vẫn in `loaiNoiDung` THÔ (không phải bản đã hạ chữ): người đọc cần thấy đúng thứ
- *  server gửi, không phải bản đã bị mã này chế biến.
+ *  THÔNG BÁO in `loaiNoiDung` THÔ (không phải bản đã hạ chữ của `noiLaJson`): người đọc cần thấy
+ *  đúng thứ server gửi, không phải bản đã bị mã này chế biến.
  *
  *  task-28-fix-3.md P1: ném `ApiError` (không phải `Error` trần) — `Login.tsx:212`
  *  (`err instanceof ApiError ? err.detail : 'Không kết nối được máy chủ'`) chỉ hiện `detail` cho
@@ -115,7 +135,7 @@ export const BASE = baseApi()
  *  dùng kẹt ở màn đăng nhập, không bao giờ tới các trang dùng ba chỗ đó — Reports/ReportDetail). */
 async function docJsonHopLe<T>(res: Response): Promise<T> {
   const loaiNoiDung = typeof res.headers?.get === 'function' ? res.headers.get('content-type') : null
-  if (loaiNoiDung && !loaiNoiDung.toLowerCase().includes('application/json')) {
+  if (!noiLaJson(loaiNoiDung)) {
     throw new ApiError(res.status, {
       detail:
         `API trả về "${loaiNoiDung}" thay vì JSON — kiểm tra biến môi trường VITE_API_BASE (hiện ` +

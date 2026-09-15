@@ -23,7 +23,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { flushSync } from 'react-dom'
 import { useNavigate, type NavigateFunction } from 'react-router-dom'
-import { api, ApiError, BASE } from '../api/client'
+import { api, ApiError, BASE, noiLaJson } from '../api/client'
 import { useSession, type SessionOrgUnit, type SessionUser } from '../app/session'
 import { Wordmark } from '../components/ui/Wordmark'
 
@@ -59,8 +59,13 @@ async function thuGoiHealth(): Promise<boolean> {
   const timer = setTimeout(() => ctrl.abort(), TIMEOUT_HEALTH_MS)
   try {
     const res = await fetch(`${BASE}/health`, { signal: ctrl.signal })
+    // task-28-fix-6.md: phép so content-type dùng CHUNG vị từ `noiLaJson` với client.ts, không còn
+    // bản chép riêng ở đây — trước vòng này hai bản chép đã lệch nhau thật (bản kia có
+    // `.toLowerCase()`, bản này không), nên một `Application/JSON` hợp lệ làm hàm này trả false và
+    // màn đăng nhập báo mất kết nối trên một máy chủ lành. `res.ok` thì GIỮ RIÊNG ở đây: đó là
+    // phần khác nhau giữa hai nơi gọi, và là chỗ hợp đồng "502/503 vẫn tính là đã thức" nằm.
     const loaiNoiDung = typeof res.headers?.get === 'function' ? res.headers.get('content-type') : null
-    if (res.ok && loaiNoiDung && !loaiNoiDung.includes('application/json')) {
+    if (res.ok && !noiLaJson(loaiNoiDung)) {
       return false
     }
     return true

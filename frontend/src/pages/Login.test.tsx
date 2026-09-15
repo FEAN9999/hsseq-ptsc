@@ -121,6 +121,33 @@ describe('/login', () => {
     }
   })
 
+  // task-28-fix-6.md — đối xứng với ca P3 ngay trên, ở cạnh biên CHỮ HOA. `Application/JSON` là
+  // header HỢP LỆ (media type trong HTTP không phân biệt hoa/thường, RFC 9110 §8.3.1), nên một máy
+  // chủ trả 200 kèm JSON thật KHÔNG được bị coi là chết.
+  //
+  // Trước khi gộp vị từ, `thuGoiHealth` so trên chuỗi THÔ (bản chép thứ hai của phép so đã sửa ở
+  // `client.ts` vòng 5) nên nó trả false cả ba lượt và màn đăng nhập hiện "Không kết nối được máy
+  // chủ" trên một bản deploy HOÀN TOÀN LÀNH. Nhánh này nặng hơn nhánh `client.ts`: nó chạy lúc MỞ
+  // TRANG, không cần ai bấm gì, và câu hiện ra là câu CHUNG — không nói tên biến nào để mà đi kiểm.
+  it('/health trả 200 kèm Application/JSON (viết HOA, server LÀNH) thì KHÔNG hiện banner mất kết nối', async () => {
+    vi.useFakeTimers()
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true, status: 200,
+        headers: { get: () => 'Application/JSON' },
+        json: async () => ({ status: 'ok' }),
+      }),
+    )
+    try {
+      renderLogin()
+      await vi.advanceTimersByTimeAsync(10_100)
+      expect(screen.queryByText(/Không kết nối được máy chủ/)).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('sau 3 giây chưa trả lời thì hiện câu đánh thức máy chủ', async () => {
     vi.useFakeTimers()
     vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})))
