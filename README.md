@@ -73,8 +73,15 @@ npm install && npx playwright install chromium             # chỉ lần đầu
 npx playwright test                                        # 2 viewport: 1280×800 và 1024×640 (=125%)
 ```
 
-Không cần tự chạy `npm run preview`: `playwright.config.ts` khai `webServer` nên nó tự dựng
-`frontend` và tự dọn.
+Không cần tự chạy `npm run build` hay `npm run preview`: `playwright.config.ts` khai `webServer`
+nên nó tự **build lại `frontend/dist`** rồi dựng `preview`, và tự dọn. Build lại mỗi lượt là cố ý
+(≈1,6 giây trên một lượt e2e ≈1,6 phút): `preview` không build, nên nếu không có bước này thì cả bộ
+e2e cần trình duyệt đo bundle của lần build TRƯỚC — sửa `frontend/src` rồi chạy `npx playwright test`
+sẽ cho một màu xanh nói về mã cũ.
+
+Vì lý do đó `reuseExistingServer` để `false`: **đang có gì nghe ở cổng 5173 thì Playwright dừng kèm
+lỗi thay vì mượn nó**. Mượn một `vite preview` sót lại từ lượt trước = bỏ qua hẳn bước build ở trên.
+Gặp lỗi đó thì tắt tiến trình đang giữ cổng (`lsof -nP -iTCP:5173 -sTCP:LISTEN`) rồi chạy lại.
 
 ### Trỏ vào một bản deploy: `BASE_URL`
 
@@ -109,18 +116,32 @@ hẳn về hậu quả. Bộ test vì vậy chia đôi theo đúng thứ nó C�
 
 | ở chế độ `BASE_URL` | ca |
 |---|---|
-| **chạy** (10) | thuần, không cần server: phân loại hostname ×2 · `apiUrl` ×2 · lớp nối F23 ×2 (`API_ORIGIN` đọc `process.env` thật · `helpers.ts` đi qua `goiApi`) — cộng bốn ca cần trình duyệt: không cuộn ngang · titlebar · rbac 403 · rbac chưa đăng nhập — đây là bộ khói cho một bản deploy |
-| **bỏ qua**, in rõ lý do (6) | demo phân đoạn 2 · lớp làm mới cache · Ctrl+S · hộp thoại trên lớp dính · hộp thoại trên Toast · rbac người xem — sáu ca này cần một báo cáo **nháp sạch** |
+| **chạy** | thuần, không cần server: phân loại hostname ×2 · `apiUrl` ×2 · lớp nối F23 ×2 (`API_ORIGIN` đọc `process.env` thật · `helpers.ts` đi qua `goiApi`) — cộng bốn ca cần trình duyệt: không cuộn ngang · titlebar · rbac 403 · rbac chưa đăng nhập — đây là bộ khói cho một bản deploy |
+| **bỏ qua**, in rõ lý do | demo phân đoạn 2 · lớp làm mới cache · Ctrl+S · hộp thoại trên lớp dính · hộp thoại trên Toast · rbac người xem (sáu ca này cần một báo cáo **nháp sạch**) · ca canh `webServer` (chế độ từ xa không có `webServer` nào để canh) |
 
-Tổng 16 ca/project (32 cho cả hai project `desktop-1280` + `zoom-125`).
+**Số ca thì hỏi bộ test, đừng đọc ở đây.** Dòng tổng viết tay từng đứng ở đúng chỗ này và đã sai
+hai lần liên tiếp — mỗi lần vì có người thêm ca test mà không ai nhớ sửa con số. Một tài liệu không
+nên khẳng định thứ nó không có cách nào biết là còn đúng:
+
+```bash
+cd e2e
+npx playwright test --list                          # tổng cả lượt chạy (cả hai project)
+npx playwright test --list --project=desktop-1280   # số ca một project
+```
+
+`--list` không dựng `webServer` nên nó rẻ (dưới một giây) và không đụng gì tới `frontend/dist`. Ở
+chế độ `BASE_URL` từ xa, dòng tóm tắt cuối lượt chạy tự in ra bao nhiêu ca chạy và bao nhiêu ca bỏ
+qua — đó mới là câu trả lời đúng cho "bộ khói của bản deploy này gồm những gì".
 
 Muốn chạy cả sáu ca kia trên bản deploy thì reset ở chính máy chủ đó trước
 (`docker compose exec api python -m scripts.reset_demo --yes`) rồi chạy lẻ từng ca bằng `-g`.
 
-**Riêng `spa-fallback.spec.ts` (2 ca, task-28-review.md P5):** cũng cách ly mạng hoàn toàn (chạy ở
-MỌI chế độ `BASE_URL`, không nằm trong bảng trên) nhưng có điều kiện RIÊNG — cần `frontend/dist` đã
-build sẵn (`npm run build` hoặc `npm test` trong `frontend/`, xem "Chạy test" phía trên). Chưa build
-thì hai ca này tự báo `skipped` kèm lý do, không phải một ca đỏ khó hiểu trên cây vừa clone.
+**Riêng `spa-fallback.spec.ts` (task-28-review.md P5):** cũng cách ly mạng hoàn toàn (chạy ở MỌI
+chế độ `BASE_URL`, không nằm trong bảng trên) nhưng đọc thẳng `frontend/dist`. Chạy cục bộ thì
+không phải lo: `webServer` đã build lại trước khi bộ test được nạp (đo được — xoá sạch
+`frontend/dist` rồi chạy `npx playwright test`, hai ca này vẫn chạy). Ở chế độ `BASE_URL` từ xa
+không có `webServer` nào, nên chưa build thì chúng tự báo `skipped` kèm lý do, không phải một ca đỏ
+khó hiểu.
 
 "Máy nhà hay từ xa" được quyết ở `e2e/moi-truong.ts` theo **hostname đã phân tích cú pháp**, không
 theo tiền tố chuỗi: `localhost`, `127.0.0.1`, `0.0.0.0`, `::1` và `*.localhost` là máy nhà, bất kể
