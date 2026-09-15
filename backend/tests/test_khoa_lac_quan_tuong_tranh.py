@@ -403,3 +403,41 @@ def test_ghi_gia_tri_hai_luong_o_trong_khong_no_500(du_lieu):
 
     with SessionLocal() as s:
         assert s.query(ReportValue).filter_by(report_id=rid).count() == 1
+
+
+def test_apply_transition_hai_luong_chi_mot_ben_quyet_duoc(du_lieu):
+    """Trưởng Ban bấm "Duyệt" và chuyên viên bấm "Trả lại" CÙNG LÚC trên một
+    báo cáo đã nộp — cả hai khai `expected_state='submitted', version=1`.
+
+    Ca tuần tự ở trên (A commit xong B mới chạy) canh `.populate_existing()`;
+    ca này canh `.with_for_update()` ở `app/services/workflow.py`. Bỏ nó đi:
+    hai luồng đọc cùng một mốc, **cả hai trả 200**, lượt "Duyệt" mất trắng
+    thành `returned`, `version` chỉ nhích 1 cho HAI lượt chuyển, và audit ghi
+    **hai dòng cùng khai `before.state="submitted"`** — sổ audit nói dối về
+    thứ tự đã xảy ra. Dự án đã trả giá một lần ở đúng vùng này (commit
+    `02e929d`).
+    """
+    rid, actor = du_lieu["id_nop"], du_lieu["actor"]
+
+    def _quyet(action, ghi_chu):
+        def _viec(s):
+            apply_transition(s, rid, action, ghi_chu, "submitted", 1, actor)
+            return action
+        return _viec
+
+    thang, thua = _phan_loai(*_hai_luong_chong_thoi_gian(
+        rid, _quyet("approve", None), _quyet("return", "Thiếu số B-8")))
+
+    assert len(thang) == 1, f"CẢ HAI lượt quyết định cùng được ghi: {thang}"
+    assert isinstance(thua[0], ConflictError), f"lượt thua phải là 409, đang là {thua[0]!r}"
+    assert thua[0].detail == "Người khác vừa sửa báo cáo này"
+
+    ket_cuc = {"approve": "approved", "return": "returned"}[thang[0]]
+    with SessionLocal() as s:
+        r = s.query(Report).filter_by(id=rid).one()
+        assert (r.version, _ma_trang_thai(s, r)) == (2, ket_cuc)
+        assert [(d.action, d.before_json["state"], d.after_json["state"])
+                for d in s.query(AuditLog).filter_by(entity="report", entity_id=rid)
+                          .order_by(AuditLog.id).all()] == [(thang[0], "submitted", ket_cuc)], \
+            "audit phải có đúng MỘT dòng — hai dòng cùng khai before.state='submitted' " \
+            "là sổ audit nói dối về thứ tự đã xảy ra"
