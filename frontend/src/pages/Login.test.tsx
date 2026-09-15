@@ -185,6 +185,94 @@ describe('/login', () => {
     }
   })
 
+  // ---- P5 (final-fix-FE.md · final-review-R3-report.md §A3) — LỚP SỐNG-SÓT COLD-START CỦA RENDER.
+  //
+  // Ba hằng số ở `Login.tsx:30-33` là lớp DUY NHẤT đứng giữa buổi demo và một instance Render đang
+  // ngủ, và cả ba **không có một người canh nào**: đột biến `TIMEOUT_HEALTH_MS` 90 000 → 1 000,
+  // `SO_LAN_THU_LAI_HEALTH` 2 → 0, `CACH_THU_LAI_MS` 5 000 → 0 đều **sống sót 750/750**.
+  //
+  // Người canh duy nhất còn sống ở vùng này là một ca THẨM MỸ (thời điểm hiện câu "Đang đánh thức
+  // máy chủ"): bộ test canh CÂU CHỮ, không canh CƠ CHẾ làm cho câu chữ ấy có nghĩa. Ba ca dưới đây
+  // canh cơ chế. Không đổi một dòng mã sản phẩm nào.
+  //
+  // Vì sao ca `quá 90 giây … AbortController` ngay trên KHÔNG đủ: nó tua thẳng 90 giây rồi hỏi "đã
+  // huỷ chưa". Với timeout 1 giây thì tới mốc đó đã huỷ ba lần — vẫn `>= 1`, vẫn xanh. Một ngưỡng
+  // chỉ được canh khi đo CẢ HAI phía của nó.
+
+  it('P5 — cold-start 89 giây vẫn ĐANG CHỜ: /health không bị huỷ trước ngưỡng 90 giây', async () => {
+    vi.useFakeTimers()
+    const soLanBiHuy = [0]
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((_url: string, init?: { signal?: AbortSignal }) => {
+        return new Promise((_giaiQuyet, tuChoi) => {
+          init?.signal?.addEventListener('abort', () => {
+            soLanBiHuy[0] += 1
+            tuChoi(new DOMException('huỷ', 'AbortError'))
+          })
+        })
+      }),
+    )
+    try {
+      renderLogin()
+      // playwright.config.ts ghi "Render cold start ~60 s" — 89 giây vẫn nằm TRONG ngân sách đó,
+      // nên lúc này phải còn đang chờ, không được cắt.
+      await vi.advanceTimersByTimeAsync(89_000)
+      expect(soLanBiHuy[0]).toBe(0)
+      expect(screen.queryByText(/Không kết nối được máy chủ/)).toBeNull()
+      // Và ngưỡng phải CÓ THẬT, không phải "không bao giờ huỷ": qua mốc 90 giây thì cắt.
+      await vi.advanceTimersByTimeAsync(1_500)
+      expect(soLanBiHuy[0]).toBeGreaterThanOrEqual(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('P5 — /health hỏng mạng thì gọi ĐÚNG 3 lần (2 lượt thử lại) rồi mới báo mất kết nối', async () => {
+    vi.useFakeTimers()
+    const f = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'))
+    vi.stubGlobal('fetch', f)
+    try {
+      renderLogin()
+      // 3 lời gọi + 2 khoảng nghỉ 5 giây = ~10 giây. Tua dư để chắc chắn chuỗi đã chạy hết.
+      await vi.advanceTimersByTimeAsync(20_000)
+      // Đúng 3, chốt CẢ HAI phía: `SO_LAN_THU_LAI_HEALTH = 0` cho 1 lần (đột biến trong bảng),
+      // `= 5` cho 6 lần (một bản vá "cho chắc" kéo màn đăng nhập đứng im 30 giây).
+      expect(f.mock.calls.filter(([u]) => String(u).includes('/health'))).toHaveLength(3)
+      expect(screen.getByText(/Không kết nối được máy chủ/)).toBeTruthy()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('P5 — hai lượt thử lại cách nhau ĐÚNG 5 giây, không dồn một nhịp', async () => {
+    vi.useFakeTimers()
+    const f = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'))
+    vi.stubGlobal('fetch', f)
+    const dem = () => f.mock.calls.filter(([u]) => String(u).includes('/health')).length
+    try {
+      renderLogin()
+      await vi.advanceTimersByTimeAsync(0)
+      expect(dem()).toBe(1)
+      // 4,9 giây sau lần hỏng đầu: CHƯA được gọi lại. `CACH_THU_LAI_MS = 0` (đột biến trong bảng)
+      // làm cả ba lượt nổ trong cùng một nhịp — ba lần đấm vào một máy chủ đang khởi động, hết
+      // ngân sách thử lại trước khi nó kịp thức, rồi báo "Không kết nối được máy chủ" trên một máy
+      // chủ đang lên bình thường.
+      await vi.advanceTimersByTimeAsync(4_900)
+      expect(dem()).toBe(1)
+      await vi.advanceTimersByTimeAsync(200)
+      expect(dem()).toBe(2)
+      // Khoảng nghỉ thứ hai cũng thế — một bản vá chỉ nghỉ trước lượt đầu vẫn qua được nếu chỉ đo
+      // một nhịp. (Mốc: lượt 2 nổ ở t=5 000, nên t=9 900 là "chưa tới" và t=10 100 là "đã qua".)
+      await vi.advanceTimersByTimeAsync(4_800)
+      expect(dem()).toBe(2)
+      await vi.advanceTimersByTimeAsync(300)
+      expect(dem()).toBe(3)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('401 hiện Sai email hoặc mật khẩu tại chỗ, KHÔNG điều hướng đi đâu', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: false, status: 401, json: async () => ({ detail: 'Sai email hoặc mật khẩu' }),
