@@ -23,11 +23,10 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { flushSync } from 'react-dom'
 import { useNavigate, type NavigateFunction } from 'react-router-dom'
-import { api, ApiError } from '../api/client'
+import { api, ApiError, BASE } from '../api/client'
 import { useSession, type SessionOrgUnit, type SessionUser } from '../app/session'
 import { Wordmark } from '../components/ui/Wordmark'
 
-const BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? '/api/v1'
 const TIMEOUT_HEALTH_MS = 90_000
 const CHAM_HIEN_DANH_THUC_MS = 3_000 // sau 3s /health chưa xong thì hiện dòng đánh thức
 const CACH_THU_LAI_MS = 5_000 // khoảng cách giữa các lần thử lại khi /health lỗi mạng

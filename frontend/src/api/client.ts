@@ -55,7 +55,58 @@ export class ApiError extends Error {
   }
 }
 
-const BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? '/api/v1'
+// task-28-scope.md mục 2: nguồn DUY NHẤT của origin API — Login.tsx (gọi /health trần, không qua
+// `api`) import lại BASE từ đây thay vì tự tính, để không còn hai chỗ có thể lệch nhau.
+//
+// Ranh giới ĐÚNG không phải "đây có phải bản build production hay không" — mà là "có backend cùng
+// origin hay không" (proxy `/api/v1` → localhost:8000 khai ở vite.config.ts, cả `server.proxy` lẫn
+// `preview.proxy`). Vòng sửa 1: bản đầu chỉ xét `import.meta.env.PROD` và ĐÃ SAI, vì `vite preview`
+// phục vụ CHÍNH bản build production đã build sẵn (không build lại) — `PROD` là `true` y hệt bundle
+// sẽ lên Vercel. Vite nội tuyến cả `VITE_API_BASE` (undefined) lẫn `PROD` (true) lúc `vite build`,
+// trình tối ưu gập luôn `if` chết, xoá hẳn nhánh `/api/v1` — bundle phục vụ bởi `npm run preview`
+// (dùng bởi webServer của Playwright) ném VÔ ĐIỀU KIỆN, sập trắng trước khi React kịp render. Bằng
+// chứng đo được: 20/28 ca e2e hỏng, đúng bằng số ca cần trang render (8 ca sống sót là logic thuần,
+// không cần trang hiện lên).
+//
+// Vì vậy chặn thêm điều kiện hostname: CHỈ ném khi PROD **và** origin hiện tại KHÔNG phải máy cục
+// bộ (không có ai đứng ra làm proxy). `npm run dev`/`npm run preview` đều chạy ở localhost —
+// hostname cục bộ, có proxy, an toàn rơi về '/api/v1'. Vercel chạy ở domain thật — không có proxy,
+// phải hỏng ồn ào. Không import `laCucBo` từ `e2e/moi-truong.ts` dù cùng ý tưởng: hai gói tách biệt
+// hoàn toàn về runtime (kia là Node đọc `new URL(...).hostname`, đây là trình duyệt đọc
+// `location.hostname`), và gói `frontend/` không có lý do phụ thuộc ngược vào gói `e2e/`.
+//
+// Vì sao vẫn phải hỏng ồn ào ở production thật (không phải preview): trên Vercel
+// (frontend/vercel.json rewrite mọi path về index.html), đường dẫn tương đối '/api/v1' đâm vào
+// chính origin Vercel — không có backend ở đó — và SPA fallback trả 200 kèm THÂN HTML thay vì 404.
+// `res.ok` ở dưới thấy đúng, nhảy xuống `res.json()`, và JSON.parse một tài liệu HTML ném
+// SyntaxError TRẦN chứ không phải ApiError — mọi nơi bắt `instanceof ApiError` đều trượt.
+function laHostnameCucBo(hostname: string): boolean {
+  if (
+    hostname === 'localhost' ||
+    hostname === '127.0.0.1' ||
+    hostname === '0.0.0.0' ||
+    hostname === '::1' ||
+    hostname === '[::1]'
+  ) {
+    return true
+  }
+  // `*.localhost` được RFC 6761 dành riêng cho loopback, trình duyệt phân giải thẳng về 127.0.0.1.
+  return hostname.endsWith('.localhost')
+}
+
+function baseApi(): string {
+  const v = import.meta.env.VITE_API_BASE as string | undefined
+  if (v) return v
+  if (import.meta.env.PROD && !laHostnameCucBo(location.hostname)) {
+    throw new Error(
+      'Thiếu biến môi trường VITE_API_BASE — bắt buộc phải đặt (bảng điều khiển Vercel) trước khi ' +
+        'build production, nếu không mọi lời gọi API sẽ âm thầm rơi về chính origin frontend.',
+    )
+  }
+  return '/api/v1'
+}
+
+export const BASE = baseApi()
 
 // Endpoint tự xử lý 401 của chính nó (form đăng nhập hiện lỗi tại chỗ, không văng người dùng
 // đi đâu cả) — đối chiếu theo ĐƯỜNG DẪN REQUEST (path truyền vào api.get/post/put), không phải

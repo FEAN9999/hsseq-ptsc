@@ -1,5 +1,5 @@
 // frontend/src/api/client.test.ts
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiError, api } from './client'
 import { useSession } from '../app/session'
 
@@ -131,5 +131,70 @@ describe('api client', () => {
     const p = api.get('/reports/1')
     await expect(p).rejects.toBeInstanceOf(ApiError)
     await expect(p).rejects.toMatchObject({ status: 502, detail: 'Có lỗi xảy ra' })
+  })
+})
+
+// task-28-scope.md mục 2 — BASE là nguồn origin API DUY NHẤT: Login.tsx import lại từ đây thay vì
+// tự tính (trước là hai bản chép cùng một dòng, có thể lệch nhau). BASE được tính MỘT LẦN lúc
+// module nạp, nên mỗi ca dưới đây phải `vi.resetModules()` + `import('./client')` ĐỘNG rồi mới
+// `vi.stubEnv(...)` — stub sau khi module đã nạp xong không còn tác dụng gì lên hằng số đã tính.
+describe('BASE — nguồn origin API duy nhất (task-28-scope.md mục 2)', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
+  it('CÓ VITE_API_BASE thì api.* gọi đúng origin tuyệt đối đó, bất kể PROD hay hostname', async () => {
+    vi.resetModules()
+    vi.stubEnv('PROD', true)
+    vi.stubEnv('VITE_API_BASE', 'https://api.example.com/api/v1')
+    const f = tra(200, { ok: true })
+    vi.stubGlobal('fetch', f)
+    const { api: apiMoi } = await import('./client')
+    await apiMoi.get('/reports/1')
+    expect(f.mock.calls[0][0]).toBe('https://api.example.com/api/v1/reports/1')
+  })
+
+  // Vòng sửa 1 — P1/P2: ranh giới ĐÚNG là "có backend cùng origin hay không", không phải "PROD hay
+  // không". `vite preview` (webServer của Playwright, hostname localhost) phục vụ CHÍNH bundle
+  // production nhưng CÓ proxy (vite.config.ts) — đây là ca mà bản sửa lần 1 (chỉ xét PROD) ném
+  // NHẦM, sập trắng 20/28 ca e2e (mọi ca cần trang render). Ca này khoá đúng cái vừa vỡ: PROD=true
+  // + hostname CỤC BỘ + thiếu biến ⇒ vẫn phải rơi về '/api/v1' như cũ, KHÔNG được ném.
+  it('PROD=true nhưng hostname cục bộ (vite preview) thì KHÔNG ném dù thiếu biến — proxy lo phần còn lại', async () => {
+    vi.resetModules()
+    vi.stubEnv('PROD', true)
+    vi.stubEnv('VITE_API_BASE', '')
+    vi.stubGlobal('location', { hostname: 'localhost' } as never)
+    const f = tra(200, { ok: true })
+    vi.stubGlobal('fetch', f)
+    const { api: apiMoi } = await import('./client')
+    await apiMoi.get('/reports/1')
+    expect(f.mock.calls[0][0]).toBe('/api/v1/reports/1')
+  })
+
+  // Đúng mạch brief cảnh báo (task-28-scope.md mục 2): thiếu biến ở production THẬT — hostname
+  // KHÔNG phải cục bộ (Vercel), tức không có ai đứng ra làm proxy — KHÔNG được rơi về '/api/v1' im
+  // lặng. Trên Vercel, đường dẫn tương đối đó đâm vào SPA fallback (vercel.json), trả 200 + HTML
+  // thay vì 404, và res.json() sẽ ném SyntaxError trần thay vì ApiError. Phải hỏng NGAY lúc tải
+  // module — trước khi kịp gọi fetch nào — và nói rõ tên biến.
+  it('production THẬT (hostname không phải cục bộ) thiếu VITE_API_BASE thì hỏng ồn ào ngay lúc tải module, nói rõ tên biến', async () => {
+    vi.resetModules()
+    vi.stubEnv('PROD', true)
+    vi.stubEnv('VITE_API_BASE', '')
+    vi.stubGlobal('location', { hostname: 'meu-frontend.vercel.app' } as never)
+    await expect(import('./client')).rejects.toThrow(/VITE_API_BASE/)
+  })
+
+  // `npm run dev` (PROD luôn false) thiếu biến vẫn rơi về '/api/v1' — `server.proxy` của
+  // vite.config.ts lo phần còn lại. Nhánh PROD=false không bao giờ đọc `location.hostname`
+  // (short-circuit `&&` trong baseApi()), nên không cần stub `location` ở ca này.
+  it('KHÔNG phải production (npm run dev) thì thiếu biến vẫn rơi về /api/v1 như cũ', async () => {
+    vi.resetModules()
+    vi.stubEnv('PROD', false)
+    vi.stubEnv('VITE_API_BASE', '')
+    const f = tra(200, { ok: true })
+    vi.stubGlobal('fetch', f)
+    const { api: apiMoi } = await import('./client')
+    await apiMoi.get('/reports/1')
+    expect(f.mock.calls[0][0]).toBe('/api/v1/reports/1')
   })
 })
