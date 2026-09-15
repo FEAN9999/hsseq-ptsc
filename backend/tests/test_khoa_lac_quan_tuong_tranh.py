@@ -35,6 +35,7 @@ chẳng liên quan gì tới thứ đang kiểm. Phải giữ tham chiếu (`nap
 suốt kịch bản. Đường thật giữ y như vậy: `_kiem_quyen_ghi` trả THẲNG đối
 tượng `Report` vào tham số của route `PUT /values`, nên nó sống suốt request.
 """
+import threading
 from datetime import date, datetime
 from decimal import Decimal
 from zoneinfo import ZoneInfo
@@ -278,3 +279,127 @@ def test_ghi_gia_tri_409_khi_request_kia_vua_ghi_xong(du_lieu):
         assert s.query(Report).filter_by(id=rid).one().version == 2
         dong = s.query(ReportValue).filter_by(report_id=rid).one()
         assert dong.this_period == Decimal("10.00"), "số của lượt ghi thứ nhất bị đè mất"
+
+
+# ---------------------------------------------------------------------------
+# HAI LUỒNG THẬT — phần này canh `FOR UPDATE`, không phải `populate_existing`
+#
+# Hai ca tuần tự ở trên (A commit xong B mới đọc) canh được `.populate_existing()`
+# nhưng KHÔNG hỏi tới `.with_for_update()`: bỏ hẳn `FOR UPDATE` thì cả 305 ca vẫn
+# XANH (final-review-R1-report.md §5, M6-FULL và M24-FULL). Cảnh duy nhất phân
+# biệt được là hai transaction ĐỌC TRƯỚC KHI bên nào kịp GHI — không dựng được
+# nếu không có luồng thật.
+# ---------------------------------------------------------------------------
+
+
+def _hai_luong_chong_thoi_gian(rid: int, viec_a, viec_b):
+    """Hai luồng, hai session, hai transaction, cùng nạp `Report` rồi cùng ghi.
+
+    Mỗi luồng nạp `Report` TRƯỚC cổng chắn — đúng như dependency kiểm quyền của
+    route làm (`_kiem_quyen_ghi` / `_kiem_quyen_chuyen_trang_thai`,
+    app/api/reports.py) — và giữ tham chiếu suốt lượt chạy, vì identity map của
+    SQLAlchemy dùng WEAK reference (xem bẫy đã ghi ở docstring module).
+
+    `threading.Barrier` là đủ, KHÔNG cần `sleep`: bên trong
+    `ghi_gia_tri`/`apply_transition`, quãng từ lượt ĐỌC `Report` tới lúc COMMIT
+    còn vài query nữa (WorkflowState, Indicator, ReportValue…) nên dài hàng
+    mili-giây, trong khi barrier nhả hai luồng lệch nhau cỡ micro-giây.
+
+    Trả về `(ket_a, ket_b)`, mỗi cái là `("ok", giá trị viec trả về)` hoặc
+    `("loi", ngoại lệ)`. COMMIT hỏng cũng tính là thua.
+    """
+    cong = threading.Barrier(2)
+    ket: dict[str, tuple] = {}
+
+    def _chay(ten, viec):
+        s = SessionLocal()
+        try:
+            nap_truoc = s.query(Report).filter_by(id=rid).one()
+            cong.wait(timeout=20)
+            gia_tri = viec(s)
+            s.commit()
+            assert nap_truoc.id == rid          # giữ tham chiếu sống tới hết lượt
+            ket[ten] = ("ok", gia_tri)
+        except BaseException as loi:            # noqa: BLE001 — test tự phân loại lỗi
+            s.rollback()
+            ket[ten] = ("loi", loi)
+        finally:
+            s.close()
+
+    luong = [threading.Thread(target=_chay, args=("a", viec_a)),
+             threading.Thread(target=_chay, args=("b", viec_b))]
+    for t in luong:
+        t.start()
+    for t in luong:
+        t.join(timeout=30)
+        assert not t.is_alive(), "luồng treo — nhiều khả năng kẹt ở FOR UPDATE"
+    return ket["a"], ket["b"]
+
+
+def _phan_loai(ket_a, ket_b):
+    thang = [k[1] for k in (ket_a, ket_b) if k[0] == "ok"]
+    thua = [k[1] for k in (ket_a, ket_b) if k[0] == "loi"]
+    return thang, thua
+
+
+def test_ghi_gia_tri_hai_luong_chi_mot_ben_ghi_duoc(du_lieu):
+    """Hai `PUT /values` chồng thời gian trên ô ĐÃ CÓ số — đường UPDATE.
+
+    Chính sách "lưu khi rời ô" (`DO_TRE = 1500 ms`, D23) làm cảnh này là
+    chuyện thường ngày, không cần hai người. Bỏ `.with_for_update()` ở
+    `app/services/reports.py::ghi_gia_tri`: cả hai luồng đọc `version` cùng một
+    mốc, cả hai qua phép so, **cả hai nhận 200** — và số của người ghi TRƯỚC
+    biến mất, không 409, không cảnh báo, không cách nào biết.
+    """
+    rid, actor = du_lieu["id_nhap"], du_lieu["actor"]
+
+    with SessionLocal() as s:                       # dựng sẵn ô có dữ liệu
+        ghi_gia_tri(s, rid, 1,
+                    [ValueIn(indicator_code=MA_CHI_TIEU, this_period=Decimal("5"))], actor)
+        s.commit()
+
+    def _put(so):
+        def _viec(s):
+            ghi_gia_tri(s, rid, 2,
+                        [ValueIn(indicator_code=MA_CHI_TIEU, this_period=Decimal(so))], actor)
+            return so
+        return _viec
+
+    thang, thua = _phan_loai(*_hai_luong_chong_thoi_gian(rid, _put("111"), _put("222")))
+
+    assert len(thang) == 1, f"CẢ HAI lượt PUT cùng được ghi — số của lượt trước mất trắng: {thang}"
+    assert isinstance(thua[0], ConflictError), f"lượt thua phải là 409, đang là {thua[0]!r}"
+    assert thua[0].detail == "Người khác vừa sửa báo cáo này"
+
+    with SessionLocal() as s:
+        assert s.query(Report).filter_by(id=rid).one().version == 3
+        assert s.query(ReportValue).filter_by(report_id=rid).one().this_period == \
+            Decimal(thang[0]), "số đang lưu không phải của lượt ghi thắng"
+
+
+def test_ghi_gia_tri_hai_luong_o_trong_khong_no_500(du_lieu):
+    """Cùng cảnh nhưng ô CHƯA CÓ dòng nào — đường INSERT, hỏng theo kiểu khác.
+
+    Bỏ `.with_for_update()`: hai luồng cùng không thấy dòng nào, cùng INSERT,
+    lượt sau đụng `UNIQUE(report_id, indicator_id)` ⇒ `IntegrityError`. Không
+    ai bắt ngoại lệ đó ⇒ **500 trần**, vi phạm ràng buộc "mọi câu lỗi hướng
+    tới người dùng đều bằng tiếng Việt". Lượt thua PHẢI là `ConflictError`.
+    """
+    rid, actor = du_lieu["id_nhap"], du_lieu["actor"]
+
+    def _put(so):
+        def _viec(s):
+            ghi_gia_tri(s, rid, 1,
+                        [ValueIn(indicator_code=MA_CHI_TIEU, this_period=Decimal(so))], actor)
+            return so
+        return _viec
+
+    thang, thua = _phan_loai(*_hai_luong_chong_thoi_gian(rid, _put("111"), _put("222")))
+
+    assert len(thang) == 1, f"CẢ HAI lượt PUT cùng được ghi: {thang}"
+    assert isinstance(thua[0], ConflictError), \
+        f"lượt thua phải là 409 tiếng Việt, đang là {type(thua[0]).__name__}: {thua[0]!r}"
+    assert thua[0].detail == "Người khác vừa sửa báo cáo này"
+
+    with SessionLocal() as s:
+        assert s.query(ReportValue).filter_by(report_id=rid).count() == 1
