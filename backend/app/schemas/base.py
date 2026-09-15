@@ -14,4 +14,14 @@ JsonNumber = Annotated[
 
 
 class ApiModel(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+    # `extra="forbid"`, KHÔNG phải mặc định `"ignore"` của pydantic: với
+    # `"ignore"`, một khoá gõ sai ở trường TUỲ CHỌN (`thisPeriod` thay cho
+    # `this_period`, `text` thay cho `texts`, `notes` thay cho `note`) đi lọt
+    # thành **200 "đã lưu" mà không lưu gì — và `version` vẫn tăng**. Lượt ghi
+    # rỗng đó đốt token khoá lạc quan: người đang mở cùng báo cáo nhận 409
+    # "Người khác vừa sửa báo cáo này" trong khi thực tế không ai sửa gì
+    # (final-review-R1-report.md §(A3)). Bốn trường tuỳ chọn đó là toàn bộ nội
+    # dung người dùng gõ vào form FM01, nên cửa này mở đúng trên đường nhập
+    # liệu chính. Ca canh: tests/api/test_put_values.py::
+    # test_khoa_go_sai_bi_tu_choi_422_va_khong_dot_version.
+    model_config = ConfigDict(from_attributes=True, extra="forbid")

@@ -1371,3 +1371,36 @@ def test_ghi_so_0_vao_cong_don_dong_snapshot_luu_dung_0_khong_phai_NULL(client, 
     assert _o(r.json(), "S-TEST")["acc_total_entered"] == 0, "thân 200 trả NULL thay vì 0"
     assert _o(_xem(client, h, bc["id"]), "S-TEST")["acc_total_entered"] == 0, \
         "tải lại trang thì số 0 vừa gõ biến mất"
+
+
+def test_khoa_go_sai_bi_tu_choi_422_va_khong_dot_version(client, db):
+    """Khoá gõ sai phải là 422, không được là "200 đã lưu" cho một việc không làm.
+
+    `ApiModel` để mặc định `extra="ignore"` của pydantic thì `thisPeriod`
+    (camelCase, gõ nhầm) đi lọt: server trả **200**, `this_period` KHÔNG đổi,
+    mà `version` vẫn tăng 1 → 2 (final-review-R1-report.md §(A3)). Nó không
+    chỉ câm — nó đốt token khoá lạc quan: người đang mở cùng báo cáo với
+    `version` cũ bấm lưu sẽ nhận **409 oan** "Người khác vừa sửa báo cáo này"
+    trong khi thực tế không ai sửa gì.
+
+    Kiểm cả hai tầng, vì lỗ mở ở MỌI `ApiModel` có trường tuỳ chọn:
+    khoá lạ lồng trong `ValueIn`, và khoá lạ ở chính `PutValuesIn`.
+    """
+    seed_all(db)
+    h = dang_nhap(client, "u22@ptsc.local")
+    bc = _nhap_08(client, h)
+    truoc = client.get(f"/api/v1/reports/{bc['id']}", headers=h).json()
+    o_truoc = next(v for v in truoc["values"] if v["indicator_code"] == "B-2.1")
+
+    for than in (
+        {"version": truoc["version"],
+         "values": [{"indicator_code": "B-2.1", "thisPeriod": 999}]},   # lồng trong ValueIn
+        {"version": truoc["version"], "values": [], "text": {"C1": "ghi chú"}},  # PutValuesIn
+    ):
+        r = client.put(f"/api/v1/reports/{bc['id']}/values", json=than, headers=h)
+        assert r.status_code == 422, f"khoá gõ sai đi lọt: {than} → {r.status_code} {r.text}"
+
+    sau = client.get(f"/api/v1/reports/{bc['id']}", headers=h).json()
+    assert sau["version"] == truoc["version"], \
+        "lượt ghi bị từ chối vẫn đốt version ⇒ người khác nhận 409 oan"
+    assert next(v for v in sau["values"] if v["indicator_code"] == "B-2.1") == o_truoc
