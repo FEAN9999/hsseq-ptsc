@@ -206,6 +206,23 @@ describe('docJsonHopLe — content-type thay cho hostname (task-28-fix-2.md P1)'
     await expect(api.get('/reports/1')).resolves.toEqual({ id: 1 })
   })
 
+  // task-28-fix-4.md P2 (A4') — MẶT ÂM: `docJsonHopLe` phải KHÔNG ném khi server ĐÃ trả JSON.
+  // Nghĩa vụ mặt dương (phải ném khi nhận HTML) được canh dày, mặt âm thì trước vòng này chỉ có
+  // đúng MỘT người canh (content-type vắng hẳn — ca `tra()` không truyền loại, và đột biến bỏ
+  // khoan dung đó làm đỏ 139 ca), nên siết `.includes('application/json')` thành
+  // `=== 'application/json'` vẫn xanh 746/746.
+  //
+  // `application/json; charset=utf-8` là header HOÀN TOÀN HỢP LỆ và là dạng mà bất kỳ proxy/CDN
+  // nào đứng trước Render cũng có thể chuẩn hoá ra (FastAPI hôm nay trả `application/json` trần,
+  // nên local không bao giờ chạm cạnh biên này). Với bản `===`, MỌI lời gọi API trên một bản deploy
+  // ĐÚNG đều bị ném kèm câu buộc tội `VITE_API_BASE` — cơ chế sinh ra để chỉ đúng chỗ quay sang chỉ
+  // sai chỗ, ở đúng trường hợp mọi thứ đều ổn. Đây là bài học K2 (Task 26: 5/7 đột biến sống sót
+  // nằm ở mặt âm) lặp lại trên cơ chế mới.
+  it('Content-Type application/json KÈM tham số (charset=utf-8 — proxy/CDN rất hay thêm) thì KHÔNG ném', async () => {
+    vi.stubGlobal('fetch', tra(200, { id: 1 }, 'application/json; charset=utf-8'))
+    await expect(api.get('/reports/1')).resolves.toEqual({ id: 1 })
+  })
+
   // B4: đặt biến SAI HÌNH DẠNG (thiếu origin tuyệt đối, chỉ có phần đường dẫn) lọt qua MỌI danh
   // sách hostname vì bản thân biến đã được "đặt" — chỉ phép kiểm NỘI DUNG response mới bắt được.
   it('B4 — VITE_API_BASE bị đặt sai hình dạng ("/api/v1", thiếu origin) vẫn hỏng ồn ào y hệt lúc thiếu biến', async () => {

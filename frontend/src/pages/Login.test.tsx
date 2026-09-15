@@ -9,11 +9,10 @@
 // toàn cục như cũ cho các ca cần kiểm next=.
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { MemoryRouter, Route, Routes, RouterProvider, createMemoryRouter, useLocation } from 'react-router-dom'
 
 import { Login, duongDanNoiBo } from './Login'
-import { BASE } from '../api/client'
 import { useSession } from '../app/session'
 
 // task-28-fix-2.md P1: cả thuGoiHealth() lẫn docJsonHopLe() (client.ts) giờ đọc
@@ -29,11 +28,13 @@ function DichDen() {
   return <div data-testid="dich-den">{pathname}{search}</div>
 }
 
-function renderLogin() {
+// Tham số `Comp` chỉ để ca P1 bên dưới render được BẢN `./Login` nạp lại sau `vi.resetModules()`
+// (lúc đó `BASE` mang giá trị khác mặc định); mọi ca khác gọi `renderLogin()` trần y như cũ.
+function renderLogin(Comp: typeof Login = Login) {
   return render(
     <MemoryRouter initialEntries={['/login']}>
       <Routes>
-        <Route path="/login" element={<Login />} />
+        <Route path="/login" element={<Comp />} />
         <Route path="*" element={<DichDen />} />
       </Routes>
     </MemoryRouter>,
@@ -42,14 +43,26 @@ function renderLogin() {
 
 describe('/login', () => {
   beforeEach(() => vi.unstubAllGlobals())
+  afterEach(() => vi.unstubAllEnvs())
 
-  it('mở trang là gọi /health để đánh thức Render', async () => {
+  // task-28-fix-4.md P1 (A3'): bản trước khẳng định `toBe(`${BASE}/health`)` — nhưng trong môi
+  // trường test không ai đặt VITE_API_BASE nên `BASE` rơi về đúng '/api/v1', tức vế phải BẰNG
+  // CHÍNH chuỗi mà một bản viết cứng `fetch('/api/v1/health')` tạo ra. Khẳng định so một giá trị
+  // với chính giá trị mặc định nó rơi về thì không phân biệt được "đi qua BASE" với "viết cứng
+  // đúng giá trị BASE đang có" (sức phân biệt đi mượn) — đột biến viết cứng vẫn xanh 746/746.
+  //
+  // Đóng bằng cách ép `BASE` mang một giá trị KHÁC mặc định trong chính ca này: `vi.stubEnv` +
+  // `vi.resetModules()` + `import()` động (cùng khuôn với client.test.ts — BASE tính MỘT LẦN lúc
+  // module nạp, stub sau khi nạp xong không còn tác dụng). Lúc đó origin khẳng định là tuyệt đối,
+  // không chuỗi viết cứng nào trùng được nữa.
+  it('mở trang là gọi /health trên ĐÚNG origin của VITE_API_BASE (không phải chuỗi viết cứng)', async () => {
+    vi.resetModules()
+    vi.stubEnv('VITE_API_BASE', 'https://api.example.com/api/v1')
     const f = vi.fn().mockResolvedValue(okJson({ status: 'ok' }))
     vi.stubGlobal('fetch', f)
-    renderLogin()
-    // P2/A3 (task-28-fix-2.md): `toContain('/health')` cũ cũng khớp '/api/v1/health' — một đột
-    // biến hardcode `fetch('/api/v1/health')` (bỏ qua BASE) vẫn xanh. Khẳng định ĐÍCH ĐẾN đầy đủ.
-    await waitFor(() => expect(f.mock.calls[0][0]).toBe(`${BASE}/health`))
+    const { Login: LoginMoi } = await import('./Login')
+    renderLogin(LoginMoi)
+    await waitFor(() => expect(f.mock.calls[0][0]).toBe('https://api.example.com/api/v1/health'))
   })
 
   // task-28-fix-2.md P1: đúng "kịch bản hỏng của A3" mà thuGoiHealth() trước P1 mắc phải — response
@@ -71,6 +84,38 @@ describe('/login', () => {
       renderLogin()
       await vi.advanceTimersByTimeAsync(10_100)
       expect(screen.getByText(/Không kết nối được máy chủ/)).toBeTruthy()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  // task-28-fix-4.md P3 (A5') — mặt ÂM của thuGoiHealth(), cặp đôi của ca ngay trên. Chú thích của
+  // chính hàm đó ghi rõ hợp đồng ("kể cả 503/502 kèm THÂN HTML của gateway lúc cold-start vẫn tính
+  // là 'đã có phản hồi'"), nhưng hợp đồng ấy KHÔNG có ai canh: chèn `if (!res.ok) return false` vào
+  // thuGoiHealth vẫn xanh 746/746. Vòng sửa 2 vừa đặt một điều kiện ĐỌC `res.ok` vào chính hàm này
+  // nên mặt âm giờ là mã load-bearing.
+  //
+  // Render free tier cold-start là trạng thái BẮT BUỘC đi qua ở mọi lần demo sau 15 phút không ai
+  // dùng: gateway trả 502 kèm HTML trong lúc máy chủ đang lên. Lúc đó màn đăng nhập phải im lặng
+  // chờ (rồi hiện "Đang đánh thức máy chủ" nếu lâu), KHÔNG được hiện "Không kết nối được máy chủ" —
+  // người xem demo sẽ kết luận hệ thống chết trong lúc nó chỉ đang thức dậy.
+  it('/health trả 502 kèm HTML (gateway lúc Render cold-start) VẪN tính là server đã thức', async () => {
+    vi.useFakeTimers()
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: false, status: 502,
+        headers: { get: () => 'text/html' },
+        json: async () => { throw new SyntaxError('Unexpected token <') },
+      }),
+    )
+    try {
+      renderLogin()
+      await vi.advanceTimersByTimeAsync(10_100)
+      expect(screen.queryByText(/Không kết nối được máy chủ/)).toBeNull()
+      // Và dòng đánh thức cũng đã tắt: lời gọi ĐÃ XONG và kết luận "đã thức" ngay lần đầu — khác
+      // hẳn một fetch treo (ca dưới), thứ cũng không hiện banner mất kết nối nhưng vì lý do khác.
+      expect(screen.queryByText(/Đang đánh thức máy chủ/)).toBeNull()
     } finally {
       vi.useRealTimers()
     }
