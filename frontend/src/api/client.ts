@@ -58,55 +58,59 @@ export class ApiError extends Error {
 // task-28-scope.md mục 2: nguồn DUY NHẤT của origin API — Login.tsx (gọi /health trần, không qua
 // `api`) import lại BASE từ đây thay vì tự tính, để không còn hai chỗ có thể lệch nhau.
 //
-// Ranh giới ĐÚNG không phải "đây có phải bản build production hay không" — mà là "có backend cùng
-// origin hay không" (proxy `/api/v1` → localhost:8000 khai ở vite.config.ts, cả `server.proxy` lẫn
-// `preview.proxy`). Vòng sửa 1: bản đầu chỉ xét `import.meta.env.PROD` và ĐÃ SAI, vì `vite preview`
-// phục vụ CHÍNH bản build production đã build sẵn (không build lại) — `PROD` là `true` y hệt bundle
-// sẽ lên Vercel. Vite nội tuyến cả `VITE_API_BASE` (undefined) lẫn `PROD` (true) lúc `vite build`,
-// trình tối ưu gập luôn `if` chết, xoá hẳn nhánh `/api/v1` — bundle phục vụ bởi `npm run preview`
-// (dùng bởi webServer của Playwright) ném VÔ ĐIỀU KIỆN, sập trắng trước khi React kịp render. Bằng
-// chứng đo được: 20/28 ca e2e hỏng, đúng bằng số ca cần trang render (8 ca sống sót là logic thuần,
-// không cần trang hiện lên).
+// task-28-fix-2.md P1 — vòng sửa 1 rồi vòng sửa 2 đã đi qua BA miếng vá liên tiếp trên CÙNG một
+// câu hỏi sai ("tôi đang đứng ở đâu?"): (1) chỉ xét `import.meta.env.PROD` — sập ở `vite preview`
+// vì preview CŨNG phục vụ chính bundle production; (2) thêm danh sách hostname cục bộ — sập ở
+// `vite preview --host` qua IP LAN (192.168.x.x), dù CHÍNH origin đó đang proxy `/api/v1` y hệt
+// localhost; cửa thứ ba đã nhìn thấy trước khi vá: tên mDNS (`http://may-cua-toi.local:5173`, cách
+// rất thường để mở web từ điện thoại) không nằm trong dải IP nào cả, và dù có nới danh sách cũng
+// không kiểm được TÍNH ĐÚNG — đặt `VITE_API_BASE=/api/v1` (chính giá trị mặc định, nhưng sai vì
+// Render không cùng origin với Vercel) lọt qua mọi danh sách vì guard chỉ hỏi "có đặt biến không",
+// không hỏi "biến đó có trỏ đúng chỗ không" (B4).
 //
-// Vì vậy chặn thêm điều kiện hostname: CHỈ ném khi PROD **và** origin hiện tại KHÔNG phải máy cục
-// bộ (không có ai đứng ra làm proxy). `npm run dev`/`npm run preview` đều chạy ở localhost —
-// hostname cục bộ, có proxy, an toàn rơi về '/api/v1'. Vercel chạy ở domain thật — không có proxy,
-// phải hỏng ồn ào. Không import `laCucBo` từ `e2e/moi-truong.ts` dù cùng ý tưởng: hai gói tách biệt
-// hoàn toàn về runtime (kia là Node đọc `new URL(...).hostname`, đây là trình duyệt đọc
-// `location.hostname`), và gói `frontend/` không có lý do phụ thuộc ngược vào gói `e2e/`.
+// Danh sách hostname về nguyên tắc không đóng được lớp này vì nó hỏi sai câu. Câu hỏi ĐÚNG không
+// phải "tôi đang đứng ở đâu?" (không danh sách nào trả lời đúng cho MỌI hostname tương lai) mà là
+// "tôi vừa xin JSON của API và nhận về cái gì?" (đóng CẢ BA cửa trên cùng lúc, không cần biết
+// trước hostname sẽ là gì): `vite dev`/`preview` — mọi hostname, kể cả IP LAN hay `.local` — đều có
+// proxy `/api/v1` → backend cục bộ (vite.config.ts) nên luôn nhận JSON thật; Vercel thiếu biến
+// (hoặc đặt sai hình dạng) khiến đường dẫn tương đối đâm vào SPA fallback (vercel.json rewrite mọi
+// path về index.html) — 200 kèm THÂN HTML, bắt được ngay bởi `docJsonHopLe()` bên dưới, KHÔNG cần
+// biết hostname là gì.
 //
-// Vì sao vẫn phải hỏng ồn ào ở production thật (không phải preview): trên Vercel
-// (frontend/vercel.json rewrite mọi path về index.html), đường dẫn tương đối '/api/v1' đâm vào
-// chính origin Vercel — không có backend ở đó — và SPA fallback trả 200 kèm THÂN HTML thay vì 404.
-// `res.ok` ở dưới thấy đúng, nhảy xuống `res.json()`, và JSON.parse một tài liệu HTML ném
-// SyntaxError TRẦN chứ không phải ApiError — mọi nơi bắt `instanceof ApiError` đều trượt.
-function laHostnameCucBo(hostname: string): boolean {
-  if (
-    hostname === 'localhost' ||
-    hostname === '127.0.0.1' ||
-    hostname === '0.0.0.0' ||
-    hostname === '::1' ||
-    hostname === '[::1]'
-  ) {
-    return true
-  }
-  // `*.localhost` được RFC 6761 dành riêng cho loopback, trình duyệt phân giải thẳng về 127.0.0.1.
-  return hostname.endsWith('.localhost')
-}
-
+// BASE không còn ném lúc TẢI MODULE — không còn gì để đoán trước lúc đó. Lỗi giờ nổ lúc REQUEST
+// THẬT (docJsonHopLe), đúng chỗ có đủ thông tin để biết chắc; trang vẫn dựng được (React vẫn
+// render) nên thông báo có CHỮ HIỆN RA thay vì màn trắng trước khi kịp vẽ gì (Ruling 405: màn
+// trắng vẫn hợp lệ nếu thiết kế chọn thế, nhưng thiết kế ở đây chọn hiện chữ).
 function baseApi(): string {
-  const v = import.meta.env.VITE_API_BASE as string | undefined
-  if (v) return v
-  if (import.meta.env.PROD && !laHostnameCucBo(location.hostname)) {
-    throw new Error(
-      'Thiếu biến môi trường VITE_API_BASE — bắt buộc phải đặt (bảng điều khiển Vercel) trước khi ' +
-        'build production, nếu không mọi lời gọi API sẽ âm thầm rơi về chính origin frontend.',
-    )
-  }
-  return '/api/v1'
+  return (import.meta.env.VITE_API_BASE as string | undefined) || '/api/v1'
 }
 
 export const BASE = baseApi()
+
+/** Ném lỗi nói rõ tên biến khi response `res.ok` nhưng KHÔNG phải JSON — dấu hiệu BASE đang trỏ
+ *  nhầm về chính origin frontend (SPA fallback trả 200 kèm HTML cho mọi đường dẫn) thay vì backend
+ *  thật. Chỉ ném NGAY khi có tín hiệu DƯƠNG TÍNH rõ ràng (Content-Type khai hẳn một loại khác
+ *  JSON, đủ để bắt SPA fallback — trình duyệt thật LUÔN có header này); Content-Type vắng/không
+ *  đọc được (mock test trần không set `headers`, hoặc server thật không khai) thì rơi xuống
+ *  `res.json()` — SyntaxError của chính nó là lưới an toàn thứ hai cho trường hợp đó. */
+async function docJsonHopLe<T>(res: Response): Promise<T> {
+  const loaiNoiDung = typeof res.headers?.get === 'function' ? res.headers.get('content-type') : null
+  if (loaiNoiDung && !loaiNoiDung.includes('application/json')) {
+    throw new Error(
+      `API trả về "${loaiNoiDung}" thay vì JSON — kiểm tra biến môi trường VITE_API_BASE (hiện là ` +
+        `"${BASE}"), rất có thể đang trỏ nhầm về chính origin frontend thay vì backend thật (SPA ` +
+        'fallback trả trang HTML cho mọi đường dẫn).',
+    )
+  }
+  try {
+    return (await res.json()) as T
+  } catch {
+    throw new Error(
+      'API không trả về JSON hợp lệ — kiểm tra biến môi trường VITE_API_BASE ' +
+        `(hiện là "${BASE}"), rất có thể đang trỏ nhầm về chính origin frontend thay vì backend thật.`,
+    )
+  }
+}
 
 // Endpoint tự xử lý 401 của chính nó (form đăng nhập hiện lỗi tại chỗ, không văng người dùng
 // đi đâu cả) — đối chiếu theo ĐƯỜNG DẪN REQUEST (path truyền vào api.get/post/put), không phải
@@ -145,7 +149,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     throw new ApiError(res.status, than)
   }
 
-  return res.json() as Promise<T>
+  return docJsonHopLe<T>(res)
 }
 
 export const api = {

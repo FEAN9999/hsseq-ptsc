@@ -3,11 +3,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiError, api } from './client'
 import { useSession } from '../app/session'
 
-function tra(status: number, body: unknown) {
+// task-28-fix-2.md P1: docJsonHopLe() đọc `res.headers.get('content-type')` trên NHÁNH THÀNH CÔNG
+// — mặc định 'application/json' để mọi ca sẵn có (viết trước P1, không quan tâm content-type) vẫn
+// xanh nguyên như cũ; ca nào cần mô phỏng SPA fallback (200 kèm HTML) tự truyền `loaiNoiDung` khác.
+function tra(status: number, body: unknown, loaiNoiDung = 'application/json') {
   return vi.fn().mockResolvedValue({
     ok: status < 400, status,
+    headers: { get: (ten: string) => (ten.toLowerCase() === 'content-type' ? loaiNoiDung : null) },
     json: async () => body,
-  } as Response)
+  } as unknown as Response)
 }
 
 beforeEach(() => { useSession.getState().logout(); vi.unstubAllGlobals() })
@@ -138,14 +142,19 @@ describe('api client', () => {
 // tự tính (trước là hai bản chép cùng một dòng, có thể lệch nhau). BASE được tính MỘT LẦN lúc
 // module nạp, nên mỗi ca dưới đây phải `vi.resetModules()` + `import('./client')` ĐỘNG rồi mới
 // `vi.stubEnv(...)` — stub sau khi module đã nạp xong không còn tác dụng gì lên hằng số đã tính.
+//
+// task-28-fix-2.md P1: BASE giờ chỉ có ĐÚNG hai trường hợp — có biến (dùng biến) hay không (rơi về
+// '/api/v1') — không còn nhánh thứ ba ném lúc tải module theo PROD/hostname. Bộ 4 ca cũ ở vòng sửa
+// 1 (PROD=true/false × hostname cục bộ/không) đã bị XOÁ vì chính CƠ CHẾ chúng canh không còn tồn
+// tại — thay bằng ca dưới đây khoá rằng module KHÔNG BAO GIỜ ném nữa dù ở điều kiện "xấu nhất" của
+// cơ chế cũ (PROD=true + hostname domain thật), và bộ `docJsonHopLe` bên dưới khoá cơ chế MỚI.
 describe('BASE — nguồn origin API duy nhất (task-28-scope.md mục 2)', () => {
   afterEach(() => {
     vi.unstubAllEnvs()
   })
 
-  it('CÓ VITE_API_BASE thì api.* gọi đúng origin tuyệt đối đó, bất kể PROD hay hostname', async () => {
+  it('CÓ VITE_API_BASE thì api.* gọi đúng origin tuyệt đối đó', async () => {
     vi.resetModules()
-    vi.stubEnv('PROD', true)
     vi.stubEnv('VITE_API_BASE', 'https://api.example.com/api/v1')
     const f = tra(200, { ok: true })
     vi.stubGlobal('fetch', f)
@@ -154,47 +163,58 @@ describe('BASE — nguồn origin API duy nhất (task-28-scope.md mục 2)', ()
     expect(f.mock.calls[0][0]).toBe('https://api.example.com/api/v1/reports/1')
   })
 
-  // Vòng sửa 1 — P1/P2: ranh giới ĐÚNG là "có backend cùng origin hay không", không phải "PROD hay
-  // không". `vite preview` (webServer của Playwright, hostname localhost) phục vụ CHÍNH bundle
-  // production nhưng CÓ proxy (vite.config.ts) — đây là ca mà bản sửa lần 1 (chỉ xét PROD) ném
-  // NHẦM, sập trắng 20/28 ca e2e (mọi ca cần trang render). Ca này khoá đúng cái vừa vỡ: PROD=true
-  // + hostname CỤC BỘ + thiếu biến ⇒ vẫn phải rơi về '/api/v1' như cũ, KHÔNG được ném.
-  it('PROD=true nhưng hostname cục bộ (vite preview) thì KHÔNG ném dù thiếu biến — proxy lo phần còn lại', async () => {
+  it('KHÔNG đặt VITE_API_BASE thì rơi về /api/v1 tương đối — không ném lúc tải module dù PROD=true và hostname là domain thật', async () => {
     vi.resetModules()
-    vi.stubEnv('PROD', true)
     vi.stubEnv('VITE_API_BASE', '')
-    vi.stubGlobal('location', { hostname: 'localhost' } as never)
-    const f = tra(200, { ok: true })
-    vi.stubGlobal('fetch', f)
-    const { api: apiMoi } = await import('./client')
-    await apiMoi.get('/reports/1')
-    expect(f.mock.calls[0][0]).toBe('/api/v1/reports/1')
-  })
-
-  // Đúng mạch brief cảnh báo (task-28-scope.md mục 2): thiếu biến ở production THẬT — hostname
-  // KHÔNG phải cục bộ (Vercel), tức không có ai đứng ra làm proxy — KHÔNG được rơi về '/api/v1' im
-  // lặng. Trên Vercel, đường dẫn tương đối đó đâm vào SPA fallback (vercel.json), trả 200 + HTML
-  // thay vì 404, và res.json() sẽ ném SyntaxError trần thay vì ApiError. Phải hỏng NGAY lúc tải
-  // module — trước khi kịp gọi fetch nào — và nói rõ tên biến.
-  it('production THẬT (hostname không phải cục bộ) thiếu VITE_API_BASE thì hỏng ồn ào ngay lúc tải module, nói rõ tên biến', async () => {
-    vi.resetModules()
     vi.stubEnv('PROD', true)
-    vi.stubEnv('VITE_API_BASE', '')
     vi.stubGlobal('location', { hostname: 'meu-frontend.vercel.app' } as never)
-    await expect(import('./client')).rejects.toThrow(/VITE_API_BASE/)
-  })
-
-  // `npm run dev` (PROD luôn false) thiếu biến vẫn rơi về '/api/v1' — `server.proxy` của
-  // vite.config.ts lo phần còn lại. Nhánh PROD=false không bao giờ đọc `location.hostname`
-  // (short-circuit `&&` trong baseApi()), nên không cần stub `location` ở ca này.
-  it('KHÔNG phải production (npm run dev) thì thiếu biến vẫn rơi về /api/v1 như cũ', async () => {
-    vi.resetModules()
-    vi.stubEnv('PROD', false)
-    vi.stubEnv('VITE_API_BASE', '')
     const f = tra(200, { ok: true })
     vi.stubGlobal('fetch', f)
     const { api: apiMoi } = await import('./client')
     await apiMoi.get('/reports/1')
     expect(f.mock.calls[0][0]).toBe('/api/v1/reports/1')
+  })
+})
+
+// task-28-fix-2.md P1 — "tôi vừa xin JSON của API và nhận về cái gì?" thay cho "tôi đang đứng ở
+// đâu?": response `res.ok` nhưng KHÔNG phải JSON là dấu hiệu BASE trỏ nhầm về chính origin frontend
+// (SPA fallback trả index.html cho mọi path — vercel.json) bất kể hostname/PROD là gì, và bất kể
+// trỏ nhầm vì THIẾU biến hay vì đặt SAI HÌNH DẠNG (B4: `VITE_API_BASE=/api/v1`, đúng chính giá trị
+// mặc định, sai vì Render không cùng origin với Vercel) — cùng một triệu chứng, cùng một phép bắt.
+describe('docJsonHopLe — content-type thay cho hostname (task-28-fix-2.md P1)', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
+  it('res.ok nhưng Content-Type text/html (SPA fallback) thì ném lỗi nói rõ tên VITE_API_BASE', async () => {
+    vi.stubGlobal('fetch', tra(200, '<!doctype html><body>index.html</body>', 'text/html'))
+    await expect(api.get('/reports/1')).rejects.toThrow(/VITE_API_BASE/)
+  })
+
+  it('res.ok kèm Content-Type application/json thì vẫn trả JSON như cũ, không ném', async () => {
+    vi.stubGlobal('fetch', tra(200, { id: 1 }, 'application/json'))
+    await expect(api.get('/reports/1')).resolves.toEqual({ id: 1 })
+  })
+
+  // B4: đặt biến SAI HÌNH DẠNG (thiếu origin tuyệt đối, chỉ có phần đường dẫn) lọt qua MỌI danh
+  // sách hostname vì bản thân biến đã được "đặt" — chỉ phép kiểm NỘI DUNG response mới bắt được.
+  it('B4 — VITE_API_BASE bị đặt sai hình dạng ("/api/v1", thiếu origin) vẫn hỏng ồn ào y hệt lúc thiếu biến', async () => {
+    vi.resetModules()
+    vi.stubEnv('VITE_API_BASE', '/api/v1')
+    vi.stubGlobal('fetch', tra(200, '<!doctype html><body>index.html</body>', 'text/html'))
+    const { api: apiMoi } = await import('./client')
+    await expect(apiMoi.get('/reports/1')).rejects.toThrow(/VITE_API_BASE/)
+  })
+
+  it('Content-Type JSON nhưng thân không parse được thì vẫn ném lỗi nói rõ tên VITE_API_BASE', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true, status: 200,
+        headers: { get: () => 'application/json' },
+        json: async () => { throw new SyntaxError('Unexpected end of JSON input') },
+      } as unknown as Response),
+    )
+    await expect(api.get('/reports/1')).rejects.toThrow(/VITE_API_BASE/)
   })
 })

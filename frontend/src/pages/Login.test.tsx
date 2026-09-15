@@ -13,7 +13,16 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { MemoryRouter, Route, Routes, RouterProvider, createMemoryRouter, useLocation } from 'react-router-dom'
 
 import { Login, duongDanNoiBo } from './Login'
+import { BASE } from '../api/client'
 import { useSession } from '../app/session'
+
+// task-28-fix-2.md P1: cả thuGoiHealth() lẫn docJsonHopLe() (client.ts) giờ đọc
+// `res.headers.get('content-type')` ở nhánh `res.ok` — mọi mock "thành công" phải có `headers`,
+// nếu không `.get` ném TypeError trên `undefined`. Helper dùng chung cho các ca không tự ý kiểm
+// content-type (giá trị mặc định 'application/json' — hành vi cũ, không thay đổi).
+function okJson(body: unknown) {
+  return { ok: true, status: 200, headers: { get: () => 'application/json' }, json: async () => body }
+}
 
 function DichDen() {
   const { pathname, search } = useLocation()
@@ -35,10 +44,36 @@ describe('/login', () => {
   beforeEach(() => vi.unstubAllGlobals())
 
   it('mở trang là gọi /health để đánh thức Render', async () => {
-    const f = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ status: 'ok' }) })
+    const f = vi.fn().mockResolvedValue(okJson({ status: 'ok' }))
     vi.stubGlobal('fetch', f)
     renderLogin()
-    await waitFor(() => expect(f.mock.calls[0][0]).toContain('/health'))
+    // P2/A3 (task-28-fix-2.md): `toContain('/health')` cũ cũng khớp '/api/v1/health' — một đột
+    // biến hardcode `fetch('/api/v1/health')` (bỏ qua BASE) vẫn xanh. Khẳng định ĐÍCH ĐẾN đầy đủ.
+    await waitFor(() => expect(f.mock.calls[0][0]).toBe(`${BASE}/health`))
+  })
+
+  // task-28-fix-2.md P1: đúng "kịch bản hỏng của A3" mà thuGoiHealth() trước P1 mắc phải — response
+  // 200 nhưng KHÔNG phải JSON (chữ ký của SPA fallback trả index.html khi BASE trỏ nhầm) KHÔNG
+  // được tính là "server đã thức", phải rơi vào nhánh "Không kết nối được máy chủ" sau khi thử lại
+  // đủ SO_LAN_THU_LAI_HEALTH lần. Timer giả như ca "quá 90 giây" ở trên — 2 lần thử lại ×
+  // CACH_THU_LAI_MS (5s) = tối đa 10s trước khi báo mất kết nối.
+  it('/health trả 200 kèm HTML (SPA fallback, BASE trỏ nhầm) thì KHÔNG tính là server đã thức', async () => {
+    vi.useFakeTimers()
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true, status: 200,
+        headers: { get: () => 'text/html' },
+        json: async () => { throw new SyntaxError('Unexpected token <') },
+      }),
+    )
+    try {
+      renderLogin()
+      await vi.advanceTimersByTimeAsync(10_100)
+      expect(screen.getByText(/Không kết nối được máy chủ/)).toBeTruthy()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('sau 3 giây chưa trả lời thì hiện câu đánh thức máy chủ', async () => {
@@ -91,7 +126,7 @@ describe('/login', () => {
   })
 
   it('không có link quên mật khẩu, không có đăng ký', () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({}) }))
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(okJson({})))
     renderLogin()
     expect(screen.queryByText(/quên mật khẩu/i)).toBeNull()
     expect(screen.queryByText(/đăng ký/i)).toBeNull()
@@ -116,23 +151,20 @@ describe('/login', () => {
 function fetchDangNhapThanhCong(roles: string[]) {
   return vi.fn((url: string) => {
     if (url.includes('/health')) {
-      return Promise.resolve({ ok: true, status: 200, json: async () => ({ status: 'ok' }) })
+      return Promise.resolve(okJson({ status: 'ok' }))
     }
     if (url.includes('/auth/login')) {
-      return Promise.resolve({
-        ok: true, status: 200, json: async () => ({ access_token: 'tok-123', token_type: 'bearer' }),
-      })
+      return Promise.resolve(okJson({ access_token: 'tok-123', token_type: 'bearer' }))
     }
     if (url.includes('/auth/me')) {
-      return Promise.resolve({
-        ok: true, status: 200,
-        json: async () => ({
+      return Promise.resolve(
+        okJson({
           user: { id: 1, email: 'u01@ptsc.local', full_name: 'Người dùng thử', position: null },
           roles,
           permissions: ['report.edit'],
           org_unit: { id: 2, code: 'U01', name: 'Đơn vị thành viên 01' },
         }),
-      })
+      )
     }
     throw new Error(`URL không lường trước trong test: ${url}`)
   })

@@ -43,14 +43,26 @@ function cho(ms: number): Promise<void> {
   return new Promise((giaiQuyet) => setTimeout(giaiQuyet, ms))
 }
 
-// Trả true nếu server có phản hồi (bất kể mã trạng thái — /health chỉ cần "đánh thức" Render,
-// không cần đăng nhập nên không quan tâm 200/401/503), false nếu fetch tự ném (mất mạng, hoặc
-// AbortController huỷ sau TIMEOUT_HEALTH_MS).
+// Trả true nếu server THẬT có phản hồi (bất kể mã trạng thái — /health chỉ cần "đánh thức" Render,
+// không cần đăng nhập nên không quan tâm 200/401/503 — kể cả 503/502 kèm THÂN HTML của gateway lúc
+// cold-start vẫn tính là "đã có phản hồi"), false nếu fetch tự ném (mất mạng, hoặc AbortController
+// huỷ sau TIMEOUT_HEALTH_MS).
+//
+// task-28-fix-2.md P1: NGOẠI LỆ duy nhất là res.ok (200) nhưng thân KHÔNG phải JSON — đó không
+// phải "server đã thức", mà là SPA fallback (vercel.json) trả index.html cho mọi path vì BASE
+// đang trỏ nhầm về chính origin frontend (client.ts: docJsonHopLe() bắt cùng triệu chứng này ở
+// nhánh gọi API thật). Trước P1 hàm này trả `true` vô điều kiện cho MỌI phản hồi — cùng lỗ hổng
+// A3 mà Login.test.tsx từng bỏ sót: người dùng thấy "đã kết nối" trong khi BASE sai, rồi mới vỡ
+// lúc bấm đăng nhập thật.
 async function thuGoiHealth(): Promise<boolean> {
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), TIMEOUT_HEALTH_MS)
   try {
-    await fetch(`${BASE}/health`, { signal: ctrl.signal })
+    const res = await fetch(`${BASE}/health`, { signal: ctrl.signal })
+    const loaiNoiDung = typeof res.headers?.get === 'function' ? res.headers.get('content-type') : null
+    if (res.ok && loaiNoiDung && !loaiNoiDung.includes('application/json')) {
+      return false
+    }
     return true
   } catch {
     return false
