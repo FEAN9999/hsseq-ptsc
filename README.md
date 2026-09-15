@@ -82,6 +82,19 @@ Không cần tự chạy `npm run preview`: `playwright.config.ts` khai `webServ
 BASE_URL=https://<bản-deploy> npx playwright test
 ```
 
+`BASE_URL` luôn là origin **frontend** — bốn lời gọi API qua `request` của Playwright
+(`tokenApi`, `dsBaoCao`, `nopBaoCaoQuaApi`) đi bằng đường dẫn tương đối nên mặc định bám theo đúng
+origin đó (same-origin, đúng cho local qua proxy của `vite preview`). Khi API nằm ở origin RIÊNG
+(Vercel ≠ Render — xem mục "Deploy" bên dưới), đặt thêm `API_BASE_URL`:
+
+```bash
+BASE_URL=https://<vercel-app>.vercel.app API_BASE_URL=https://<render-app>.onrender.com \
+  npx playwright test --project=desktop-1280
+```
+
+Không đặt `API_BASE_URL` ⇒ mặc định bằng chính `BASE_URL` — không đổi hành vi cũ. Lớp phân giải
+này (`apiUrl()` ở `e2e/moi-truong.ts`) là logic thuần, có ca test riêng ở `moi-truong.spec.ts`.
+
 Lúc đó `webServer` tự tắt (server đã có sẵn) và `resetDemo()` **tự bỏ qua** — `.venv` trên máy này
 không nói chuyện được với database của server đó, và xoá dữ liệu trên máy chủ thật là chuyện khác
 hẳn về hậu quả. Bộ test vì vậy chia đôi theo đúng thứ nó CẦN:
@@ -105,6 +118,46 @@ theo tiền tố chuỗi: `localhost`, `127.0.0.1`, `0.0.0.0`, `::1` và `*.loca
 - **`FIXTURE_CSV`:** helper `resetDemo()` trỏ `FIXTURE_CSV` sang `backend/tests/fixtures/full_synthetic.csv`
   vì fixture số thật (`backend/app/seed/fixtures/fm01_2026-06_2026-08.csv`) hiện mới có dòng tiêu đề.
   Khi đã dán số thật vào đó thì bỏ biến này đi.
+
+## Deploy
+
+Bản demo dự kiến chạy trên **Vercel** (frontend) + **Render** (backend) + **Supabase** (database),
+giữ ấm bằng **UptimeRobot**. **Chưa có project nào trong bốn dịch vụ này được tạo** — mục này mô tả
+cách làm và những gì đã kiểm chứng được TRÊN MÁY NÀY, không phải một bản deploy cloud thật đã chạy
+qua.
+
+Bốn việc dưới đây nằm NGOÀI máy này — của Chồng yêu, không phải việc của subagent (tạo tài khoản /
+cấu hình dịch vụ ngoài, hoặc repo chưa có remote nào để push):
+
+| Việc | Ghi chú |
+|---|---|
+| Tạo project Vercel — root `frontend/`, build `npm run build`, output `dist`, Production Branch = `demo` | Đặt biến `VITE_API_BASE` ở đây (xem dưới) |
+| Sửa `CORS_ORIGINS` trên Render | Thêm domain Vercel, **giữ cả** `http://localhost:5173`, ngăn bằng dấu phẩy |
+| `gh repo create` (hoặc tương đương) rồi `git push` | Repo này **hiện không có remote nào** — cố ý |
+| Tạo monitor UptimeRobot | HTTP(s), URL `https://<render-app>.onrender.com/api/v1/health`, mỗi 5 phút |
+
+Trên Render, nhớ thêm `APP_ENV=demo`: thiếu biến này thì cầu chì fail-closed của
+`backend/scripts/reset_demo.py` từ chối chạy — đúng sáng demo sẽ không reset được dữ liệu.
+
+**`frontend/vercel.json`** (đã có trong repo) khai SPA fallback — thiếu nó thì F5 (tải lại trang) ở
+một route con như `/reports/12` trả 404, vì Vercel không biết đó là một route phía client.
+
+**`VITE_API_BASE`** đặt ở biến môi trường project trên Vercel — KHÔNG đặt bằng file
+`.env.production` trong repo (file đó bị đọc ở MỌI lần build production, kể cả
+`npm run build && npm run preview` mà local/CI dùng để test, nên ghi cứng URL Render vào đó sẽ khiến
+phép đo local vô tình gọi sang cloud). **Quên đặt biến này thì ứng dụng hỏng NGAY LÚC TẢI TRANG, ở một địa chỉ không phải máy cục bộ (như
+domain Vercel thật)** — `frontend/src/api/client.ts` (nguồn origin API duy nhất; `Login.tsx` import
+lại `BASE` từ đây) ném lỗi rõ tên biến, màn hình trắng — thay vì âm thầm rơi về `/api/v1`, ăn phải
+SPA fallback ở trên (200 kèm HTML), rồi vỡ bằng `SyntaxError` không rõ lý do như trước Task 28. Ở
+máy nhà (`npm run dev`/`npm run preview`, hostname `localhost`) thiếu biến vẫn AN TOÀN — proxy khai
+ở `vite.config.ts` lo phần backend, không có gì để hỏng (vòng sửa 1: ranh giới thật là "có backend
+cùng origin hay không", không phải "có phải bản build production hay không").
+
+**Trỏ e2e vào bản deploy:** xem "Chạy e2e (Playwright)" ở trên — `BASE_URL` (origin frontend) và
+`API_BASE_URL` (origin API, tách riêng từ Task 28) là hai biến ĐỘC LẬP; không đặt `API_BASE_URL` ⇒
+mặc định bằng `BASE_URL` (same-origin, đúng hành vi cũ).
+
+Kết nối Supabase: xem mục ngay dưới đây.
 
 ## Kết nối Supabase
 
