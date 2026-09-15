@@ -135,6 +135,37 @@ def lay_chi_tiet_bao_cao(db: Session, report_id: int) -> tuple[int, ReportDetail
         .scalar_subquery()
     )
 
+    # View đi qua một CTE `MATERIALIZED` lọc sẵn `report_id`, KHÔNG phải
+    # `LEFT JOIN v_report_value_computed ON v.report_id = report.id AND ...`
+    # như bản đầu. Lý do là số đo, không phải sở thích: với dạng JOIN thẳng,
+    # Postgres đặt view vào nhánh TRONG của một Nested Loop và chạy lại TOÀN BỘ
+    # thân view **một lần cho MỖI dòng chỉ tiêu** — 53 lần × 9,38 ms ≈ 490 ms
+    # cho một `GET /reports/{id}`, gấp ~100× mọi endpoint khác, trên uvicorn đơn
+    # tiến trình (không request nào khác được phục vụ trong quãng đó). Bộ lọc
+    # `report_id` không đẩy được vào trong view nên CTE `counted` của view quét
+    # lại toàn bộ `report_value` mỗi vòng ⇒ chi phí O(số chỉ tiêu × TOÀN BỘ
+    # report_value), lớn dần theo thời gian vận hành.
+    #
+    # `MATERIALIZED` (chứ không phải subquery thường, `OFFSET 0`, hay CTE trần)
+    # là thứ DUY NHẤT biến "chạy một lần" thành BẢO ĐẢM của Postgres: cả ba cách
+    # kia đều bị phẳng hoá và số lần chạy lại rơi về tay bộ tối ưu — đo được là
+    # cùng một câu SQL, cùng một bộ dữ liệu, chạy view 53 lần trên `hseq` nhưng
+    # 1 lần trên `hseq_test`, khác nhau chỉ vì thống kê bảng. Vẫn ĐÚNG MỘT câu
+    # SQL, không phá ngân sách 2 query ở docstring module.
+    # Đo sau khi sửa, server thật: 490 ms → 17 ms. Ca canh:
+    # tests/api/test_reports.py::test_get_report_chay_view_dung_mot_lan_cho_ca_bao_cao.
+    v_computed = (
+        select(
+            V_REPORT_VALUE_COMPUTED.c.indicator_id,
+            V_REPORT_VALUE_COMPUTED.c.acc_prev_computed,
+            V_REPORT_VALUE_COMPUTED.c.acc_total_computed,
+            V_REPORT_VALUE_COMPUTED.c.missing_periods,
+        )
+        .where(V_REPORT_VALUE_COMPUTED.c.report_id == report_id)
+        .cte("computed")
+        .prefix_with("MATERIALIZED")
+    )
+
     stmt = (
         select(
             Report.id, Report.version, Report.source, Report.is_late,
@@ -153,9 +184,9 @@ def lay_chi_tiet_bao_cao(db: Session, report_id: int) -> tuple[int, ReportDetail
             prev_counter.label("prev_total_counter"),
             texts_json.label("texts_json"),
             ma_truong_chu.label("ma_truong_chu"),
-            V_REPORT_VALUE_COMPUTED.c.acc_prev_computed,
-            V_REPORT_VALUE_COMPUTED.c.acc_total_computed,
-            V_REPORT_VALUE_COMPUTED.c.missing_periods,
+            v_computed.c.acc_prev_computed,
+            v_computed.c.acc_total_computed,
+            v_computed.c.missing_periods,
         )
         .select_from(Report)
         .join(OrgUnit, OrgUnit.id == Report.org_unit_id)
@@ -167,10 +198,7 @@ def lay_chi_tiet_bao_cao(db: Session, report_id: int) -> tuple[int, ReportDetail
         .join(TemplateSection, TemplateSection.id == Indicator.section_id)
         .outerjoin(ReportValue, and_(ReportValue.indicator_id == Indicator.id,
                                      ReportValue.report_id == Report.id))
-        .outerjoin(V_REPORT_VALUE_COMPUTED, and_(
-            V_REPORT_VALUE_COMPUTED.c.report_id == Report.id,
-            V_REPORT_VALUE_COMPUTED.c.indicator_id == Indicator.id,
-        ))
+        .outerjoin(v_computed, v_computed.c.indicator_id == Indicator.id)
         .where(Report.id == report_id)
         .order_by(TemplateSection.sort_order, Indicator.sort_order)
     )

@@ -531,3 +531,90 @@ def test_post_reports_kiem_nhiem_nhieu_don_vi_tra_403(client, db):
     assert r.status_code == 403, r.text
     assert r.json()["detail"] == (
         "Không xác định được đúng một đơn vị để tạo báo cáo cho tài khoản này")
+
+
+def _nut_than_view(nut: dict) -> dict | None:
+    """Nút THÂN của CTE bọc `v_report_value_computed` trong cây `EXPLAIN`.
+
+    Postgres đặt `Subplan Name` của một CTE tên `computed` là `"CTE computed"`.
+    Trả `None` nếu câu SQL không bọc view sau hàng rào nào.
+    """
+    if nut.get("Subplan Name") == "CTE computed":
+        return nut
+    for con in nut.get("Plans", []):
+        tim = _nut_than_view(con)
+        if tim is not None:
+            return tim
+    return None
+
+
+def test_get_report_chay_view_dung_mot_lan_cho_ca_bao_cao(client, db):
+    """`v_report_value_computed` phải chạy ĐÚNG MỘT lần cho cả báo cáo.
+
+    Đo trên CSDL demo `hseq` (final-review-R2-report.md §(A1)): bản cũ
+    `LEFT JOIN v_report_value_computed ON v.report_id = report.id AND
+    v.indicator_id = indicator.id` làm Postgres đặt view vào nhánh TRONG của
+    một Nested Loop và chạy lại **toàn bộ thân view 53 lần — một lần cho MỖI
+    dòng chỉ tiêu** (9,38 ms × 53 ≈ 490 ms, gấp ~100× mọi endpoint khác). Bộ
+    lọc `report_id` không đẩy được vào trong view nên CTE `counted` của view
+    quét lại toàn bộ `report_value` mỗi vòng. Chi phí là O(số chỉ tiêu × TOÀN
+    BỘ `report_value`) nên nó lớn dần: một năm vận hành thật ⇒ ~2 giây mỗi lần
+    mở form, trên uvicorn ĐƠN TIẾN TRÌNH — trong quãng đó không request nào
+    khác được phục vụ, kể cả `/dashboard/summary` trên máy chiếu bên cạnh.
+
+    **Vì sao ca này đo HÀNG RÀO chứ không đo số vòng lặp trần.** Đúng cùng một
+    bộ dữ liệu (66 báo cáo · 3432 `report_value` · 1144 `opening_balance`),
+    câu SQL CŨ chạy view **53 lần trên `hseq`** nhưng **1 lần trên
+    `hseq_test`** — khác nhau chỉ vì thống kê bảng. Tức là bản cũ không sai
+    "một cách đo được ở mọi nơi": nó giao SỐ LẦN CHẠY cho bộ tối ưu quyết
+    định, và trên CSDL thật bộ tối ưu quyết định sai. `WITH ... AS
+    MATERIALIZED` là thứ DUY NHẤT biến "một lần" thành bảo đảm của Postgres
+    chứ không phải may rủi theo thống kê — nên ca này khẳng định đúng cái bảo
+    đảm đó, và `Actual Loops` của nút thân view chính là SỐ LẦN view chạy.
+
+    Không đo thời gian tường: Ruling 408 vừa dạy rằng đồng hồ ở độ phân giải
+    giây là thứ không đáng tin, và một ca đo mili-giây sẽ chớp tắt theo máy.
+    """
+    import json
+
+    from sqlalchemy import event
+
+    from app.core.db import engine
+    from app.models import Report, ReportTemplate
+    from app.services.reports import lay_chi_tiet_bao_cao
+
+    seed_all(db)
+    bc = (db.query(Report).join(ReportTemplate, ReportTemplate.id == Report.template_id)
+          .filter(ReportTemplate.code == "FM01").first())
+
+    bat: list[tuple[str, object]] = []
+
+    def _ghi(conn, cursor, statement, parameters, context, many):
+        bat.append((statement, parameters))
+
+    event.listen(engine, "before_cursor_execute", _ghi)
+    try:
+        ket = lay_chi_tiet_bao_cao(db, bc.id)
+    finally:
+        event.remove(engine, "before_cursor_execute", _ghi)
+    assert ket is not None
+    assert len(bat) == 1, \
+        f"phần đọc dữ liệu phải là ĐÚNG một câu SQL (ngân sách 2 query), đang là {len(bat)}"
+
+    # `exec_driver_sql` chứ không phải `text()`: câu SQL còn nguyên tham số kiểu
+    # pyformat (`%(id_1)s`) mà `text()` sẽ hiểu nhầm là ký tự escape.
+    stmt, params = bat[0]
+    plan = db.connection().exec_driver_sql(
+        "EXPLAIN (ANALYZE, FORMAT JSON) " + stmt, params).scalar()
+    if isinstance(plan, str):
+        plan = json.loads(plan)
+
+    than = _nut_than_view(plan[0]["Plan"])
+    assert than is not None, (
+        "Kế hoạch không có nút thân view nào nằm sau hàng rào CTE: câu SQL đang JOIN "
+        "thẳng `v_report_value_computed`, nên SỐ LẦN view chạy do bộ tối ưu quyết định "
+        "theo thống kê bảng — trên `hseq` nó chạy 53 lần (490 ms), trên `hseq_test` "
+        "cùng dữ liệu lại chạy 1 lần. Xem R2 §(A1).")
+    assert than["Actual Loops"] == 1, (
+        f"thân view chạy {than['Actual Loops']} lần cho MỘT báo cáo "
+        f"({len(ket[1].values)} dòng chỉ tiêu) — phải đúng 1")
