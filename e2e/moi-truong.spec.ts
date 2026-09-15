@@ -17,6 +17,8 @@
 //
 // Hai ca này không mở trình duyệt (không đòi fixture `page`) nên chạy được ở MỌI chế độ, kể cả
 // `BASE_URL` từ xa — đúng chỗ người ta cần chúng nhất.
+import { readFileSync } from 'node:fs'
+
 import { expect, test } from '@playwright/test'
 
 import { apiUrl, laCucBo } from './moi-truong'
@@ -102,16 +104,65 @@ test('laCucBo — chiều SÓT: mọi dạng loopback hợp lệ phải được
 // F23 (task-28-scope.md mục 3) — LỚP PHÂN GIẢI tách origin API khỏi origin frontend. Hàm THUẦN,
 // nhận cả hai origin làm tham số (như `laCucBo(url)` ở trên) nên test được không cần đụng
 // `process.env` hay nạp lại module.
-test('apiUrl — same-origin (mặc định, không đặt API_BASE_URL) giữ NGUYÊN đường dẫn tương đối', () => {
+//
+// task-28-fix-2.md P3/A4: tên ca DƯỚI đây trước là "mặc định (không đặt API_BASE_URL)" nhưng THÂN
+// chỉ truyền hai chuỗi TAY bằng nhau — không hề đọc `process.env.API_BASE_URL` hay module thật, nên
+// không canh được việc ĐỌC biến môi trường. Đổi tên cho khớp thứ nó THẬT SỰ kiểm (tính chất thuần
+// "hai origin bằng nhau" của apiUrl, không liên quan gì tới localhost hay biến môi trường) — việc
+// ĐỌC biến môi trường thật chuyển xuống ca `API_ORIGIN đọc process.env.API_BASE_URL...` bên dưới.
+test('apiUrl — hai origin bằng nhau (same-origin) giữ NGUYÊN đường dẫn tương đối, bất kể giá trị cụ thể là gì', () => {
   // Đây chính là hành vi CŨ: `request` của Playwright tự nối đường dẫn tương đối vào `baseURL`
-  // của nó — không đổi MỘT KÝ TỰ nào so với trước khi có F23, nên 24/24 ca hiện có phải vẫn xanh.
-  expect(apiUrl('http://localhost:5173', 'http://localhost:5173', '/api/v1/auth/login')).toBe(
-    '/api/v1/auth/login',
-  )
+  // của nó — không đổi MỘT KÝ TỰ nào so với trước khi có F23. Cố ý dùng origin KHÔNG PHẢI
+  // localhost để chứng minh tính chất này không liên quan gì tới "máy nhà" — chỉ là SO SÁNH BẰNG.
+  expect(apiUrl('https://x.example', 'https://x.example', '/api/v1/auth/login')).toBe('/api/v1/auth/login')
 })
 
 test('apiUrl — hai origin khác nhau (Task 28: Vercel ≠ Render) trả URL TUYỆT ĐỐI trỏ vào gốc API', () => {
   expect(
     apiUrl('https://hseq-api.onrender.com', 'https://hseq-demo.vercel.app', '/api/v1/auth/login'),
   ).toBe('https://hseq-api.onrender.com/api/v1/auth/login')
+})
+
+// task-28-fix-2.md P3/A4: ca trên chỉ canh HÀM THUẦN `apiUrl`, không canh LỚP NỐI — nơi
+// `API_ORIGIN`/`BASE_URL` (module-level, tính từ `process.env` lúc nạp) THẬT SỰ được đọc ra. Hai
+// đột biến sống trên toàn suite (gõ nhầm tên biến môi trường, hoặc bỏ sót `goiApi` ở một trong bốn
+// lời gọi `request.*` của helpers.ts) đều âm thầm quay về same-origin — không ca nào ở trên phát
+// hiện được vì cả hai chỉ nói chuyện với `apiUrl` bằng tham số tay.
+//
+// Cache-bust bằng query string: ESM cache theo ĐÚNG specifier, `?...` khác nhau ép Node nạp lại
+// module với `process.env` hiện tại thay vì trả bản đã cache từ lần import đầu (đầu file, hoặc từ
+// một ca trước).
+test('API_ORIGIN đọc THẬT process.env.API_BASE_URL lúc module nạp (không phải hai chuỗi tay)', async () => {
+  const cu = process.env.API_BASE_URL
+  try {
+    delete process.env.API_BASE_URL
+    const khongDat = (await import(`./moi-truong.ts?khong-dat-${Date.now()}`)) as typeof import('./moi-truong')
+    expect(khongDat.API_ORIGIN, 'không đặt API_BASE_URL ⇒ API_ORIGIN phải mặc định BẰNG chính BASE_URL').toBe(
+      khongDat.BASE_URL,
+    )
+
+    process.env.API_BASE_URL = 'https://hseq-api.onrender.com'
+    const coDat = (await import(`./moi-truong.ts?co-dat-${Date.now()}`)) as typeof import('./moi-truong')
+    expect(coDat.API_ORIGIN, 'đặt API_BASE_URL ⇒ API_ORIGIN phải đọc ĐÚNG giá trị đó, không phải BASE_URL').toBe(
+      'https://hseq-api.onrender.com',
+    )
+  } finally {
+    if (cu === undefined) delete process.env.API_BASE_URL
+    else process.env.API_BASE_URL = cu
+  }
+})
+
+// task-28-fix-2.md P3/A4: mọi lời gọi `request.*` (Playwright APIRequestContext) tới API trong
+// helpers.ts BẮT BUỘC đi qua `goiApi()` — bỏ sót MỘT chỗ là chỗ đó âm thầm quay về same-origin khi
+// API_BASE_URL khác BASE_URL (Task 28: Vercel ≠ Render), không ca nào ở trên phát hiện vì chúng chỉ
+// gọi `apiUrl`/đọc `API_ORIGIN` trực tiếp, không đọc chính `helpers.ts`. Ca này đọc THẲNG mã nguồn
+// — không phải chạy `request.*` thật — vì mục tiêu là khoá QUY ƯỚC VIẾT MÃ, thứ không hiện ra được
+// qua bất kỳ giá trị input/output nào của một lượt chạy đơn lẻ.
+test('helpers.ts — mọi lời gọi request.* tới API đều qua goiApi(...), không tự ráp path trần', () => {
+  const src = readFileSync(new URL('./helpers.ts', import.meta.url), 'utf-8')
+  const loiGoi = [...src.matchAll(/\brequest\.(get|post|put|patch|delete)\(\s*([^,)]+)/g)]
+  expect(loiGoi.length, 'không tìm thấy lời gọi request.* nào — regex sai hoặc helpers.ts đã đổi cấu trúc').toBe(4)
+  for (const [, phuongThuc, doiSo] of loiGoi) {
+    expect(doiSo.trim(), `request.${phuongThuc}(${doiSo.trim()}…) không gọi qua goiApi(...)`).toMatch(/^goiApi\(/)
+  }
 })
