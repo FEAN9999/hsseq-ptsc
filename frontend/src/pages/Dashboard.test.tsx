@@ -86,7 +86,18 @@ const DEFAULT_SUMMARY = {
   ],
 }
 
-function moiApi(overrides: Partial<typeof DEFAULT_SUMMARY> = {}) {
+// P2 (final-review-R2-report.md A3): dải kỳ CÓ THẬT của seed — GET /templates/FM01/periods trả
+// đúng 4 kỳ 2026-06…2026-09 đã sắp theo start_date. Đây là NGUỒN CHÂN LÝ Dashboard dùng để biết
+// "kỳ này có thật không"; mọi ca dưới đây chạy trên dải đó trừ khi truyền `periods` khác.
+const DEFAULT_PERIODS = ['2026-06', '2026-07', '2026-08', '2026-09'].map((period_key, i) => ({
+  period_key,
+  start_date: `${period_key}-01`,
+  end_date: `${period_key}-28`,
+  due_at: `${period_key}-28T23:59:59Z`,
+  is_open: i >= 2,
+}))
+
+function moiApi(overrides: Partial<typeof DEFAULT_SUMMARY> = {}, periods: unknown[] = DEFAULT_PERIODS) {
   const summary = { ...DEFAULT_SUMMARY, ...overrides }
   const f = vi.fn((url: string) => {
     if (url.includes('/dashboard/summary')) {
@@ -94,6 +105,9 @@ function moiApi(overrides: Partial<typeof DEFAULT_SUMMARY> = {}) {
     }
     if (url.includes('/dashboard/units')) {
       return Promise.resolve({ ok: true, status: 200, json: async () => DEFAULT_UNITS })
+    }
+    if (url.includes('/periods')) {
+      return Promise.resolve({ ok: true, status: 200, json: async () => periods })
     }
     throw new Error(`URL không lường trước trong test: ${url}`)
   })
@@ -254,6 +268,9 @@ describe('/dashboard', () => {
       if (url.includes('/dashboard/units')) {
         return Promise.resolve({ ok: true, status: 200, json: async () => [donViLa] })
       }
+      if (url.includes('/periods')) {
+        return Promise.resolve({ ok: true, status: 200, json: async () => DEFAULT_PERIODS })
+      }
       throw new Error(`URL không lường trước trong test: ${url}`)
     })
     vi.stubGlobal('fetch', f)
@@ -316,8 +333,12 @@ describe('/dashboard', () => {
   // congThang dùng Date.UTC nên tự tràn năm đúng (JS chuẩn hoá tháng âm/>11) — không test qua ranh
   // giới năm thì mutation "lấy `nam` gốc thay vì d.getUTCFullYear()" (đúng với MỌI kỳ giữa năm,
   // vd. 2026-08 dùng ở các ca trên) sống sót, chỉ lộ sai ở kỳ đầu/cuối năm.
+  //
+  // P2: dải kỳ của ca này phải BAO kỳ 2026-01 và kỳ liền trước nó — nếu không, 2026-01 rơi vào
+  // nhánh "kỳ ngoài dải" và PeriodNav không còn được vẽ, ca mất đối tượng đo. Dải riêng giữ ĐÚNG
+  // thứ ca này đang đo (số học tràn năm), không đo lây sang chuyện biên.
   it('congThang qua ranh giới năm: kỳ 01/2026 thì nút lùi hiện "‹ 12/2025"', async () => {
-    moiApi()
+    moiApi({}, ['2025-11', '2025-12', '2026-01', '2026-02'].map((period_key) => ({ period_key, is_open: false })))
     renderDashboard('/dashboard?period=2026-01')
     expect(await screen.findByRole('button', { name: '‹ 12/2025' })).toBeTruthy()
   })
@@ -466,6 +487,9 @@ describe('/dashboard', () => {
           ? Promise.resolve({ ok: true, status: 200, json: async () => DEFAULT_UNITS })
           : Promise.resolve({ ok: false, status: 502, json: async () => ({ detail: 'Bad gateway' }) })
       }
+      if (url.includes('/periods')) {
+        return Promise.resolve({ ok: true, status: 200, json: async () => DEFAULT_PERIODS })
+      }
       throw new Error(`URL không lường trước: ${url}`)
     })
     vi.stubGlobal('fetch', f)
@@ -536,9 +560,14 @@ describe('/dashboard', () => {
       </QueryClientProvider>,
     )
     expect(await screen.findByText('Bạn không có quyền xem dashboard này')).toBeTruthy()
-    // Không thử lại 4xx: đúng 1 lần gọi MỖI endpoint (2 tổng) — không phải 8 (2 endpoint × 4 lượt
-    // mặc định TanStack khi không đặt retry nào).
-    expect(f.mock.calls.length).toBe(2)
+    // Không thử lại 4xx: đúng 1 lần gọi MỖI endpoint — không phải 4 lượt mặc định TanStack khi
+    // không đặt retry nào. P2: đếm THEO TỪNG endpoint chứ không đếm TỔNG — trang giờ hỏi thêm
+    // /templates/FM01/periods, và một con số tổng khoá cứng biến mọi lần thêm/bớt query thành ca
+    // đỏ giả trong khi vẫn không nói được endpoint NÀO bị thử lại.
+    const dem = (u: string) => f.mock.calls.filter(([x]) => String(x).includes(u)).length
+    expect(dem('/dashboard/summary')).toBe(1)
+    expect(dem('/dashboard/units')).toBe(1)
+    expect(dem('/templates/FM01/periods')).toBe(1)
   })
 
   // Vòng sửa 2 (task-25-fix-2.md P6-P10/M-04+M-34, task-25-rereview-1.md mục 5 [NHẸ]): ca 403 ở
@@ -558,6 +587,9 @@ describe('/dashboard', () => {
           json: async () => ({ detail: 'Không có quyền dashboard.view' }),
         })
       }
+      if (url.includes('/periods')) {
+        return Promise.resolve({ ok: true, status: 200, json: async () => DEFAULT_PERIODS })
+      }
       throw new Error(`URL không lường trước trong test: ${url}`)
     })
     vi.stubGlobal('fetch', f)
@@ -576,6 +608,9 @@ describe('/dashboard', () => {
       }
       if (url.includes('/dashboard/units')) {
         return Promise.resolve({ ok: true, status: 200, json: async () => DEFAULT_UNITS })
+      }
+      if (url.includes('/periods')) {
+        return Promise.resolve({ ok: true, status: 200, json: async () => DEFAULT_PERIODS })
       }
       throw new Error(`URL không lường trước trong test: ${url}`)
     })
@@ -640,6 +675,9 @@ describe('/dashboard', () => {
       if (url.includes('/dashboard/units')) {
         return Promise.resolve({ ok: true, status: 200, json: async () => [donViU10, donViU05] })
       }
+      if (url.includes('/periods')) {
+        return Promise.resolve({ ok: true, status: 200, json: async () => DEFAULT_PERIODS })
+      }
       throw new Error(`URL không lường trước: ${url}`)
     })
     vi.stubGlobal('fetch', f)
@@ -691,6 +729,9 @@ describe('/dashboard', () => {
         return Promise.resolve({ ok: true, status: 200, json: async () => DEFAULT_SUMMARY })
       }
       if (url.includes('/dashboard/units')) return new Promise<never>(() => {}) // treo mãi
+      if (url.includes('/periods')) {
+        return Promise.resolve({ ok: true, status: 200, json: async () => DEFAULT_PERIODS })
+      }
       throw new Error(`URL không lường trước: ${url}`)
     })
     vi.stubGlobal('fetch', f)
@@ -832,6 +873,157 @@ describe('/dashboard', () => {
     const oCells = within(dong).getAllByRole('cell').map((c) => c.textContent)
     expect(oCells).toContain('105')
     expect(oCells).not.toContain('105,00')
+  })
+})
+
+// ---- P2 (final-fix-FE.md, Ruling 424 · final-review-R2-report.md §A3) — BA CỬA của cùng một câu
+// hỏi: "kỳ này có thật không?".
+//
+// Vì sao ba ca chứ không một: mỗi cửa mở bằng một cách KHÁC NHAU và bịt một cửa không bịt hai cửa
+// kia. (1) bấm `›` ở kỳ cuối dải — `congThang` luôn cho một kỳ mới, không có biên; (2) gõ tay
+// `?period=2026-10` — ĐÚNG định dạng, chỉ là không tồn tại, nên siết `pattern` phía backend không
+// bắt được; (3) `?period=xyz` — sai cả định dạng, làm `formatPeriod` in "undefined/xyz" và
+// `congThang` in "NaN/NaN".
+//
+// Cả ba đóng bằng MỘT nguồn: GET /templates/FM01/periods, đúng nguồn Status.tsx đã dùng (cùng
+// queryKey nên hai trang dùng chung một lượt tải).
+describe('/dashboard — kỳ ngoài dải (P2)', () => {
+  // Cửa 1. Kịch bản demo nguyên văn: người trình bày đang ở kỳ CUỐI dải (2026-09) bấm `›` đúng một
+  // lần. Trước bản vá, màn hình nhảy sang 2026-10 và hiện "0 đã duyệt / 22 chưa nộp" — không phân
+  // biệt được với mất sạch dữ liệu.
+  it('cửa 1 — ở kỳ CUỐI dải thì nút `›` bị khoá, bấm KHÔNG đẩy sang kỳ không có thật', async () => {
+    const f = moiApi()
+    renderDashboard('/dashboard?period=2026-09')
+    await screen.findByText('PTSC Đình Vũ')
+
+    const nutSau = screen.getByRole('button', { name: '10/2026 ›' })
+    expect(nutSau.hasAttribute('disabled')).toBe(true)
+    await userEvent.click(nutSau)
+
+    // Khoá bằng CẢ HAI mặt: không request nào mang period=2026-10 bay lên, VÀ ô kỳ đang xem vẫn là
+    // 09/2026. Chỉ khẳng định "không có request" thì một nút render ra rồi bị chặn ở tầng khác vẫn
+    // qua; chỉ khẳng định "ô kỳ không đổi" thì một lượt tải ngầm sai kỳ vẫn lọt.
+    expect(f.mock.calls.map(([u]) => String(u)).some((u) => u.includes('period=2026-10'))).toBe(false)
+    expect(screen.getByText('09/2026')).toBeTruthy()
+  })
+
+  // Nửa ÂM của cùng vị ngữ (bài học K2 — lỗi trốn ở mặt âm): khoá biên mà khoá quá tay thì nút `›`
+  // chết ở GIỮA dải, và đó là đường đi bình thường của buổi demo. Không có ca này thì
+  // `disabled={true}` cứng cũng xanh.
+  it('cửa 1 (mặt âm) — ở GIỮA dải thì CẢ HAI nút còn bấm được', async () => {
+    moiApi()
+    renderDashboard('/dashboard?period=2026-07')
+    await screen.findByText('PTSC Đình Vũ')
+    expect(screen.getByRole('button', { name: '‹ 06/2026' }).hasAttribute('disabled')).toBe(false)
+    expect(screen.getByRole('button', { name: '08/2026 ›' }).hasAttribute('disabled')).toBe(false)
+  })
+
+  it('cửa 1 — ở kỳ ĐẦU dải thì nút `‹` bị khoá', async () => {
+    moiApi()
+    renderDashboard('/dashboard?period=2026-06')
+    await screen.findByText('PTSC Đình Vũ')
+    expect(screen.getByRole('button', { name: '‹ 05/2026' }).hasAttribute('disabled')).toBe(true)
+  })
+
+  // Cửa 2. URL gõ tay / bookmark cũ: đúng định dạng YYYY-MM, chỉ là kỳ không tồn tại.
+  it('cửa 2 — `?period=2026-10` (đúng định dạng, không có thật): một câu tử tế + lối về, KHÔNG phải màn 0/22', async () => {
+    moiApi()
+    renderDashboard('/dashboard?period=2026-10')
+
+    expect(await screen.findByText('Kỳ 10/2026 chưa có trong hệ thống')).toBeTruthy()
+    // Đây là toàn bộ điểm của mục: màn "0 đã duyệt / 22 đơn vị chưa nộp" KHÔNG được hiện, vì nó
+    // đọc y hệt "toàn bộ số liệu vừa biến mất".
+    expect(screen.queryByText(/Chưa có báo cáo được duyệt/)).toBeNull()
+    expect(screen.queryByText(/Toàn Tổng công ty/)).toBeNull()
+    expect(screen.queryByRole('table')).toBeNull()
+  })
+
+  it('cửa 2 — lối về đưa đúng về kỳ MỚI NHẤT có thật, và trang hồi sinh', async () => {
+    moiApi()
+    renderDashboard('/dashboard?period=2026-10')
+    await userEvent.click(await screen.findByRole('button', { name: 'Về kỳ 09/2026' }))
+    expect(await screen.findByText('PTSC Đình Vũ')).toBeTruthy()
+    expect(screen.queryByText('Kỳ 10/2026 chưa có trong hệ thống')).toBeNull()
+  })
+
+  // Cửa 3. Chuỗi rác — trước bản vá cho "undefined/xyz" trên thanh coverage và "NaN/NaN" trên
+  // PeriodNav. Khẳng định KHÔNG có hai chuỗi đó ở BẤT KỲ đâu trên trang, không chỉ ở một phần tử.
+  it('cửa 3 — `?period=xyz`: không NaN/NaN, không undefined/xyz, chỉ một câu tử tế', async () => {
+    moiApi()
+    const { container } = renderDashboard('/dashboard?period=xyz')
+
+    expect(await screen.findByText('Kỳ xyz chưa có trong hệ thống')).toBeTruthy()
+    const text = container.textContent ?? ''
+    expect(text).not.toContain('NaN')
+    expect(text).not.toContain('undefined')
+    expect(screen.queryByRole('table')).toBeNull()
+  })
+
+  // Lưới an toàn của chính bản vá: /templates/FM01/periods là một lượt gọi mạng NỮA, và Render free
+  // ngủ dậy trả 502. Nguồn chân lý hỏng KHÔNG được biến một kỳ THẬT thành "chưa có trong hệ thống"
+  // — cùng luật "lỗi nền không được phá màn hình đang có dữ liệu" mà P1/B-01 đã đặt ra.
+  it('dải kỳ tải HỎNG thì trang vẫn vẽ bình thường, không kết tội kỳ đang xem', async () => {
+    const f = vi.fn((url: string) => {
+      if (url.includes('/dashboard/summary')) {
+        return Promise.resolve({ ok: true, status: 200, json: async () => DEFAULT_SUMMARY })
+      }
+      if (url.includes('/dashboard/units')) {
+        return Promise.resolve({ ok: true, status: 200, json: async () => DEFAULT_UNITS })
+      }
+      if (url.includes('/periods')) {
+        return Promise.resolve({ ok: false, status: 502, json: async () => ({ detail: 'Bad gateway' }) })
+      }
+      throw new Error(`URL không lường trước: ${url}`)
+    })
+    vi.stubGlobal('fetch', f)
+    renderDashboard()
+    expect(await screen.findByText('PTSC Đình Vũ')).toBeTruthy()
+    expect(screen.queryByText(/chưa có trong hệ thống/)).toBeNull()
+    // Và không khoá nhầm nút nào khi chưa biết dải — khoá "phòng xa" ở đây là chặn đường đi đúng.
+    expect(screen.getByRole('button', { name: '09/2026 ›' }).hasAttribute('disabled')).toBe(false)
+  })
+
+  // Khe hở thời gian của CHÍNH bản vá: `/dashboard/*` luôn nhanh hơn (2 query) còn dải kỳ là lượt
+  // gọi thứ ba. Nếu trang vẽ số ngay khi summary/units về mà chưa biết dải, thì kỳ 2026-10 vẫn
+  // chiếu đúng màn "0 đã duyệt / 22 chưa nộp" — chỉ ngắn hơn, đúng cái màn mục P2 đi xoá. Đo bằng
+  // cách treo RIÊNG lượt gọi dải kỳ.
+  it('dải kỳ chưa về thì CHƯA vẽ số — không chớp màn 0/22 trong lúc chờ nguồn chân lý', async () => {
+    const f = vi.fn((url: string) => {
+      if (url.includes('/dashboard/summary')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({ ...DEFAULT_SUMMARY, period_key: '2026-10', approved_count: 0, submitted_count: 0 }),
+        })
+      }
+      if (url.includes('/dashboard/units')) {
+        return Promise.resolve({ ok: true, status: 200, json: async () => DEFAULT_UNITS })
+      }
+      if (url.includes('/periods')) return new Promise<never>(() => {}) // treo mãi
+      throw new Error(`URL không lường trước: ${url}`)
+    })
+    vi.stubGlobal('fetch', f)
+    renderDashboard('/dashboard?period=2026-10')
+
+    expect(await screen.findByTestId('skeleton')).toBeTruthy()
+    // Khẳng định ngay-lập-tức ở trên đúng cả khi SAI (đo trước khi summary/units kịp chạy hết chuỗi
+    // await + cập nhật React). Đợi một nhịp macrotask THẬT rồi đo lại — khuôn ca B7/N35 ngay trên.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50))
+    })
+    expect(screen.getByTestId('skeleton')).toBeTruthy()
+    expect(screen.queryByRole('table')).toBeNull()
+    expect(screen.queryByText(/Chưa có báo cáo được duyệt/)).toBeNull()
+  })
+
+  // Dùng CHUNG một queryKey với Status.tsx (`['templates','FM01','periods']`) là điều kiện để hai
+  // trang không gọi hai lần — khoá luôn đường dẫn, vì một queryKey trùng mà URL lệch thì cache
+  // dùng chung sẽ phát dữ liệu sai cho một trong hai trang.
+  it('hỏi ĐÚNG /templates/FM01/periods — cùng nguồn Status.tsx dùng', async () => {
+    const f = moiApi()
+    renderDashboard()
+    await screen.findByText('PTSC Đình Vũ')
+    expect(f.mock.calls.map(([u]) => String(u)).some((u) => u.includes('/templates/FM01/periods'))).toBe(true)
   })
 })
 
