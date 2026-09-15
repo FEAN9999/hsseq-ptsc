@@ -49,10 +49,17 @@ def main(argv: list[str]) -> None:
     # server sẽ bị hiểu nhầm thành "local" và lọt qua cầu chì.
     app_env = os.environ.get("APP_ENV")
     if app_env not in MOI_TRUONG_AN_TOAN:
-        hien_tai = "chưa được đặt" if app_env is None else f'"{app_env}"'
+        # Dựng nguyên MỆNH ĐỀ đầu, KHÔNG nhét một cụm vào giữa khung cố định
+        # "APP_ENV đang là {…}": nhét cụm thì ca thiếu biến in ra "APP_ENV đang
+        # là chưa được đặt, …" — sai ngữ pháp, và người đọc câu này đang cứu hộ
+        # giữa buổi demo. Ca canh: tests/api/test_reset_demo.py::
+        # test_thong_bao_tu_choi_neu_ro_gia_tri_APP_ENV_hien_tai (khoá nguyên
+        # mệnh đề bằng startswith, không phải dò mẩu chuỗi).
+        ve_dau = ("APP_ENV chưa được đặt" if app_env is None
+                  else f'APP_ENV đang là "{app_env}"')
         ds_an_toan = ", ".join(sorted(MOI_TRUONG_AN_TOAN))
         print(
-            f"APP_ENV đang là {hien_tai}, không thuộc các môi trường an toàn: "
+            f"{ve_dau}, không thuộc các môi trường an toàn: "
             f"{ds_an_toan}. Từ chối chạy để tránh xoá nhầm dữ liệu thật. Nếu "
             f"đang chạy từ terminal, đặt biến ngay trên dòng lệnh: "
             f"APP_ENV=local .venv/bin/python -m scripts.reset_demo --yes"

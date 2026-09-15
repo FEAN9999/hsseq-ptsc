@@ -98,23 +98,37 @@ def test_tu_choi_khi_APP_ENV_khong_dat(monkeypatch, chan_lop_dung_db):
 
 
 def test_thong_bao_tu_choi_neu_ro_gia_tri_APP_ENV_hien_tai(monkeypatch, capsys):
-    """Thông báo từ chối phải nói rõ APP_ENV đang là gì, không chỉ thoát im lặng.
+    """Thông báo từ chối phải nói rõ APP_ENV đang là gì, và nói ĐÚNG NGỮ PHÁP.
 
     (task-14-fix-brief.md S5) Giá trị nêu bằng ngoặc kép thường ("production"),
-    không phải repr() kiểu Python ('production') — đổi assert cũ theo đúng
-    format mới, không đổi ý nghĩa của test.
+    không phải repr() kiểu Python ('production').
+
+    (final-fix-brief.md §F1) Bản cũ dựng câu bằng cách nhét một CỤM vào giữa
+    khung cố định "APP_ENV đang là {…}, …", nên ca thiếu biến in ra "APP_ENV
+    đang là chưa được đặt, …". Người đọc câu này đang cứu hộ giữa buổi demo.
+    Hai assert `in` cũ ('"production"' và "chưa được đặt") vẫn XANH nguyên với
+    câu sai ngữ pháp đó — chúng chỉ hỏi "mẩu này có nằm đâu đó trong câu
+    không". Nên khoá nguyên MỆNH ĐỀ ĐẦU bằng `startswith`, cộng danh sách môi
+    trường an toàn (trước đây không ca nào khoá). Vế "nêu lệnh gõ lại" do
+    test_thong_bao_APP_ENV_chi_duong_lenh_dung giữ.
     """
     from scripts.reset_demo import main
 
     monkeypatch.setenv("APP_ENV", "production")
     with pytest.raises(SystemExit):
         main(["--yes"])
-    assert '"production"' in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert out.startswith('APP_ENV đang là "production", '), out
+    # Danh sách viết thẳng, KHÔNG dựng lại từ MOI_TRUONG_AN_TOAN: dựng lại thì
+    # hai vế cùng dịch khi hằng đổi và test hết nhìn thấy gì.
+    assert "môi trường an toàn: demo, local, test." in out
 
     monkeypatch.delenv("APP_ENV", raising=False)
     with pytest.raises(SystemExit):
         main(["--yes"])
-    assert "chưa được đặt" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert out.startswith("APP_ENV chưa được đặt, "), out
+    assert "môi trường an toàn: demo, local, test." in out
 
 
 def test_thong_bao_APP_ENV_chi_duong_lenh_dung(monkeypatch, capsys):
