@@ -1,4 +1,9 @@
 {
+  "build": {
+    "env": {
+      "VITE_API_BASE": "https://hsseq-ptsc-api.onrender.com/api/v1"
+    }
+  },
   "rewrites": [
     { "source": "/(.*)", "destination": "/index.html" }
   ]
