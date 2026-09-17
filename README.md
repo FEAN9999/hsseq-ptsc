@@ -157,20 +157,24 @@ theo tiền tố chuỗi: `localhost`, `127.0.0.1`, `0.0.0.0`, `::1` và `*.loca
 
 ## Deploy
 
-Bản demo dự kiến chạy trên **Vercel** (frontend) + **Render** (backend) + **Supabase** (database),
-giữ ấm bằng **UptimeRobot**. **Chưa có project nào trong bốn dịch vụ này được tạo** — mục này mô tả
-cách làm và những gì đã kiểm chứng được TRÊN MÁY NÀY, không phải một bản deploy cloud thật đã chạy
-qua.
+Bản demo chạy trên **Vercel** (frontend) + **Render** (backend) + **Supabase** (database), giữ ấm
+bằng **UptimeRobot**. Ba dịch vụ đầu **đã dựng và đã đo thật** (2026-09-17):
 
-Bốn việc dưới đây nằm NGOÀI máy này — của Chồng yêu, không phải việc của subagent (tạo tài khoản /
-cấu hình dịch vụ ngoài, hoặc repo chưa có remote nào để push):
+| Nơi | Địa chỉ | Ghi chú |
+|---|---|---|
+| Frontend | https://hsseq-ptsc.vercel.app | Vercel hobby, root `frontend/`, Production Branch `main` |
+| Backend | https://hsseq-ptsc-api.onrender.com | Render free, Docker (context `backend/`), region Singapore |
+| Database | project `hsseq-ptsc` (`bagcgihnieunmmwczqjz`) | Supabase free, region `ap-southeast-1`, Postgres 17.6 |
+
+Nhánh deploy là **`main`**, không phải `demo`: nhánh `main` trên GitHub từng là nhánh mồ côi chỉ có
+một file README, đã được ghi đè bằng `master` để Vercel/Render deploy đúng mã. Đẩy mã lên `main` là
+tự động deploy cả hai nơi.
+
+Còn lại một việc ngoài máy này, của Chồng yêu:
 
 | Việc | Ghi chú |
 |---|---|
-| Tạo project Vercel — root `frontend/`, build `npm run build`, output `dist`, Production Branch = `demo` | Đặt biến `VITE_API_BASE` ở đây (xem dưới) |
-| Sửa `CORS_ORIGINS` trên Render | Thêm domain Vercel, **giữ cả** `http://localhost:5173`, ngăn bằng dấu phẩy |
-| `gh repo create` (hoặc tương đương) rồi `git push` | Repo này **hiện không có remote nào** — cố ý |
-| Tạo monitor UptimeRobot | HTTP(s), URL `https://<render-app>.onrender.com/api/v1/health`, mỗi 5 phút |
+| Tạo monitor UptimeRobot | HTTP(s), URL `https://hsseq-ptsc-api.onrender.com/api/v1/health`, mỗi 5 phút. Thiếu nó thì Render free ngủ sau 15 phút, lần đánh thức đầu ~50 giây |
 
 Trên Render, nhớ thêm `APP_ENV=demo`: thiếu biến này thì cầu chì fail-closed của
 `backend/scripts/reset_demo.py` từ chối chạy — đúng sáng demo sẽ không reset được dữ liệu.
@@ -203,20 +207,25 @@ Kết nối Supabase: xem mục ngay dưới đây.
 
 ## Kết nối Supabase
 
-Tạo project Supabase và nhập mật khẩu database là việc của Chồng yêu — hành động ngoài máy này, không phải việc của subagent.
+Project đã dựng xong (xem bảng ở mục Deploy). Checklist dưới đây giữ lại vì nó là thứ tự đã chạy
+đúng một lần, và là thứ phải làm lại nếu có ai dựng lại từ đầu.
 
 Checklist khi dựng:
 
-- [ ] Tạo project Supabase, region Singapore. Lưu lại mật khẩu database (Supabase chỉ hiện một lần).
-- [ ] Supabase → Connect → chọn **Session pooler**, cổng **5432** (host dạng `aws-0-<region>.pooler.supabase.com`).
+- [x] Tạo project Supabase, region Singapore. Lưu lại mật khẩu database (Supabase chỉ hiện một lần).
+- [x] Supabase → Connect → chọn **Session pooler**, cổng **5432** (host dạng `aws-0-<region>.pooler.supabase.com`).
   - **Không** dùng *Direct connection* — chỉ IPv6, Render free không ra được.
   - **Không** dùng *Transaction pooler* (cổng **6543**) — không hợp với connection pool của SQLAlchemy ở `app/core/db.py`.
-- [ ] Giữ `?sslmode=require` ở cuối chuỗi.
-- [ ] Thử tại chỗ bằng `create_engine` + `select version()`; kỳ vọng in ra `PostgreSQL 15.x ...`. Lỗi `Network is unreachable` nghĩa là đang cầm nhầm chuỗi Direct connection — quay lại bước chọn pooler.
-- [ ] Dán chuỗi đã chạy được vào đây, **che mật khẩu**:
+- [x] Giữ `?sslmode=require` ở cuối chuỗi.
+- [x] Thử tại chỗ bằng `create_engine` + `select version()`; kỳ vọng in ra `PostgreSQL 17.x ...`. Lỗi `Network is unreachable` nghĩa là đang cầm nhầm chuỗi Direct connection — quay lại bước chọn pooler.
+- [x] Dán chuỗi đã chạy được vào đây, **che mật khẩu**:
 
   ```
   postgresql+psycopg://postgres.<project-ref>:***@aws-0-<region>.pooler.supabase.com:5432/postgres?sslmode=require
   ```
 
-  _(placeholder — chưa có project Supabase thật nên chưa có chuỗi thật để dán)_
+  Chuỗi đang dùng thật (đã che mật khẩu) — đặt ở biến `DATABASE_URL` trên Render:
+
+  ```
+  postgresql+psycopg://postgres.bagcgihnieunmmwczqjz:***@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres?sslmode=require
+  ```
