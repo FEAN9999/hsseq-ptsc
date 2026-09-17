@@ -19,19 +19,26 @@
 //
 // 4. Ô CHỈ ĐỌC LÀ `<td>` CHỮ THƯỜNG, không phải `<input disabled>` (a11y, Pass 6) — và nhờ đó
 //    thứ tự Tab mặc định của trình duyệt đã tự bỏ qua chúng (xem useKeyboardNav.tsx).
-import { useEffect, useMemo, useReducer, useRef } from 'react'
+import { useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { useBlocker } from 'react-router-dom'
+import { History, Lock, Sparkles, Table2 } from 'lucide-react'
 
+import { Badge } from '../../components/ui/badge'
 import { Banner } from '../../components/ui/Banner'
 import { DialogXacNhan } from '../../components/ui/DialogXacNhan'
 import { useSession } from '../../app/session'
 import type { ApiErrorItem } from '../../api/client'
 import { parseViNumber } from '../../lib/parseViNumber'
-import { formatDateTime, formatPeriod } from '../../lib/format'
+import { formatDateTime } from '../../lib/format'
 import { cellPolicy, type AggType, type Cell, type Mode } from './cellPolicy'
 import { NumberCell, dinhDangSoBang, type NumberCellProps } from './NumberCell'
-import { FormHeader, MA_NHOM_PHAN_DAU, coPhanDau } from './FormHeader'
+import { FormHeader } from './FormHeader'
 import { FormModeBar, maNeo } from './FormModeBar'
+import { LichSuThaoTac } from './LichSuThaoTac'
+import { NhacTruocDuyet } from './NhacTruocDuyet'
+import { TienDoNhap } from './TienDoNhap'
+import { tinhTienDo, type DemNhom } from './tienDo'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../components/ui/tabs'
 import { GroupHeader, type NhomMau } from './GroupHeader'
 import { useKeyboardNav } from './useKeyboardNav'
 import { useSaveValues, type KetQuaLuu, type ODoi } from './useSaveValues'
@@ -527,9 +534,24 @@ export function ReportForm({ mau, chiTiet, loiLamMoi = false }: ReportFormProps)
   }, [s.daBamNop, s.nhap, mau.indicators])
 
   // D25: bộ đếm lệch công thức mà dòng đó chưa có ghi chú — không chặn nộp, chỉ nói ra.
-  const soDemLech = mau.indicators.filter(
-    (ct) => s.server[ct.code]?.counter_check?.status === 'lech' && (s.ghiChu[ct.code] ?? '') === '',
-  ).length
+  // Giữ cả MÃ chứ không chỉ đếm: khối nhắc đầu form liệt tên chỉ tiêu và neo "Tới ô đầu" vào cái
+  // đầu tiên, nên một con số trần không đủ. `soDemLech` vẫn là chính nó — `.length` của danh sách
+  // này — để chân trang và khối nhắc không thể lệch nhau.
+  const maLech = mau.indicators
+    .filter((ct) => s.server[ct.code]?.counter_check?.status === 'lech' && (s.ghiChu[ct.code] ?? '') === '')
+    .map((ct) => ct.code)
+  const soDemLech = maLech.length
+
+  // Tiến độ nhập (mockup 04). Mẫu số dùng CHUNG vị ngữ với `thieuBatBuoc` ở trên — xem tienDo.ts.
+  const tienDo = useMemo(() => tinhTienDo(mau.sections, mau.indicators, s.nhap), [mau, s.nhap])
+  const demTheoNhom = useMemo(() => new Map(tienDo.nhom.map((n) => [n.code, n])), [tienDo])
+
+  /** Đúng các nhóm CÓ HÀNG trong bảng — cũng đúng tập hợp mà dải chip nhảy tới được. Nhóm A (5 ô
+   *  phần đầu, do `FormHeader` dựng) và C (3 ô văn bản, nay là một tab riêng) không sinh hàng nào
+   *  nên không có mặt ở đây: một cái chip trỏ vào chỗ không có gì tệ hơn là không có chip. */
+  const nhomHienTrongBang = useMemo(() => nhomCoDong.map((g) => g.nhom), [nhomCoDong])
+
+  const [tab, setTab] = useState('chi-tieu')
 
   /** Dán một cột từ Excel (task-22-carry.md C10): `NumberCell` trả CHUỖI THÔ, nơi phân tích là
    * đây — mỗi dòng đích phân tích bằng `decimals` CỦA CHÍNH NÓ. Phân tích bằng `decimals` của ô
@@ -589,7 +611,11 @@ export function ReportForm({ mau, chiTiet, loiLamMoi = false }: ReportFormProps)
   const dangHoi = chuyen.dangHoi
 
   return (
-    <div ref={formRef}>
+    // Cột flex cao hết khung nhìn để `FormModeBar` (`sticky bottom-0`) luôn nằm ở ĐÁY màn hình,
+    // kể cả khi tab đang mở ngắn hơn một trang — tab "Lịch sử thao tác" của một báo cáo mới nạp
+    // chỉ có một dòng. `sticky` chỉ dính khi có gì để cuộn; thiếu chuỗi flex này thì thanh nút
+    // đứng lửng ngay dưới dòng đó, giữa một trang trắng.
+    <div ref={formRef} className="flex flex-1 flex-col">
       <FormHeader
         dau={chiTiet.header}
         state={trangThaiHienTai}
@@ -658,31 +684,51 @@ export function ReportForm({ mau, chiTiet, loiLamMoi = false }: ReportFormProps)
         </Banner>
       )}
 
-      {/* `role="status"` cùng lý do với banner trả lại (fix-1 S12) — banner 409 ở trên mới là
-          sự kiện thật, nó giữ `role="alert"`. */}
-      {chiTiet.missing_periods.length > 0 && (
-        <Banner kind="gray">
-          <span role="status">
-            Lũy kế chưa tính kỳ {chiTiet.missing_periods.map(formatPeriod).join(', ')} (chưa duyệt). Cột "Lũy kế
-            tháng trước" sẽ đổi khi kỳ đó được duyệt.
-          </span>
-        </Banner>
-      )}
+      {/* Ba tab của mockup 04. CÓ ĐIỀU KHIỂN (`value`/`onValueChange`) chứ không để Radix tự giữ:
+          các neo "Thiếu N ô bắt buộc" ở chân trang trỏ vào hàng trong tab Chỉ tiêu, nên bấm chúng
+          lúc đang đứng ở tab khác phải kéo tab về trước rồi mới nhảy — nếu không, cú bấm không
+          làm gì cả và người dùng không biết vì sao. */}
+      <Tabs value={tab} onValueChange={setTab} className="flex-1">
+        <TabsList className="mb-3">
+          <TabsTrigger value="chi-tieu">
+            <Table2 />
+            Chỉ tiêu
+          </TabsTrigger>
+          <TabsTrigger value="hoat-dong">
+            <Sparkles />
+            Hoạt động nổi bật
+          </TabsTrigger>
+          <TabsTrigger value="lich-su">
+            <History />
+            Lịch sử thao tác
+          </TabsTrigger>
+        </TabsList>
 
-      {/* Dưới 1280px, mục lục KHÔNG còn là một cột bên phải mà xuống thành một dải nằm TRÊN bảng.
-          Lý do là số học: ở 1024px (đúng 1280 xem ở 125%, viewport `zoom-125` của bộ e2e) chỗ
-          trống thật chỉ 1024 − 256 sidebar − 48 đệm = 720px; cắt thêm 176px cho mục lục thì bảng
-          còn 528px và hai cột phải nằm ngoài tầm nhìn — đúng lúc người trình bày phóng to để dễ
-          đọc thì lại mất cột "Cộng dồn" vừa đổi. Xuống dải thì bảng lấy trọn 720px và vừa khít.
-          Mục lục vẫn nằm nguyên trong DOM ở mọi bề rộng — không `display:none`, không đánh đổi
-          bằng việc bộ test jsdom (không nạp CSS) xanh vì một lý do không có thật trên trình duyệt. */}
-      <div className="grid grid-cols-1 items-start gap-3 xl:grid-cols-[1fr_176px] xl:gap-4">
-        <div
-          // Khung cuộn RIÊNG của bảng, cuộn cả hai chiều: header cột `sticky top-0` chỉ dính được
-          // bên trong một khung CÓ cuộn dọc. `overflow-x-auto` trần (như bản vẽ tĩnh viết) biến
-          // khung thành vùng cuộn nhưng cao bằng nội dung, nên không có gì để dính vào và header
-          // trôi mất theo trang. Cao tối đa = màn hình trừ dải đầu + thanh dưới.
-          className="order-2 min-w-0 max-h-[calc(100vh-13rem)] overflow-auto border border-border bg-card rounded-xl xl:order-1"
+        {/* Khối nhắc đứng NGOÀI tab: hai điểm nó nói (lũy kế chưa tính, bộ đếm lệch) đúng với cả
+            báo cáo, không riêng tab nào — và nó là thứ phải đọc TRƯỚC khi bấm nút ở chân trang,
+            dù đang đứng ở tab nào. */}
+        <NhacTruocDuyet
+          kyChuaTinh={chiTiet.missing_periods}
+          maLech={maLech}
+          coQuyenDuyet={quyen.has('report.approve')}
+          onNhayToiO={() => setTab('chi-tieu')}
+        />
+
+        <TabsContent value="chi-tieu">
+          <TienDoNhap sections={nhomHienTrongBang} tienDo={tienDo} />
+
+          {/* Bảng nay chiếm TRỌN bề rộng: cột mục lục 176px bên phải đã nhường chỗ cho dải chip
+              trong thẻ Tiến độ nhập ở trên. Ở 1024px (đúng 1280 xem ở 125%, viewport `zoom-125`
+              của bộ e2e) chỗ trống thật là 1024 − 256 sidebar − 48 đệm = 720px; trước đây cắt
+              thêm 176px cho mục lục thì bảng còn 528px và hai cột phải nằm ngoài tầm nhìn. Nay
+              không phải cắt gì cả. */}
+          <div
+            // Khung cuộn RIÊNG của bảng, cuộn cả hai chiều: header cột `sticky top-0` chỉ dính
+            // được bên trong một khung CÓ cuộn dọc. `overflow-x-auto` trần (như bản vẽ tĩnh viết)
+            // biến khung thành vùng cuộn nhưng cao bằng nội dung, nên không có gì để dính vào và
+            // header trôi mất theo trang. Cao tối đa = màn hình trừ dải đầu, tab, thẻ tiến độ và
+            // thanh dưới.
+            className="min-w-0 max-h-[calc(100vh-17rem)] overflow-auto rounded-xl border border-border bg-card"
         >
           {/* `min-w-[700px]` đặt trên BẢNG, không phải trên từng cột: đó là bề rộng tối thiểu để
               bảy cột còn đọc được, và dưới ngưỡng đó thì cuộn ngang TRONG khung là hành vi đúng.
@@ -724,6 +770,7 @@ export function ReportForm({ mau, chiTiet, loiLamMoi = false }: ReportFormProps)
                   nhom={nhom}
                   ds={ds}
                   soCot={soCot}
+                  dem={demTheoNhom.get(nhom.code)}
                   s={s}
                   suaDuoc={suaDuoc}
                   coCotLech={coCotLech}
@@ -737,53 +784,37 @@ export function ReportForm({ mau, chiTiet, loiLamMoi = false }: ReportFormProps)
           </table>
         </div>
 
-        {/* Mục lục liệt ĐỦ `mau.sections`, kể cả A (5 ô phần đầu) và C (3 ô văn bản dưới bảng) —
-            hai nhóm đó không sinh hàng nào trong bảng nhưng vẫn là hai đích nhảy mà approve.html
-            vẽ rõ; nhóm C nằm dưới 53 dòng nên mất mục lục là mất đúng cú nhảy một phát (fix-1 S6).
-            Lọc `nhomCoDong` chỉ đúng cho HÀNG TIÊU ĐỀ trong bảng, không đúng cho điều hướng trang. */}
-        <nav
-          // Dải hẹp: MỘT dòng cuộn ngang, không phải khối tự xuống dòng — ở 640px chiều cao (viewport
-          // `zoom-125`) một khối ba dòng ăn mất ~90px, đúng phần chỗ mà bảng 53 dòng đang cần.
-          className="order-1 flex gap-x-1 overflow-x-auto rounded-xl border border-border bg-card p-1.5 text-xs xl:sticky xl:top-4 xl:order-2 xl:block xl:overflow-visible xl:p-0 xl:py-2.5"
-        >
-          {/* P7 (Ruling 427): bỏ ĐÚNG mục A khi `FormHeader` không dựng khối phần đầu — cùng vị từ
-              `coPhanDau`, không phải một điều kiện chép lại. Lọc theo MÃ chứ không theo "nhóm có
-              sinh hàng không": lọc kiểu sau nuốt luôn C (3 ô văn bản dưới bảng), đúng lỗi fix-1 S6
-              đã sửa một lần rồi. */}
-          {mau.sections
-            .filter((nhom) => nhom.code !== MA_NHOM_PHAN_DAU || coPhanDau(chiTiet.header))
-            .map((nhom) => (
-              <a
-                key={nhom.code}
-                href={`#${nhom.code}`}
-                className="shrink-0 whitespace-nowrap rounded-md px-2 py-1 text-secondary-foreground no-underline hover:bg-muted xl:block xl:whitespace-normal xl:rounded-none xl:px-3 xl:py-1.5"
-              >
-                {nhom.code}. {nhom.name_vi}
-              </a>
-            ))}
-        </nav>
-      </div>
+        </TabsContent>
 
-      <div id="C" className="mt-4 grid gap-3 scroll-mt-20">
-        {mau.text_fields.map((tf) => (
-          <OChu
-            key={tf.code}
-            ma={tf.code}
-            nhan={tf.label_vi}
-            noiDung={s.chu[tf.code] ?? ''}
-            suaDuoc={suaDuoc}
-            onDoi={(noiDung) => dispatch({ type: 'chu', ma: tf.code, noiDung })}
-            // Cùng cơ chế với ô "Ghi chú" của từng chỉ tiêu: chốt lúc RỜI Ô, và chỉ khi khác bản
-            // server đang giữ — Tab ngang qua một ô chữ không được sinh ra `PUT` nào. Bản server
-            // đọc từ `chiTiet.texts` (làm mới sau mỗi lần lưu nhờ `invalidateReportQueries`);
-            // `PutValuesOut` không trả `texts` nên đây là nguồn duy nhất.
-            onRoiO={() => {
-              const dangGo = s.chu[tf.code] ?? ''
-              if (dangGo !== (chiTiet.texts[tf.code] ?? '')) luuGiaTri.markDirtyChu(tf.code, dangGo)
-            }}
-          />
-        ))}
-      </div>
+        {/* Nhóm C lên thành MỘT TAB riêng, đúng mockup 04. Trước đây ba ô văn bản nằm dưới 53
+            dòng bảng, và mục lục tồn tại một phần chính vì cú nhảy xuống đó (fix-1 S6). Tab trả
+            lời cùng nhu cầu ấy bằng một cú bấm, và không phải cuộn qua 53 dòng. */}
+        <TabsContent value="hoat-dong" className="grid gap-3 md:grid-cols-3">
+          {mau.text_fields.map((tf) => (
+            <OChu
+              key={tf.code}
+              ma={tf.code}
+              nhan={tf.label_vi}
+              noiDung={s.chu[tf.code] ?? ''}
+              suaDuoc={suaDuoc}
+              onDoi={(noiDung) => dispatch({ type: 'chu', ma: tf.code, noiDung })}
+              // Cùng cơ chế với ô "Ghi chú" của từng chỉ tiêu: chốt lúc RỜI Ô, và chỉ khi khác
+              // bản server đang giữ — Tab ngang qua một ô chữ không được sinh ra `PUT` nào. Bản
+              // server đọc từ `chiTiet.texts` (làm mới sau mỗi lần lưu nhờ
+              // `invalidateReportQueries`); `PutValuesOut` không trả `texts` nên đây là nguồn duy
+              // nhất.
+              onRoiO={() => {
+                const dangGo = s.chu[tf.code] ?? ''
+                if (dangGo !== (chiTiet.texts[tf.code] ?? '')) luuGiaTri.markDirtyChu(tf.code, dangGo)
+              }}
+            />
+          ))}
+        </TabsContent>
+
+        <TabsContent value="lich-su">
+          <LichSuThaoTac id={chiTiet.id} chuyen={mau.transitions} />
+        </TabsContent>
+      </Tabs>
 
       <FormModeBar
         chuyenDuoc={chuyenDuoc}
@@ -794,6 +825,9 @@ export function ReportForm({ mau, chiTiet, loiLamMoi = false }: ReportFormProps)
         soDemLech={soDemLech}
         onLuu={luu}
         onChuyenTrangThai={bamChuyenTrangThai}
+        // Neo "Thiếu N ô bắt buộc" trỏ vào hàng trong tab Chỉ tiêu. Bấm nó lúc đang đứng ở tab
+        // khác thì hàng đó chưa có trong DOM — kéo tab về trước, rồi trình duyệt mới nhảy được.
+        onNhayToiO={() => setTab('chi-tieu')}
       />
 
       {/* MỘT cổng duy nhất: `dangHoi !== null` vừa là điều kiện dựng vừa là "hộp thoại đang mở".
@@ -857,6 +891,7 @@ function Nhom({
   nhom,
   ds,
   soCot,
+  dem,
   s,
   suaDuoc,
   coCotLech,
@@ -868,6 +903,8 @@ function Nhom({
   nhom: NhomMau
   ds: ChiTieuMau[]
   soCot: number
+  /** Đếm ô bắt buộc của nhóm, lấy từ `tinhTienDo`. `undefined` = nhóm không có ô nào để đếm. */
+  dem: DemNhom | undefined
   s: TrangThaiForm
   suaDuoc: boolean
   coCotLech: boolean
@@ -878,7 +915,12 @@ function Nhom({
 }) {
   return (
     <>
-      <GroupHeader nhom={nhom} soCot={soCot} />
+      <GroupHeader
+        nhom={nhom}
+        soCot={soCot}
+        soChiTieu={ds.length}
+        soThieu={dem === undefined ? 0 : dem.tong - dem.daNhap}
+      />
       {ds.map((ct) => (
         <Dong
           key={ct.code}
@@ -942,9 +984,14 @@ function Dong({
         {ct.formula && (
           // D9: dòng tự tính nói bằng icon khoá + title công thức, KHÔNG bằng một dòng chữ giải
           // thích dưới dòng (ghi chú wireframe lọt thành footer là một hard rejection).
-          <span className="ml-1 text-[11px] text-muted-foreground" title={`Tự tính = ${ct.formula.split(',').join(' + ')}`}>
-            🔒 tự tính
-          </span>
+          <Badge
+            variant="secondary"
+            className="ml-1.5 gap-1 px-1.5 py-0 align-middle text-[11px] font-normal text-muted-foreground"
+            title={`Tự tính = ${ct.formula.split(',').join(' + ')}`}
+          >
+            <Lock className="size-3" />
+            tự tính
+          </Badge>
         )}
         {lech && <span className="block text-[11px] leading-[1.3] text-warning-foreground whitespace-normal">{lech}</span>}
       </td>
@@ -1029,12 +1076,19 @@ function OChu({
   onDoi: (noiDung: string) => void
   onRoiO: () => void
 }) {
+  // Mockup 04 vẽ ba ô chữ thành ba THẺ đứng cạnh nhau, không phải ba khối xếp chồng dưới bảng:
+  // C1/C2/C3 là ba câu hỏi ngang hàng (đã làm gì · sắp làm gì · đề nghị gì), và xếp chồng làm
+  // chúng đọc như ba bước nối tiếp.
   return (
-    <div>
+    <section className="flex flex-col rounded-xl border border-border bg-card px-5 py-4">
       {suaDuoc ? (
         <>
-          <label htmlFor={`chu-${ma}`} className="block text-xs font-medium text-secondary-foreground mb-1">
-            {ma}. {nhan}
+          <label
+            htmlFor={`chu-${ma}`}
+            className="mb-2 flex items-center gap-2 text-sm font-semibold text-foreground"
+          >
+            <span className="font-mono text-[11.5px] font-medium text-primary">{ma}</span>{' '}
+            {nhan}
           </label>
           <textarea
             id={`chu-${ma}`}
@@ -1047,22 +1101,25 @@ function OChu({
               onDoi(e.target.value)
             }}
             onBlur={onRoiO}
-            className="block w-full min-h-24 border border-border rounded-md px-2.5 py-2 bg-card text-sm text-secondary-foreground focus:outline-2 focus:outline-ring focus:-outline-offset-2"
+            className="block min-h-24 w-full flex-1 rounded-md border border-border bg-card px-2.5 py-2 text-sm leading-[1.6] text-secondary-foreground focus:outline-2 focus:-outline-offset-2 focus:outline-ring"
           />
-          <div className="text-[11px] text-muted-foreground text-right mt-0.5">
+          <div className="mt-1.5 text-right font-mono text-[11px] tnum text-muted-foreground">
             {noiDung.length}/{TOI_DA_CHU}
           </div>
         </>
       ) : (
         <>
-          <div className="block text-xs font-medium text-secondary-foreground mb-1">
-            {ma}. {nhan}
+          <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-foreground">
+            <span className="font-mono text-[11.5px] font-medium text-primary">{ma}</span>{' '}
+            {nhan}
           </div>
-          <div className="min-h-24 border border-border rounded-md px-2.5 py-2 bg-card text-sm text-secondary-foreground whitespace-pre-wrap">
-            {noiDung}
+          {/* Chỉ đọc: KHÔNG vẽ viền ô nhập. Một cái hộp rỗng hình ô nhập trên báo cáo đã duyệt mời
+              người ta bấm vào rồi mới phát hiện không gõ được. Ô trống thì nói ra là trống. */}
+          <div className="flex-1 text-sm leading-[1.6] whitespace-pre-wrap text-secondary-foreground">
+            {noiDung === '' ? <span className="text-muted-foreground">Không có nội dung</span> : noiDung}
           </div>
         </>
       )}
-    </div>
+    </section>
   )
 }

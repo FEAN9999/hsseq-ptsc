@@ -56,6 +56,7 @@ export function FormModeBar({
   soDemLech,
   onLuu,
   onChuyenTrangThai,
+  onNhayToiO,
 }: {
   chuyenDuoc: ChuyenTrangThai[]
   suaDuoc: boolean
@@ -71,6 +72,9 @@ export function FormModeBar({
   soDemLech: number
   onLuu: () => void
   onChuyenTrangThai: (chuyen: ChuyenTrangThai) => void
+  /** Gọi TRƯỚC khi trình duyệt nhảy tới một ô còn thiếu. Form dùng nó để kéo tab "Chỉ tiêu" về
+   *  trước — neo trỏ vào hàng nằm trong tab đó, và tab đang ẩn thì hàng chưa có trong DOM. */
+  onNhayToiO?: () => void
 }) {
   const hienThi = thieuBatBuoc.slice(0, MA_HIEN_TOI_DA)
   const cauDan = cauBaoDan(boQuaKhiDan, tranKhiDan)
@@ -87,7 +91,12 @@ export function FormModeBar({
           <span className="text-destructive">
             Thiếu {thieuBatBuoc.length} ô bắt buộc:{' '}
             {hienThi.map((ma) => (
-              <a key={ma} href={`#${maNeo(ma)}`} className="text-destructive font-medium underline mr-1.5">
+              <a
+                key={ma}
+                href={`#${maNeo(ma)}`}
+                onClick={onNhayToiO}
+                className="text-destructive font-medium underline mr-1.5"
+              >
                 {ma}
               </a>
             ))}

@@ -19,7 +19,20 @@ export interface NhomMau {
   name_en: string
 }
 
-export function GroupHeader({ nhom, soCot }: { nhom: NhomMau; soCot: number }) {
+export function GroupHeader({
+  nhom,
+  soCot,
+  soChiTieu,
+  soThieu,
+}: {
+  nhom: NhomMau
+  soCot: number
+  /** Số dòng chỉ tiêu nhóm này có — KỂ CẢ dòng tự tính, vì người đọc đang đếm dòng trên màn hình. */
+  soChiTieu: number
+  /** Số ô BẮT BUỘC của nhóm còn trống. Đếm ở `tienDo.ts`, không đếm lại ở đây: dải chip, thanh
+   *  tiến độ và hàng này phải không bao giờ nói ba con số khác nhau về cùng một nhóm. */
+  soThieu: number
+}) {
   return (
     <tr id={nhom.code} className="scroll-mt-20">
       <td
@@ -28,6 +41,12 @@ export function GroupHeader({ nhom, soCot }: { nhom: NhomMau; soCot: number }) {
       >
         {nhom.code}. {nhom.name_vi}
         <small className="ml-2 font-normal text-[11px] text-sec">{nhom.name_en}</small>
+        {/* Bộ đếm đứng bên PHẢI hàng, tách khỏi tên nhóm: nó trả lời "nhóm này còn nợ gì" trong
+            lúc mắt đang trôi dọc 53 dòng, nên nó phải ở một cột mắt biết trước chỗ. */}
+        <span className="float-right font-normal text-[11px] text-sec">
+          {soChiTieu} chỉ tiêu
+          {soThieu > 0 && <span className="ml-1.5 font-medium text-warning-foreground">· {soThieu} thiếu</span>}
+        </span>
       </td>
     </tr>
   )

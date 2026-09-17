@@ -79,7 +79,9 @@ export function ReportDetail() {
   if (baoCao.data === undefined || mau.data === undefined) return <SkeletonDong rows={20} />
 
   return (
-    <div>
+    // `min-h-full` + cột flex: xem chú thích ở `ReportForm` — đây là mắt đầu của chuỗi đẩy thanh
+    // thao tác xuống đáy khung nhìn khi tab đang mở có ít nội dung.
+    <div className="flex min-h-full flex-col">
       {/* NÚT QUAY LẠI, không phải một vệt breadcrumb thứ hai. Thanh đầu trang của AppShell (Lát 1)
           đã có breadcrumb; vế sau của vệt cũ ("<đơn vị> · <kỳ>") lặp đúng chữ của <h1> ngay dưới
           nó, nên bỏ đi không mất thông tin nào. Chữ của nút vẫn đi theo QUYỀN — người duyệt tới

@@ -18,7 +18,7 @@
 // PHẢI `npm run build` trước khi chạy file này: các khẳng định màu banner đọc CSS THẬT đã build
 // (`resolveCascadeWinner`, task-20-carry.md C4) chứ không hỏi `className.includes`.
 import { createContext, useContext, useState, type ReactElement, type ReactNode } from 'react'
-import { act, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Link, RouterProvider, createMemoryRouter } from 'react-router-dom'
@@ -30,6 +30,29 @@ import { useSession } from '../../app/session'
 import { resolveCascadeWinner } from '../../components/ui/cascade'
 
 const CATALOG = (await import('../../test/fixtures/fm01-catalog.json')).default
+
+// Ba ô chữ nhóm C nay nằm trong tab "Hoạt động nổi bật" (mockup 04), và Radix gỡ nội dung tab
+// không hoạt động khỏi DOM — nên mọi ca chạm tới chúng phải mở tab trước. Radix đổi tab ở
+// `mousedown`, KHÔNG phải `click`, nên `fireEvent.click` ở đây sẽ im lặng không làm gì.
+function moTabC() {
+  const tab = screen.getByRole('tab', { name: 'Hoạt động nổi bật' })
+  if (tab.getAttribute('aria-selected') !== 'true') fireEvent.mouseDown(tab)
+}
+
+/** Ô chữ nhóm C, tự mở tab chứa nó. Gọi nhiều lần vô hại. */
+function oChu(nhan: string): HTMLTextAreaElement {
+  moTabC()
+  return screen.getByLabelText(nhan) as HTMLTextAreaElement
+}
+
+/** Mọi neo `#x` đang có trên trang đều phải có đích thật. Thay cho các khẳng định đếm mục lục cũ:
+ *  dải chip của thẻ "Tiến độ nhập" chỉ liệt nhóm CÓ trong bảng, nên "A còn trong mục lục không"
+ *  không còn là câu hỏi — câu duy nhất từng quan trọng là "không link nào trỏ vào chỗ trống". */
+function neoHong(): string[] {
+  return Array.from(document.querySelectorAll('a[href^="#"]'))
+    .map((a) => a.getAttribute('href')!.slice(1))
+    .filter((id) => document.getElementById(id) === null)
+}
 
 // `GET /templates/{code}` trả thêm `states` + `transitions` mà fixture hợp đồng BE↔FE không có
 // (fixture chỉ chép phần danh mục chỉ tiêu). Hai mảng dưới đây chép NGUYÊN VĂN seed
@@ -478,7 +501,10 @@ describe('ba chế độ ô của cellPolicy', () => {
   it('dòng computed hiện icon khoá + title công thức, không có dòng chữ giải thích', () => {
     ve({ state: 'draft', vai: 'reporter' })
     const khoa = screen.getByTitle('Tự tính = B-1.1 + B-1.2 + B-1.3')
-    expect(khoa.textContent).toBe('🔒 tự tính')
+    // Icon lucide `aria-hidden` không vào textContent — đo riêng nó, và đo riêng chữ, để một bản
+    // bỏ mất icon (hay bỏ mất chữ) đều đỏ.
+    expect(khoa.textContent).toBe('tự tính')
+    expect(khoa.querySelector('svg.lucide-lock')).toBeTruthy()
     expect(o('B-1.4', 'Tháng này').tagName).toBe('TD')
   })
 })
@@ -726,7 +752,8 @@ describe('nộp và ô bắt buộc', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Nộp báo cáo' }))
     expect(screen.getByText(/Thiếu 1 ô bắt buộc/)).toBeTruthy()
     await userEvent.type(o('B-8.1', 'Tháng này'), '5')
-    expect(screen.queryByText(/ô bắt buộc/)).toBeNull()
+    // Bắt ĐÚNG câu của thanh dưới: thẻ "Tiến độ nhập" cũng in "n/n ô bắt buộc" và luôn có mặt.
+    expect(screen.queryByText(/Thiếu \d+ ô bắt buộc/)).toBeNull()
     expect(o('B-8.1', 'Tháng này').getAttribute('aria-invalid')).not.toBe('true')
   })
 })
@@ -844,7 +871,10 @@ describe('banner', () => {
     expect(screen.queryByText(/phiên bản/)).toBeNull()
   })
 
-  it('banner kỳ thiếu là xám và KHÔNG chặn nộp', async () => {
+  // Hai banner xám xếp chồng nay gom thành MỘT khối Alert "n điểm cần biết trước khi nộp/duyệt"
+  // (mockup 04). Đổi màu xám → vàng cảnh báo là có chủ ý, nên ca này khoá hai thứ còn lại: nó
+  // KHÔNG mang màu lỗi (đỏ) và nó KHÔNG chặn nộp.
+  it('nhắc kỳ thiếu là cảnh báo mềm và KHÔNG chặn nộp', async () => {
     ve({
       state: 'draft',
       vai: 'reporter',
@@ -852,16 +882,19 @@ describe('banner', () => {
       mau: mauNho([chiTieu({ code: 'B-1.1' })]),
       values: [{ indicator_code: 'B-1.1', this_period: 5 }],
     })
-    const b = screen.getByText(/Lũy kế chưa tính kỳ 07\/2026/)
-    expect(resolveCascadeWinner(b.closest('div')!.className, 'background-color')).toBe('bg-muted')
+    const khoi = screen.getByRole('status')
+    expect(khoi.textContent).toContain('Lũy kế chưa tính kỳ 07/2026')
+    expect(resolveCascadeWinner(khoi.className, 'background-color')).toBe('bg-warning-bg')
 
     await userEvent.click(screen.getByRole('button', { name: 'Nộp báo cáo' }))
     expect(await screen.findByRole('dialog')).toBeTruthy()
   })
 
-  it('không thiếu kỳ nào thì không có banner kỳ thiếu', () => {
+  it('không thiếu kỳ nào thì không có lời nhắc kỳ thiếu', () => {
     ve({ state: 'draft', vai: 'reporter', missing_periods: [] })
-    expect(screen.queryByText(/Lũy kế chưa tính kỳ/)).toBeNull()
+    // Đọc `textContent` chứ không `queryByText`: câu nhắc có <b> ở giữa nên `queryByText` trả null
+    // cả khi câu CÒN trên màn hình — ca này sẽ xanh vĩnh viễn mà không đo gì.
+    expect(document.body.textContent).not.toContain('Lũy kế chưa tính kỳ')
   })
 })
 
@@ -1297,7 +1330,7 @@ describe('bàn phím kiểu Excel', () => {
     const u = userEvent.setup()
     ve({ state: 'draft', vai: 'reporter' })
     await lamBanMotO(u)
-    await u.click(screen.getByLabelText('C1. Hoạt động nổi bật trong tháng'))
+    await u.click(oChu('C1 Hoạt động nổi bật trong tháng'))
     await u.keyboard('{Control>}s{/Control}')
     expect(putSpy).toHaveBeenCalledTimes(1)
   })
@@ -1315,7 +1348,7 @@ describe('bàn phím kiểu Excel', () => {
 
   it('Enter trong textarea nhóm C giữ mặc định (xuống dòng), không nhảy ô', async () => {
     ve({ state: 'draft', vai: 'reporter', mau: mauNho([chiTieu({ code: 'B-1.1' })]) })
-    const ta = screen.getByLabelText('C1. Hoạt động nổi bật trong tháng')
+    const ta = oChu('C1 Hoạt động nổi bật trong tháng')
     await userEvent.click(ta)
     const theoDoi = theoDoiChan('Enter')
     await userEvent.keyboard('a{Enter}b')
@@ -1680,7 +1713,7 @@ describe('dán một cột từ Excel', () => {
 describe('nhóm C, mục lục và dải đầu', () => {
   it('nhóm C là textarea đơn cột dưới bảng, có đếm ký tự và trần 2000', async () => {
     ve({ state: 'draft', vai: 'reporter', mau: mauNho([chiTieu({ code: 'B-1.1' })]) })
-    const ta = screen.getByLabelText('C1. Hoạt động nổi bật trong tháng') as HTMLTextAreaElement
+    const ta = oChu('C1 Hoạt động nổi bật trong tháng')
     expect(ta.tagName).toBe('TEXTAREA')
     expect(ta.getAttribute('maxlength')).toBe('2000')
     await userEvent.type(ta, 'abcd')
@@ -1694,7 +1727,7 @@ describe('nhóm C, mục lục và dải đầu', () => {
       mau: mauNho([chiTieu({ code: 'B-1.1' })]),
       texts: { C1: 'Đã có nội dung' },
     })
-    expect(chu(screen.getByLabelText('C1. Hoạt động nổi bật trong tháng'))).toBe('Đã có nội dung')
+    expect(chu(oChu('C1 Hoạt động nổi bật trong tháng'))).toBe('Đã có nội dung')
     unmount()
 
     ve({
@@ -1703,14 +1736,17 @@ describe('nhóm C, mục lục và dải đầu', () => {
       mau: mauNho([chiTieu({ code: 'B-1.1' })]),
       texts: { C1: 'Đã có nội dung' },
     })
-    expect(screen.queryByLabelText('C1. Hoạt động nổi bật trong tháng')).toBeNull()
+    moTabC()
+    expect(screen.queryByLabelText('C1 Hoạt động nổi bật trong tháng')).toBeNull()
     expect(screen.getByText('Đã có nội dung')).toBeTruthy()
   })
 
-  it('mục lục trỏ tới đúng id của hàng tiêu đề nhóm, và hàng đó có thật', () => {
+  // Cột mục lục 176px đã nhường chỗ cho dải chip trong thẻ "Tiến độ nhập" (mockup 04). Câu hỏi
+  // ca này hỏi không đổi: chip trỏ tới đích CÓ THẬT, và đích đó là hàng tiêu đề nhóm trong bảng.
+  it('chip nhóm trỏ tới đúng id của hàng tiêu đề nhóm, và hàng đó có thật', () => {
     ve({ state: 'draft', vai: 'reporter' })
-    const muc = screen.getByRole('link', { name: 'B-8. Quản lý môi trường' })
-    expect(muc.getAttribute('href')).toBe('#B-8')
+    const chip = screen.getByRole('link', { name: /^B-8 Quản lý môi trường/ })
+    expect(chip.getAttribute('href')).toBe('#B-8')
     expect(document.getElementById('B-8')?.tagName).toBe('TR')
   })
 
@@ -1721,6 +1757,27 @@ describe('nhóm C, mục lục và dải đầu', () => {
     expect(hang.textContent).toContain('Total Man Hours')
     // name_en của một dòng chỉ tiêu nằm ở title khi hover, không in ra chữ.
     expect(screen.queryByText('PTSC Corp.')).toBeNull()
+  })
+
+  // Bản vẽ ghi rõ hàng tiêu đề nhóm mang bộ đếm "18 chỉ tiêu" / "18 chỉ tiêu · 1 thiếu".
+  it('hàng tiêu đề nhóm đếm ĐỦ số dòng (kể cả dòng tự tính) và số ô bắt buộc còn thiếu', () => {
+    ve({ state: 'draft', vai: 'reporter' })
+    const hang = document.getElementById('B-1')!
+    const soDong = CATALOG.indicators.filter((ct) => ct.section_code === 'B-1').length
+    expect(hang.textContent).toContain(`${soDong} chỉ tiêu`)
+    // Form trống: mọi ô bắt buộc của nhóm đều thiếu. Con số phải KHỚP với chip cùng nhóm ở dải
+    // tiến độ — hai chỗ đếm riêng là cách để một hôm nào đó chúng nói hai điều khác nhau.
+    const chip = screen.getByRole('link', { name: /^B-1 / })
+    const [daNhap, tong] = chip.textContent!.match(/(\d+)\/(\d+)\s*$/)!.slice(1).map(Number)
+    expect(hang.textContent).toContain(`· ${tong - daNhap} thiếu`)
+  })
+
+  it('điền đủ ô bắt buộc của một nhóm thì "· n thiếu" của hàng tiêu đề nhóm tự hết', async () => {
+    ve({ state: 'draft', vai: 'reporter', mau: mauNho([chiTieu({ code: 'B-1.1' })]) })
+    expect(document.getElementById('B-1')!.textContent).toContain('· 1 thiếu')
+    await userEvent.type(o('B-1.1', 'Tháng này'), '5')
+    expect(document.getElementById('B-1')!.textContent).not.toContain('thiếu')
+    expect(document.getElementById('B-1')!.textContent).toContain('1 chỉ tiêu')
   })
 
   it('dải đầu: tiêu đề, 5 ô phần đầu và mốc "Lũy kế đã tính tới" theo kỳ thiếu', () => {
@@ -1898,7 +1955,7 @@ describe('bản vẽ: cột lũy kế của counter, màu số, lớp dính', ()
     const { container } = ve({ state: 'draft', vai: 'reporter' })
     const hop = container.querySelector('table')!.parentElement!
     expect(resolveCascadeWinner(hop.className, 'overflow')).toBe('overflow-auto')
-    expect(resolveCascadeWinner(hop.className, 'max-height')).toBe('max-h-[calc(100vh-13rem)]')
+    expect(resolveCascadeWinner(hop.className, 'max-height')).toBe('max-h-[calc(100vh-17rem)]')
   })
 
   // P3 (final-fix-FE.md, Ruling 425 · final-review-R3-report.md §A1): `bottom-0` đổi thành
@@ -1917,7 +1974,9 @@ describe('bản vẽ: cột lũy kế của counter, màu số, lớp dính', ()
 
   it('mọi đích nhảy có scroll-margin-top 80px để không nấp dưới header cột dính', () => {
     ve({ state: 'draft', vai: 'reporter' })
-    for (const id of ['A', 'B-1', 'B-1-1', 'C']) {
+    // 'C' rời danh sách: nhóm C nay là một TAB, không phải một khối để cuộn tới — Radix gỡ nội
+    // dung tab không hoạt động khỏi DOM, nên một neo `#C` sẽ trỏ vào chỗ trống quá nửa thời gian.
+    for (const id of ['A', 'B-1', 'B-1-1']) {
       const dich = document.getElementById(id)!
       expect(resolveCascadeWinner(dich.className, 'scroll-margin-top')).toBe('scroll-mt-20')
     }
@@ -1942,7 +2001,7 @@ describe('bản vẽ: cột lũy kế của counter, màu số, lớp dính', ()
   // tự giãn còn sống; brief đòi thẳng "textarea tự giãn, không thanh cuộn trong ô".
   it('textarea nhóm C tự chỉnh chiều cao theo nội dung khi gõ', async () => {
     ve({ state: 'draft', vai: 'reporter' })
-    const ta = screen.getByLabelText('C1. Hoạt động nổi bật trong tháng') as HTMLTextAreaElement
+    const ta = oChu('C1 Hoạt động nổi bật trong tháng')
     expect(ta.style.height).toBe('')
     await userEvent.type(ta, 'a')
     expect(ta.style.height).not.toBe('')
@@ -1962,21 +2021,19 @@ describe('bản vẽ: cột lũy kế của counter, màu số, lớp dính', ()
     expect(o('B-1.1', 'Lũy kế tháng trước').textContent).toBe('402.100')
   })
 
-  // fix-1 S6: approve.html liệt CẢ "A. Thông tin chung" lẫn "C. Nhận xét, kiến nghị" trong mục
-  // lục. Vòng 1 lọc nhóm rỗng nên mất hai mục đó — và `toHaveLength(9)` khoá đúng con số sai.
-  it('mục lục liệt ĐỦ 11 nhóm của danh mục, kể cả A và C, và mỗi link có đích thật trong DOM', () => {
+  // Kế thừa fix-1 S6 / fix-2 F11 (R14) với đích mới. Mục lục cũ phải liệt cả A và C vì nó là lối
+  // đi DUY NHẤT tới hai khối đó; dải chip thì không — A là dải đầu luôn nằm trên màn hình, C là
+  // một TAB có nhãn riêng. Nên dải chip liệt đúng chín nhóm CÓ trong bảng, và vẫn khoá THỨ TỰ:
+  // một dải đảo ngược (B-9 … B-1) vẫn đủ chín chip và vẫn có đủ mã đang tìm ở dưới.
+  it('dải chip liệt ĐỦ 9 nhóm có mặt trong bảng, đúng thứ tự, mỗi chip có đích thật', () => {
     ve({ state: 'draft', vai: 'reporter' })
-    expect(screen.getAllByRole('link')).toHaveLength(11)
-    // fix-2 F11 (R14): khoá THỨ TỰ, không chỉ số lượng — mục lục đảo ngược (C, B-9 … A) vẫn đủ 11
-    // link và vẫn có đủ 4 mã đang tìm ở dưới.
     expect(screen.getAllByRole('link').map((a) => a.getAttribute('href'))).toEqual([
-      '#A', '#B-1', '#B-2', '#B-3', '#B-4', '#B-5', '#B-6', '#B-7', '#B-8', '#B-9', '#C',
+      '#B-1', '#B-2', '#B-3', '#B-4', '#B-5', '#B-6', '#B-7', '#B-8', '#B-9',
     ])
-    for (const ma of ['A', 'B-1', 'B-9', 'C']) {
-      const link = screen.getByRole('link', { name: new RegExp(`^${ma.replace('-', '-')}\\.`) })
-      expect(link.getAttribute('href')).toBe(`#${ma}`)
-      expect(document.getElementById(ma)).toBeTruthy()
-    }
+    expect(neoHong()).toEqual([])
+    // A và C không còn chip, nhưng CHÚNG PHẢI CÒN LỐI ĐI: khối A ở dải đầu, nhóm C sau một tab.
+    expect(document.getElementById('A')).toBeTruthy()
+    expect(screen.getByRole('tab', { name: 'Hoạt động nổi bật' })).toBeTruthy()
   })
 
   // A và C là đích nhảy của TRANG, không phải hàng của bảng: chúng không được sinh hàng tiêu đề
@@ -2245,7 +2302,7 @@ describe('lưu khi rời ô', () => {
   it('gõ ô chữ nhóm C rồi rời ô: 1,5 giây sau gửi texts của đúng mã đó', async () => {
     const u = nguoiDung()
     ve({ state: 'draft', vai: 'reporter', mau: MAU_HAI_DONG() })
-    await u.click(screen.getByLabelText('C1. Hoạt động nổi bật trong tháng'))
+    await u.click(oChu('C1 Hoạt động nổi bật trong tháng'))
     await u.keyboard('Diễn tập PCCC ngày 12/08')
     await u.tab()
     await choDebounce()
@@ -2256,7 +2313,7 @@ describe('lưu khi rời ô', () => {
   it('Tab ngang qua ô chữ mà không sửa gì thì không gửi request nào', async () => {
     const u = nguoiDung()
     ve({ state: 'draft', vai: 'reporter', mau: MAU_HAI_DONG(), texts: { C1: 'Câu đã lưu từ trước' } })
-    await u.click(screen.getByLabelText('C1. Hoạt động nổi bật trong tháng'))
+    await u.click(oChu('C1 Hoạt động nổi bật trong tháng'))
     await u.tab()
     await choDebounce()
     expect(putSpy).not.toHaveBeenCalled()
@@ -2292,7 +2349,7 @@ describe('lưu khi rời ô', () => {
       mau: MAU_HAI_DONG(),
       texts: { C1: 'Câu cũ đã lỗi thời' },
     })
-    await u.clear(screen.getByLabelText('C1. Hoạt động nổi bật trong tháng'))
+    await u.clear(oChu('C1 Hoạt động nổi bật trong tháng'))
     await u.tab()
     await choDebounce()
     expect(thanPut(0)).toEqual({ version: 8, values: [], texts: { C1: '' } })
@@ -2303,9 +2360,9 @@ describe('lưu khi rời ô', () => {
   it('hai ô chữ nhóm C đổi trong CÙNG một cửa sổ debounce thì cả hai vào một PUT', async () => {
     const u = nguoiDung()
     ve({ state: 'draft', vai: 'reporter', version: 8, mau: MAU_BA_O_CHU() })
-    await u.click(screen.getByLabelText('C1. Hoạt động nổi bật trong tháng'))
+    await u.click(oChu('C1 Hoạt động nổi bật trong tháng'))
     await u.keyboard('Diễn tập PCCC')
-    await u.click(screen.getByLabelText('C2. Hoạt động dự kiến cho tháng tới'))
+    await u.click(oChu('C2 Hoạt động dự kiến cho tháng tới'))
     await u.keyboard('Huấn luyện cứu hộ')
     await u.tab()
     await choDebounce()
@@ -2318,7 +2375,11 @@ describe('lưu khi rời ô', () => {
     ve({ state: 'draft', vai: 'reporter', version: 8, mau: MAU_HAI_DONG() })
     await u.click(o('B-1.1', 'Tháng này'))
     await u.keyboard('12')
-    await u.click(screen.getByLabelText('C1. Hoạt động nổi bật trong tháng'))
+    // Rời ô số TRƯỚC khi sang tab khác: mở tab "Hoạt động nổi bật" gỡ cả bảng khỏi DOM, và một ô
+    // bị gỡ lúc còn focus thì không bắn `blur`. Ca này vì thế đo thêm được một điều thật: hàng chờ
+    // lưu sống qua một lượt đổi tab.
+    await u.tab()
+    await u.click(oChu('C1 Hoạt động nổi bật trong tháng'))
     await u.keyboard('Có diễn tập')
     await u.tab()
     await choDebounce()
@@ -2382,7 +2443,7 @@ describe('lưu khi rời ô', () => {
   it('Ctrl+S khi CHƯA rời ô chữ nhóm C: thân PUT có ngay khoá texts', async () => {
     const u = nguoiDung()
     ve({ state: 'draft', vai: 'reporter', version: 8, mau: MAU_HAI_DONG() })
-    await u.click(screen.getByLabelText('C1. Hoạt động nổi bật trong tháng'))
+    await u.click(oChu('C1 Hoạt động nổi bật trong tháng'))
     await u.keyboard('Có diễn tập')
     await u.keyboard('{Control>}s{/Control}')
     expect(thanPut(0)).toEqual({ version: 8, values: [], texts: { C1: 'Có diễn tập' } })
@@ -2468,7 +2529,7 @@ describe('dải đầu — trạng thái lưu', () => {
     ve({ state: 'draft', vai: 'reporter', mau: MAU_BA_DONG() })
     await goVao(u, 'B-1.1', '1')
     expect(screen.getByText('Chưa lưu (1 ô)')).toBeTruthy()
-    await u.click(screen.getByLabelText('C1. Hoạt động nổi bật trong tháng'))
+    await u.click(oChu('C1 Hoạt động nổi bật trong tháng'))
     await u.keyboard('Có diễn tập')
     await u.tab()
     expect(screen.getByText('Chưa lưu (2 ô)')).toBeTruthy()
@@ -2484,9 +2545,9 @@ describe('dải đầu — trạng thái lưu', () => {
       vai: 'reporter',
       mau: { ...MAU_BA_DONG(), text_fields: MAU_FM01.text_fields },
     })
-    await u.click(screen.getByLabelText('C1. Hoạt động nổi bật trong tháng'))
+    await u.click(oChu('C1 Hoạt động nổi bật trong tháng'))
     await u.keyboard('Có diễn tập')
-    await u.click(screen.getByLabelText('C2. Hoạt động dự kiến cho tháng tới'))
+    await u.click(oChu('C2 Hoạt động dự kiến cho tháng tới'))
     await u.keyboard('Sẽ huấn luyện cứu hộ')
     await u.tab()
     expect(screen.getByText('Chưa lưu (2 ô)')).toBeTruthy()
@@ -3423,28 +3484,162 @@ describe('P7 — nhóm A "THÔNG TIN CHUNG" khi cả năm trường đều null'
     expect(document.getElementById('A')).toBeNull()
   })
 
-  it('cả năm null: mục lục BỎ luôn mục A — không còn link trỏ vào chỗ trống', () => {
+  // Dải chip của thẻ "Tiến độ nhập" chỉ liệt nhóm CÓ trong bảng, nên nó không bao giờ có `#A` —
+  // "mục lục bỏ mục A" hết là câu hỏi. Thứ ca này từng bảo vệ thì còn nguyên và nay đo tổng quát
+  // hơn: không neo nào trên trang trỏ vào chỗ trống. Đối chứng cũ (bản vá lọc quá tay nuốt luôn C)
+  // cũng còn: chín chip B phải còn đủ.
+  it('cả năm null: không neo nào trỏ vào chỗ trống, chín chip nhóm còn nguyên', () => {
     ve({ state: 'draft', vai: 'reporter', header: RONG })
-    const href = screen.getAllByRole('link').map((a) => a.getAttribute('href'))
-    expect(href).not.toContain('#A')
-    // Đối chứng: chỉ MỘT mục biến mất, mười mục kia còn nguyên. Một bản vá lọc quá tay (bỏ mọi
-    // nhóm không sinh hàng) sẽ nuốt luôn C — đúng lỗi fix-1 S6 đã sửa một lần rồi.
-    expect(href).toEqual(['#B-1', '#B-2', '#B-3', '#B-4', '#B-5', '#B-6', '#B-7', '#B-8', '#B-9', '#C'])
+    expect(neoHong()).toEqual([])
+    expect(screen.getAllByRole('link').map((a) => a.getAttribute('href'))).toEqual([
+      '#B-1', '#B-2', '#B-3', '#B-4', '#B-5', '#B-6', '#B-7', '#B-8', '#B-9',
+    ])
   })
 
   // MẶT ÂM, và nó là mặt quan trọng: "còn một trường nào non-null thì hiện y như hôm nay". Thiếu
   // ca này, một bản vá ẩn nhóm A VÔ ĐIỀU KIỆN cũng xanh hai ca trên — và lúc dữ liệu thật về thì
   // khối định danh của FM01 biến mất vĩnh viễn mà không ai biết.
   it.each(['report_no', 'location', 'report_date', 'reporter_name', 'reporter_position'] as const)(
-    'mặt âm — CHỈ %s có giá trị thì nhóm A vẫn hiện đủ, và #A vẫn còn trong mục lục',
+    'mặt âm — CHỈ %s có giá trị thì nhóm A vẫn hiện đủ',
     (truong) => {
       const giaTri = truong === 'report_date' ? '2026-09-30' : 'có giá trị'
       ve({ state: 'draft', vai: 'reporter', header: { ...RONG, [truong]: giaTri } })
       expect(screen.getByText('Số báo cáo')).toBeTruthy()
       expect(screen.getByText('Chức vụ')).toBeTruthy()
       expect(document.getElementById('A')).toBeTruthy()
-      expect(screen.getAllByRole('link').map((a) => a.getAttribute('href'))).toContain('#A')
     },
   )
 })
 
+
+// ============================================================ mockup 04 — ba tab, khối nhắc, tiến độ
+//
+// Ba khối mà lát dựng lại theo mockup 04 mang vào: `Tabs` có điều khiển, một `Alert` gộp thay hai
+// banner xám, và thẻ "Tiến độ nhập" (`Progress` + dải chip) thay cột mục lục. Các ca ở trên đã
+// chạm tới chúng một cách gián tiếp (mở tab để tới ô chữ C, đếm neo); khối này đo thẳng.
+
+describe('mockup 04 — ba tab của form', () => {
+  it('ba tab đúng nhãn, mặc định đứng ở Chỉ tiêu', () => {
+    ve({ state: 'draft', vai: 'reporter' })
+    expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual([
+      'Chỉ tiêu',
+      'Hoạt động nổi bật',
+      'Lịch sử thao tác',
+    ])
+    expect(screen.getByRole('tab', { name: 'Chỉ tiêu' }).getAttribute('aria-selected')).toBe('true')
+    expect(screen.getByRole('table')).toBeTruthy()
+  })
+
+  // Đây là lý do `Tabs` phải CÓ ĐIỀU KHIỂN (spec §10). Để Radix tự giữ trạng thái thì cú bấm này
+  // im lặng không làm gì — neo trỏ tới một hàng đang không có trong DOM.
+  it('bấm mã thiếu ở chân trang khi đang đứng ở tab khác thì kéo tab về Chỉ tiêu', async () => {
+    const u = userEvent.setup()
+    ve({ state: 'draft', vai: 'reporter', mau: mauNho([chiTieu({ code: 'B-1.1' })]) })
+    await u.click(screen.getByRole('button', { name: 'Nộp báo cáo' }))
+    const neo = screen.getByRole('link', { name: 'B-1.1' })
+
+    moTabC()
+    expect(screen.queryByRole('table')).toBeNull()
+
+    await u.click(neo)
+    expect(screen.getByRole('tab', { name: 'Chỉ tiêu' }).getAttribute('aria-selected')).toBe('true')
+    expect(document.getElementById(neo.getAttribute('href')!.slice(1))).toBeTruthy()
+  })
+
+  it('tab Lịch sử thao tác đọc /reports/{id}/history và in việc theo tên tiếng Việt của mẫu', async () => {
+    const getSpy = vi.spyOn(api, 'get').mockResolvedValue([
+      { id: 1, action: 'seed_import', actor_id: null, before: null, after: { note: 'nạp từ file' }, created_at: '2026-09-01T08:00:00+07:00' },
+      { id: 2, action: 'return', actor_id: 3, before: { state: 'submitted' }, after: { state: 'returned', decision_note: 'Thiếu B-2.7' }, created_at: '2026-09-04T15:20:00+07:00' },
+    ])
+    ve({ state: 'returned', vai: 'reporter', decision_note: 'x' })
+    fireEvent.mouseDown(screen.getByRole('tab', { name: 'Lịch sử thao tác' }))
+
+    const ds = await screen.findByRole('list')
+    expect(getSpy).toHaveBeenCalledWith('/reports/12/history')
+    // "Trả lại" lấy từ CHÍNH `mau.transitions`, cùng nguồn với chữ trên nút — hai chỗ không lệch được.
+    expect(ds.textContent).toContain('Trả lại')
+    expect(ds.textContent).toContain('submitted → returned')
+    expect(ds.textContent).toContain('Thiếu B-2.7')
+    // Dòng seed có `before = null`: KHÔNG được in một vệt trạng thái cụt đầu.
+    expect(ds.textContent).toContain('Nạp từ file tổng hợp')
+    expect(ds.textContent).not.toContain('→ null')
+    getSpy.mockRestore()
+  })
+})
+
+describe('mockup 04 — thẻ Tiến độ nhập', () => {
+  it('in số ô bắt buộc đã nhập trên tổng, và thanh Progress mang cùng con số', () => {
+    ve({
+      state: 'draft',
+      vai: 'reporter',
+      mau: mauNho([chiTieu({ code: 'B-1.1' }), chiTieu({ code: 'B-1.2', sort_order: 2 })]),
+      values: [{ indicator_code: 'B-1.1', this_period: 5 }],
+    })
+    expect(screen.getByText('1/2 ô bắt buộc')).toBeTruthy()
+    expect(screen.getByLabelText('Đã nhập 1 trên 2 ô bắt buộc')).toBeTruthy()
+  })
+
+  // Mẫu không khai ô bắt buộc nào thì một thanh rỗng kèm "0/0 ô" là trang trí gây hiểu nhầm.
+  it('mẫu không có ô bắt buộc nào thì KHÔNG vẽ thanh và không in "0/0"', () => {
+    ve({
+      state: 'draft',
+      vai: 'reporter',
+      mau: mauNho([chiTieu({ code: 'B-1.1', required: false })]),
+    })
+    expect(screen.getByText('Tiến độ nhập')).toBeTruthy()
+    expect(screen.queryByText('0/0 ô bắt buộc')).toBeNull()
+    expect(screen.queryByText(/ô bắt buộc/)).toBeNull()
+  })
+
+  it('chip nhóm còn thiếu mang màu cảnh báo; điền đủ thì chip trở về viền thường', async () => {
+    ve({ state: 'draft', vai: 'reporter', mau: mauNho([chiTieu({ code: 'B-1.1' })]) })
+    const chip = screen.getByRole('link', { name: /^B-1 / })
+    expect(resolveCascadeWinner(chip.className, 'background-color')).toBe('bg-warning-bg')
+
+    await userEvent.type(o('B-1.1', 'Tháng này'), '5')
+    expect(resolveCascadeWinner(chip.className, 'background-color')).toBe('bg-card')
+  })
+})
+
+describe('mockup 04 — khối nhắc trước khi nộp/duyệt', () => {
+  const LECH_CHUA_GHI = {
+    mau: mauNho([chiTieu({ code: 'B-1.5', agg_type: 'counter' })]),
+    values: [{ indicator_code: 'B-1.5', counter_check: { status: 'lech', expected: 9, message: 'Lệch công thức' } }],
+  }
+
+  it('một điểm thì đếm là "Một", và mốc sắp tới của người NỘP là nộp', () => {
+    ve({ state: 'draft', vai: 'reporter', missing_periods: ['2026-07'] })
+    expect(screen.getByRole('status').textContent).toContain('Một điểm cần biết trước khi nộp')
+  })
+
+  it('hai điểm thì đếm là "Hai", và mốc sắp tới của người DUYỆT là duyệt', () => {
+    ve({ state: 'submitted', vai: 'admin', missing_periods: ['2026-07'], ...LECH_CHUA_GHI })
+    const khoi = screen.getByRole('status')
+    expect(khoi.textContent).toContain('Hai điểm cần biết trước khi duyệt')
+    expect(khoi.textContent).toContain('1 bộ đếm')
+  })
+
+  it('không điểm nào thì KHÔNG vẽ khối — không có "không có gì đáng lo" chiếm chỗ', () => {
+    ve({ state: 'draft', vai: 'reporter', missing_periods: [] })
+    expect(document.body.textContent).not.toContain('điểm cần biết')
+  })
+
+  // Neo "Tới ô đầu" chỉ hiện khi CÓ chỗ để nhảy tới: điểm "lũy kế chưa tính" nói về một kỳ KHÁC,
+  // không có ô nào trên trang này để chỉ vào.
+  it('chỉ thiếu kỳ (không có bộ đếm lệch) thì không có neo "Tới ô đầu"', () => {
+    ve({ state: 'draft', vai: 'reporter', missing_periods: ['2026-07'] })
+    expect(screen.queryByRole('link', { name: /Tới ô đầu/ })).toBeNull()
+  })
+
+  it('neo "Tới ô đầu" trỏ đúng ô lệch đầu tiên và cũng kéo tab về Chỉ tiêu', async () => {
+    const u = userEvent.setup()
+    ve({ state: 'submitted', vai: 'admin', ...LECH_CHUA_GHI })
+    const neo = screen.getByRole('link', { name: /Tới ô đầu/ })
+    expect(neo.getAttribute('href')).toBe('#B-1-5')
+
+    moTabC()
+    await u.click(neo)
+    expect(screen.getByRole('tab', { name: 'Chỉ tiêu' }).getAttribute('aria-selected')).toBe('true')
+    expect(document.getElementById('B-1-5')).toBeTruthy()
+  })
+})
