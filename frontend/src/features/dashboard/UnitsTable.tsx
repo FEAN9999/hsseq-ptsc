@@ -20,11 +20,11 @@ import type { UnitRow } from './useUnits'
 // (đó là FAT/"Chết người", catalog_fm01.py:77).
 const MA_CHI_TIEU_LTI = 'B-2.2'
 
-const O_CHUNG = 'h-9 px-3 border-b border-hair text-table'
+const O_CHUNG = 'h-9 px-3 border-b border-border text-sm'
 const O_SO = `${O_CHUNG} text-right tnum`
 // Vòng sửa 1 (task-25-fix-1.md A5-c, review mục 11 "c"): bản vẽ làm MỜ CẢ DÒNG "Chưa nộp"
 // (class="sec" trên mọi ô) — tín hiệu thị giác "dòng này không bấm được" (D4).
-const MO = ' text-sec'
+const MO = ' text-muted-foreground'
 
 // 6 cột số — dùng CHUNG danh sách này cho cả tiêu đề (canh phải, A5-a) lẫn không phải tính lại.
 const TEN_COT_SO = new Set(['Giờ công', 'LTI', 'FAT', 'Near miss', 'HAZOB', 'Giờ AT kể từ LTI cuối'])
@@ -36,11 +36,19 @@ function trangThai(state: string | null): ChipKind {
 function Dong({ row, period }: { row: UnitRow; period: string }) {
   const navigate = useNavigate()
   const coBaoCao = row.report_id !== null
+  const coLti = (row.lti ?? 0) > 0
   const mo = coBaoCao ? '' : MO
 
   return (
     <tr aria-disabled={coBaoCao ? undefined : 'true'}>
-      <td className={O_CHUNG + mo}>{row.org_unit.name}</td>
+      <td className={O_CHUNG + mo}>
+        <span className="flex items-center gap-2">
+          <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
+            {row.org_unit.code}
+          </span>
+          <span className="font-medium">{row.org_unit.name}</span>
+        </span>
+      </td>
       <td className={O_SO + mo}>{formatNumber(row.gio_cong, 0)}</td>
       <td className={O_SO + mo}>
         {coBaoCao ? (
@@ -50,14 +58,18 @@ function Dong({ row, period }: { row: UnitRow; period: string }) {
             onClick={() =>
               navigate(`/reports/${row.report_id}?from=dashboard&period=${period}#${maNeo(MA_CHI_TIEU_LTI)}`)
             }
-            className="bg-transparent border-0 p-0 cursor-pointer tnum text-ink"
+            className={`bg-transparent border-0 p-0 cursor-pointer tnum underline ${
+              coLti ? 'text-destructive font-medium' : 'text-foreground'
+            }`}
           >
             {formatNumber(row.lti, 0)}
           </button>
         ) : (
           // Vòng sửa 1 (task-25-fix-1.md A3, review N8): KHÔNG data-testid ở đây — dòng chưa nộp
           // không bấm được, không mã/test nào cần định vị riêng phần tử này bằng testid.
-          <span>{formatNumber(row.lti, 0)}</span>
+          <span className={coLti ? 'text-destructive font-medium' : undefined}>
+            {formatNumber(row.lti, 0)}
+          </span>
         )}
       </td>
       <td className={O_SO + mo}>{formatNumber(row.fat, 0)}</td>
@@ -83,8 +95,20 @@ const TIEU_DE_COT = [
 ]
 
 export function UnitsTable({ rows, period }: { rows: UnitRow[]; period: string }) {
+  // Dòng có LTI lên ĐẦU (mockup mục 02). `sort` của JS ổn định theo chuẩn nên trong mỗi nhóm thứ
+  // tự server trả được giữ nguyên — không cần khoá phụ.
+  const dsSapXep = [...rows].sort((a, b) => Number((b.lti ?? 0) > 0) - Number((a.lti ?? 0) > 0))
   return (
-    <div className="overflow-x-auto border border-hair bg-surface rounded-input">
+    <section className="overflow-hidden rounded-xl border border-border bg-card">
+      {/* KHÔNG lặp lại số đầu mối ở đây: dòng Coverage phía trên đã nói, và `rows.length` với
+          `reporting_units` là hai con số khác nguồn — in cả hai là mời người đọc so lệch. */}
+      <div className="px-4 py-3">
+        <h2 className="text-sm font-semibold text-foreground">Số liệu theo đơn vị</h2>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          Bấm số LTI để mở đúng chỉ tiêu trong báo cáo của đơn vị
+        </p>
+      </div>
+      <div className="overflow-x-auto border-t border-border">
       {/* Vòng sửa 1 (task-25-fix-1.md A5-h, review mục 11 "h"): bỏ viền dưới của dòng CUỐI trong
           tbody — cùng khung bo/viền ngoài của chính div này thì viền dưới đó thành viền đôi ngay
           trước mép khung.
@@ -102,7 +126,7 @@ export function UnitsTable({ rows, period }: { rows: UnitRow[]; period: string }
             {TIEU_DE_COT.map((ten) => (
               <th
                 key={ten}
-                className={`h-9 px-3 border-b border-hair bg-mutedbg text-tableHead font-semibold whitespace-nowrap ${
+                className={`h-9 px-3 border-b border-border bg-muted text-[13.5px] text-sec font-semibold whitespace-nowrap ${
                   TEN_COT_SO.has(ten) ? 'text-right' : 'text-left'
                 }`}
               >
@@ -112,11 +136,12 @@ export function UnitsTable({ rows, period }: { rows: UnitRow[]; period: string }
           </tr>
         </thead>
         <tbody>
-          {rows.map((row) => (
+          {dsSapXep.map((row) => (
             <Dong key={row.org_unit.code} row={row} period={period} />
           ))}
         </tbody>
       </table>
-    </div>
+      </div>
+    </section>
   )
 }

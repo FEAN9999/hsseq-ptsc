@@ -22,6 +22,7 @@ import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-quer
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { api } from '../api/client'
+import { useSummary } from '../features/dashboard/useSummary'
 import { queryClient } from './queryClient'
 
 /** Một màn tối thiểu đi qua ĐÚNG đường thật: `api.get` → `ApiError` → vị từ `retry` của singleton. */
@@ -103,5 +104,63 @@ describe('queryClient — nửa ÂM của retry (P5)', () => {
 
     expect(screen.getByText('hỏng')).toBeTruthy()
     expect(f).toHaveBeenCalledTimes(4)
+  })
+})
+
+// ---------------------------------------------------------------------------------------------
+// Lát 5 — MẶC ĐỊNH CỦA SINGLETON PHẢI SỐNG SÓT QUA HOOK.
+//
+// `useSummary` nhận tuỳ chọn `staleTime` (Sidebar cần một khoảng dài để huy hiệu đếm không bắn
+// thêm request mỗi lần đổi trang). Cái bẫy: viết thẳng `staleTime,` vào object tuỳ chọn thì nơi
+// gọi KHÔNG truyền gì vẫn đưa vào một khoá `staleTime: undefined` — TanStack trải options lên
+// `defaultOptions`, nên khoá đó GHI ĐÈ 30s của app/queryClient.ts và query thành stale-ngay.
+//
+// Không lý thuyết: đúng lỗi đó đã xảy ra, và thứ bắt được nó là e2e `Q1 — duyệt xong, dashboard
+// đổi 21→22` (đỏ ở cả hai khung nhìn, sau 1,2 phút chạy). Ca dưới đây đo CÙNG bất biến trong vài
+// mili giây, ngay cạnh chính cái mặc định mà nó bảo vệ.
+//
+// Dựng `QueryClient` từ `getDefaultOptions()` của singleton THẬT (khuôn `ve()` ở trên): chép tay
+// lại con số 30s là tạo bản thứ hai để trôi — đổi mặc định mà quên ca này thì ca vẫn xanh vô nghĩa.
+// ---------------------------------------------------------------------------------------------
+const TOM_TAT = {
+  period_key: '2026-08',
+  reporting_units: 22,
+  approved_count: 21,
+  submitted_count: 0,
+  missing_units: [],
+  kpis: [],
+}
+
+function ManSummary() {
+  const q = useSummary('2026-08')
+  return <div>{q.isLoading ? 'đang tải' : 'xong'}</div>
+}
+
+describe('queryClient — mặc định của singleton sống sót qua useSummary (Lát 5)', () => {
+  beforeEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('useSummary KHÔNG truyền staleTime: mount lại KHÔNG gọi thêm lượt /dashboard/summary nào', async () => {
+    const f = vi.fn(() => Promise.resolve(json(200, TOM_TAT)))
+    vi.stubGlobal('fetch', f)
+    const qc = new QueryClient({ defaultOptions: queryClient.getDefaultOptions() })
+    const trong = (
+      <QueryClientProvider client={qc}>
+        <ManSummary />
+      </QueryClientProvider>
+    )
+
+    const lan1 = render(trong)
+    expect(await screen.findByText('xong')).toBeTruthy()
+    expect(f).toHaveBeenCalledTimes(1)
+
+    // Rời trang rồi quay lại: dữ liệu vừa về, còn TƯƠI theo 30s của singleton ⇒ `refetchOnMount`
+    // (mặc định `true` = "làm mới nếu CŨ") không được bắn gì. Nếu `staleTime` bị `undefined` ghi
+    // đè, query stale ngay và con số này thành 2.
+    lan1.unmount()
+    render(trong)
+    expect(await screen.findByText('xong')).toBeTruthy()
+    expect(f).toHaveBeenCalledTimes(1)
   })
 })

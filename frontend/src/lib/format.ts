@@ -92,3 +92,14 @@ export function formatNumber(n: number | null, decimals: number): string {
     maximumFractionDigits: decimals,
   }).format(nSach)
 }
+
+/** Kỳ mặc định khi URL chưa có `?period=`. MỘT nguồn duy nhất — Dashboard, PeriodNav và bộ chọn kỳ
+ *  trên sidebar đều đọc hằng này, không ai tự khai lại. */
+export const KY_MAC_DINH = '2026-08'
+
+/** Lùi/tiến `delta` tháng trên chuỗi "YYYY-MM". Tính bằng UTC để không lệch theo múi giờ máy chạy. */
+export function congThang(period: string, delta: number): string {
+  const [nam, thang] = period.split('-').map(Number)
+  const d = new Date(Date.UTC(nam, thang - 1 + delta, 1))
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`
+}

@@ -337,7 +337,7 @@ describe('chế độ form theo trạng thái × quyền', () => {
     // states.html: "Ban ATCL trả lại 04/09/2026 15:20:" — `decided_at` của fixture là
     // 2026-09-04T08:20:00Z = 15:20 giờ VN.
     expect(b.textContent).toContain('Ban ATCL trả lại 04/09/2026 15:20:')
-    expect(resolveCascadeWinner(b.closest('div')!.className, 'background-color')).toBe('bg-dangerBg')
+    expect(resolveCascadeWinner(b.closest('div')!.className, 'background-color')).toBe('bg-destructive-bg')
     expect(screen.getByRole('button', { name: 'Nộp lại' })).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Nộp báo cáo' })).toBeNull()
   })
@@ -853,7 +853,7 @@ describe('banner', () => {
       values: [{ indicator_code: 'B-1.1', this_period: 5 }],
     })
     const b = screen.getByText(/Lũy kế chưa tính kỳ 07\/2026/)
-    expect(resolveCascadeWinner(b.closest('div')!.className, 'background-color')).toBe('bg-mutedbg')
+    expect(resolveCascadeWinner(b.closest('div')!.className, 'background-color')).toBe('bg-muted')
 
     await userEvent.click(screen.getByRole('button', { name: 'Nộp báo cáo' }))
     expect(await screen.findByRole('dialog')).toBeTruthy()
@@ -1531,7 +1531,7 @@ describe('dán một cột từ Excel', () => {
       'Dán: bỏ qua 12 dòng không đọc được (B-1.1, B-1.2, B-1.3, B-1.4, B-1.5, B-1.6, B-1.7, B-1.8, +4) · ô đích giữ nguyên số cũ',
     )
     // fix-2 F12 (R5): câu báo phải là chữ CẢNH BÁO, không tụt xuống chữ phụ mờ lẫn vào thanh dưới.
-    expect(resolveCascadeWinner(cau.className, 'color')).toBe('text-warning')
+    expect(resolveCascadeWinner(cau.className, 'color')).toBe('text-warning-foreground')
   })
 
   // fix-3 G2 (M23): mọi ca F1 đều dán vào cột "Tháng này". Cột Cộng dồn là cột NHẬP của 4 dòng
@@ -1875,8 +1875,8 @@ describe('bản vẽ: cột lũy kế của counter, màu số, lớp dính', ()
     ve({ state: 'approved', vai: 'admin' })
     const nguoiNhap = o('B-1.1', 'Tháng này')
     const mayTinh = o('B-1.4', 'Tháng này')
-    expect(resolveCascadeWinner(nguoiNhap.className, 'color')).toBe('text-ink')
-    expect(resolveCascadeWinner(mayTinh.className, 'color')).toBe('text-sec')
+    expect(resolveCascadeWinner(nguoiNhap.className, 'color')).toBe('text-foreground')
+    expect(resolveCascadeWinner(mayTinh.className, 'color')).toBe('text-muted-foreground')
   })
 
   it('header cột dính ở đỉnh khung, header nhóm dính ngay DƯỚI nó', () => {
@@ -2455,7 +2455,7 @@ describe('dải đầu — trạng thái lưu', () => {
     await goVao(u, 'B-1.2', '2')
     await goVao(u, 'B-1.3', '3')
     const dong = screen.getByText('Chưa lưu (3 ô)')
-    expect(resolveCascadeWinner(dong.className, 'color')).toBe('text-warning')
+    expect(resolveCascadeWinner(dong.className, 'color')).toBe('text-warning-foreground')
     // Đột biến N9 của người soát (bỏ `role="status"`) sống ở vòng soát: người đọc màn hình không
     // bao giờ nghe "Đang lưu…"/"Đã lưu 14:02" — mà chính chú thích tại chỗ khai đó là lý do đặt role.
     expect(screen.getByRole('status').textContent).toBe('Chưa lưu (3 ô)')
@@ -2539,7 +2539,7 @@ describe('dải đầu — trạng thái lưu', () => {
 
     r.batLoiLamMoi()
     const dong = screen.getByText('Không làm mới được số liệu')
-    expect(resolveCascadeWinner(dong.className, 'color')).toBe('text-warning')
+    expect(resolveCascadeWinner(dong.className, 'color')).toBe('text-warning-foreground')
     expect(screen.queryByText(/Đã lưu/)).toBeNull()
   })
 
@@ -2704,7 +2704,7 @@ describe('đường lỗi của lớp lưu', () => {
 
     const bao = await screen.findByRole('alert')
     // "Vàng" phải đo trên CSS đã build như mọi khẳng định màu khác của file này, không đọc tên lớp.
-    expect(resolveCascadeWinner(bao.closest('div')!.className, 'background-color')).toBe('bg-warningBg')
+    expect(resolveCascadeWinner(bao.closest('div')!.className, 'background-color')).toBe('bg-warning-bg')
     expect(bao.textContent).toContain('Người khác vừa sửa báo cáo này')
     expect(bao.textContent).toContain('phiên bản 8 → 11')
     expect(o('B-1.4', 'Tháng này').textContent).toBe('777')
@@ -2886,7 +2886,7 @@ describe('hộp thoại chuyển trạng thái', () => {
     const hop = await moHop(u, 'Trả lại…')
     expect(hop.textContent).toContain('Trả lại báo cáo')
     expect(within(hop).getByLabelText('Lý do trả lại (người nộp sẽ thấy nguyên văn)')).toBeTruthy()
-    expect(resolveCascadeWinner(nutHop('Trả lại').className, 'background-color')).toBe('bg-danger')
+    expect(resolveCascadeWinner(nutHop('Trả lại').className, 'background-color')).toBe('bg-destructive')
   })
 
   it('Mở lại: cũng bắt nhập lý do, và nêu hậu quả "rời khỏi tổng"', async () => {
@@ -2930,7 +2930,7 @@ describe('hộp thoại chuyển trạng thái', () => {
     await u.click(within(hop).getByRole('textbox'))
     // Khoảng trắng hai đầu CÓ trong chuỗi gõ vào: không có nó thì một `.trim()` lén trên đường
     // gửi đi vẫn xanh (đột biến N14 của người soát) — bất biến "nguyên văn" chỉ được canh ở biên
-    // `Dialog`, không ở thân request.
+    // `DialogXacNhan`, không ở thân request.
     await u.keyboard('  Thiếu số B-8.1 và B-8.2  ')
     await u.click(nutHop('Trả lại'))
     expect(thanPost(0)).toEqual({
@@ -3361,7 +3361,7 @@ describe('P4 — chặn điều hướng SPA khi còn ô chưa lưu', () => {
     await lamBanMotO(u)
     await u.click(screen.getByRole('link', { name: 'Dashboard' }))
     const nut = screen.getByRole('dialog').querySelectorAll('button')
-    await u.click(nut[nut.length - 1]) // nút chính, đứng SAU "Huỷ" trong DOM (Dialog.tsx)
+    await u.click(nut[nut.length - 1]) // nút chính, đứng SAU "Huỷ" trong DOM (DialogXacNhan.tsx)
 
     await waitFor(() => expect(daSangDashboard()).toBe(true))
   })

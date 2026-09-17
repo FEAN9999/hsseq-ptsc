@@ -53,7 +53,7 @@ export function Toast() {
   // 4 giây. Chính bộ e2e đã đo được điều đó và đi VÒNG qua nó (mở hộp thoại bằng bàn phím) thay vì
   // tố nó.
   //
-  // Vá toạ độ (`bottom-24`) chỉ dời cửa sang một thanh dính cao hơn hoặc một viewport thấp hơn —
+  // Vá toạ độ (`bottom-…24`) chỉ dời cửa sang một thanh dính cao hơn hoặc một viewport thấp hơn —
   // 1024×640 đã đo được đúng lỗi này. Câu hỏi đúng là "Toast có được phép nằm đè lên vùng bấm được
   // không" — KHÔNG. Nên Toast tự đo dải nó chiếm rồi CÔNG BỐ, và vùng nội dung của app (`AppShell`)
   // cùng mọi thanh dính đáy (`FormModeBar`) lùi lên đúng bấy nhiêu.
@@ -86,7 +86,7 @@ export function Toast() {
     <div
       ref={hop}
       role="status"
-      className="fixed right-6 bottom-6 bg-soot text-white py-2.5 px-3.5 rounded-input text-table shadow-[0_4px_16px_rgba(0,0,0,0.05)]"
+      className="fixed right-6 bottom-6 bg-dark-panel text-white py-2.5 px-3.5 rounded-md text-sm shadow-[0_4px_16px_rgba(0,0,0,0.05)]"
     >
       {toast.message}
       {toast.action && (

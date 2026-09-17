@@ -39,7 +39,7 @@ export function Coverage({
   // bình thường) — đúng nguyên văn D11, không có danh sách tên nào trong ví dụ đó.
   if (approvedCount === 0) {
     return (
-      <div className="text-sec text-table mb-5">
+      <div className="text-muted-foreground text-sm mb-5">
         Chưa có báo cáo được duyệt · Đã nộp {formatNumber(submittedCount, 0)}/{formatNumber(reportingUnits, 0)} ·{' '}
         Chờ duyệt {formatNumber(submittedCount, 0)} · Chưa nộp {formatNumber(missingUnits.length, 0)}
       </div>
@@ -55,7 +55,7 @@ export function Coverage({
     missingUnits.length > 0 ? ` · Chưa nộp ${missingUnits.length}: ${ten}${con > 0 ? `, +${con}` : ''}` : ''
 
   return (
-    <div className="text-sec text-table mb-5">
+    <div className="text-muted-foreground text-sm mb-5">
       Kỳ {formatPeriod(periodKey)} · Toàn Tổng công ty · {formatNumber(reportingUnits, 0)} đầu mối · Tổng từ{' '}
       {formatNumber(approvedCount, 0)} báo cáo đã duyệt · Chờ duyệt {formatNumber(submittedCount, 0)}
       {phanChuaNop}

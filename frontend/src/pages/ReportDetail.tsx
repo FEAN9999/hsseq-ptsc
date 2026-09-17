@@ -10,19 +10,19 @@
 //
 // `queryKey: ['report', String(id)]` khớp đúng khoá mà `invalidateReportQueries` (api/invalidate.ts)
 // làm mới sau mọi mutation — lệch khoá thì duyệt xong trang vẫn hiện số cũ.
+import { ArrowLeft } from 'lucide-react'
 import { Link, useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 
 import { api, ApiError } from '../api/client'
 import { useSession } from '../app/session'
 import { InlineError } from '../components/ui/InlineError'
-import { Skeleton } from '../components/ui/Skeleton'
+import { SkeletonDong } from '../components/ui/SkeletonDong'
 import { ReportForm, type ChiTietBaoCao, type MauBaoCao } from '../features/report/ReportForm'
-import { formatPeriod } from '../lib/format'
 
 function KhungLoi({ children }: { children: React.ReactNode }) {
   return (
-    <div className="border border-hair bg-surface rounded-tile p-8 text-center text-soot text-table">{children}</div>
+    <div className="border border-border bg-card rounded-xl p-8 text-center text-secondary-foreground text-sm">{children}</div>
   )
 }
 
@@ -48,7 +48,7 @@ export function ReportDetail() {
       <KhungLoi>
         Bạn không có quyền xem báo cáo này
         <div className="mt-2.5">
-          <Link to="/reports" className="text-soot font-medium">
+          <Link to="/reports" className="text-secondary-foreground font-medium">
             Về báo cáo của đơn vị
           </Link>
         </div>
@@ -76,19 +76,21 @@ export function ReportDetail() {
     )
   }
 
-  if (baoCao.data === undefined || mau.data === undefined) return <Skeleton rows={20} />
+  if (baoCao.data === undefined || mau.data === undefined) return <SkeletonDong rows={20} />
 
   return (
     <div>
-      <div className="text-xs text-sec mb-1.5">
-        <Link to="/reports" className="text-sec no-underline">
-          {coQuyenDuyet ? 'Chờ duyệt' : 'Báo cáo của đơn vị'}
-        </Link>{' '}
-        ›{' '}
-        <b className="font-medium text-soot">
-          {baoCao.data.header.org_unit.name} · {formatPeriod(baoCao.data.header.period_key)}
-        </b>
-      </div>
+      {/* NÚT QUAY LẠI, không phải một vệt breadcrumb thứ hai. Thanh đầu trang của AppShell (Lát 1)
+          đã có breadcrumb; vế sau của vệt cũ ("<đơn vị> · <kỳ>") lặp đúng chữ của <h1> ngay dưới
+          nó, nên bỏ đi không mất thông tin nào. Chữ của nút vẫn đi theo QUYỀN — người duyệt tới
+          đây từ hàng đợi, người nộp tới từ danh sách đơn vị, và nút phải trả họ về đúng chỗ. */}
+      <Link
+        to="/reports"
+        className="mb-2 inline-flex items-center gap-1.5 text-xs text-muted-foreground no-underline hover:text-foreground"
+      >
+        <ArrowLeft className="size-3.5" />
+        <span>{coQuyenDuyet ? 'Chờ duyệt' : 'Báo cáo của đơn vị'}</span>
+      </Link>
       <ReportForm mau={mau.data} chiTiet={baoCao.data} loiLamMoi={loi !== null} />
     </div>
   )

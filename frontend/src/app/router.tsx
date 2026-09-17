@@ -107,7 +107,7 @@ export function RequireAuth({ children }: { children: ReactNode }) {
   }
 
   if (dangNapLai && user === null) {
-    return <div className="p-6 text-table text-sec">Đang tải…</div>
+    return <div className="p-6 text-sm text-muted-foreground">Đang tải…</div>
   }
 
   return <>{children}</>

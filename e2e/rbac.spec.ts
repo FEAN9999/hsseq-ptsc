@@ -115,3 +115,33 @@ test('chưa đăng nhập vào /dashboard thì bị đẩy về /login kèm ?nex
   await expect(page).toHaveURL(/\/dashboard$/)
   await expect(page.getByRole('heading', { name: 'Dashboard SKATMT' })).toBeVisible()
 })
+
+// Lát 2 — LỐI THOÁT CỦA MÀN LỖI PHẢI THẬT SỰ ĐI ĐƯỢC.
+//
+// 403/404 nằm NGOÀI `AppShell`: không sidebar, không breadcrumb, nên nút trên màn là đường đi DUY
+// NHẤT. Trước Lát 2 nút đó là `<a href="/">` và `/` là `<Navigate to="/login">` ⇒ người đang đăng
+// nhập bấm "Về trang chủ" rơi vào form đăng nhập: lối thoát của một ngõ cụt dẫn sang ngõ cụt khác.
+//
+// Ca đơn vị khoá `href` và đích của `/` riêng rẽ. Ca này nối CẢ CHUỖI trên trình duyệt thật — chỉ
+// có ở đây mới lộ ra nếu `RequireAuth` nạp lại phiên hỏng, hay `/` rơi vào vòng chuyển hướng: hai
+// thứ mà một `MemoryRouter` với `fetch` giả không bao giờ chạm tới.
+//
+// Đi qua HAI vai vì đích của `/` đổi theo quyền, và mỗi vai có một đích khác nhau.
+for (const [vai, email, tieuDeDich] of [
+  ['người duyệt', 'admin@ptsc.local', 'Dashboard SKATMT'],
+  ['người nộp', 'u22@ptsc.local', 'Báo cáo SKATMT'],
+] as const) {
+  test(`${vai}: từ 404 bấm "Về trang chủ" tới đúng trang làm việc, KHÔNG rơi vào form đăng nhập`, async ({
+    page,
+  }) => {
+    await dangNhap(page, email)
+    await page.goto('/duong-dan-khong-ton-tai')
+    await expect(page.getByRole('heading', { name: 'Không tìm thấy trang' })).toBeVisible()
+
+    await page.getByRole('link', { name: 'Về trang chủ' }).click()
+    await expect(page.getByRole('heading', { name: tieuDeDich })).toBeVisible()
+    // Mặt âm — thứ CHÍNH XÁC đã hỏng: màn hình đích không được là trang đăng nhập.
+    await expect(page).not.toHaveURL(/\/login/)
+    await expect(page.getByRole('button', { name: 'Đăng nhập' })).toHaveCount(0)
+  })
+}

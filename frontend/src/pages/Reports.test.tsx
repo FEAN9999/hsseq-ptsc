@@ -16,7 +16,7 @@
 // renderReports() bọc <MemoryRouter> với một route bắt hết ("*") render <DichDen/> hiện lại
 // pathname hiện tại, để khẳng định điều hướng nội bộ (Tạo báo cáo/409) trên CÂY THẬT thay vì spy
 // `location.assign` (Reports.tsx không còn gọi nó nữa cho điều hướng nội bộ).
-import { act, render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -159,7 +159,7 @@ describe('/reports — người nộp', () => {
     moiApi([{ period_key: '2026-06', state: 'approved', source: 'live' }])
     renderReports()
     const chip = await screen.findByText('Đã duyệt')
-    expect(resolveCascadeWinner(chip.className, 'background-color')).toBe('bg-successBg')
+    expect(resolveCascadeWinner(chip.className, 'background-color')).toBe('bg-success-bg')
   })
 
   it('trống thì hiện Chưa có kỳ báo cáo nào đang mở', async () => {
@@ -267,7 +267,7 @@ describe('/reports — người nộp', () => {
     expect(o.getAttribute('title')).toBe(kyVong.title)
   })
 
-  it('đang tải hiện Skeleton, chưa hiện bảng hay thông báo trống', () => {
+  it('đang tải hiện SkeletonDong, chưa hiện bảng hay thông báo trống', () => {
     vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})))
     const { container } = renderReports()
     expect(container.querySelectorAll('.bg-gradient-to-r').length).toBeGreaterThan(0)
@@ -529,5 +529,161 @@ describe('/reports — lỗi nền không phá màn hình đang có dữ liệu 
     await waitFor(() => expect(goiThu).toBeGreaterThan(1))
     expect(screen.getByText(DON_VI_MAC_DINH.name)).toBeTruthy()
     expect(screen.queryByText('Không tải được danh sách báo cáo')).toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------------------------
+// Lát 6 — Ô TÌM ĐƠN VỊ và SỨC NẶNG CỦA NÚT.
+//
+// Hàng đợi "Tất cả" của seed thật là 66 dòng; mockup mục 03 vẽ một ô tìm đơn vị cho đúng cảnh đó.
+// Ô này lọc trên dữ liệu ĐANG CÓ, không gọi lại API — các ca dưới đây khẳng định cả hai vế.
+//
+// Sức nặng nút đo bằng `resolveCascadeWinner` (C4): so chuỗi className là test mù trước cascade, và
+// ở đây thứ phải đo đúng là "ô nào thắng background-color", không phải "có chữ bg-primary hay không".
+// ---------------------------------------------------------------------------------------------
+const U_TIM: FakeRow[] = [
+  { id: 1, period_key: '2026-08', state: 'submitted', org_unit: { code: 'P05', name: 'Ban dự án 05 (tên tạm)' } },
+  { id: 2, period_key: '2026-08', state: 'approved', org_unit: { code: 'U22', name: 'PTSC Đình Vũ' } },
+  { id: 3, period_key: '2026-07', state: 'approved', org_unit: { code: 'U01', name: 'Đơn vị thành viên 01 (tên tạm)' } },
+  // Chữ `đ` THƯỜNG, giữa từ — khác `Đ` HOA ở đầu "Đình Vũ". Hai chữ này là HAI ký tự Unicode riêng
+  // và cần HAI phép thay tay; một fixture chỉ có chữ hoa để lọt bản vá thiếu vế thường (đã đo: bỏ
+  // `.replace(/đ/g,'d')` mà bộ test vẫn xanh).
+  { id: 4, period_key: '2026-07', state: 'approved', org_unit: { code: 'X09', name: 'Ban điều độ sản xuất' } },
+]
+
+/** Mã đơn vị của từng dòng đang hiện, theo thứ tự — đọc chính `<span>` mã (font-mono) trong ô Đơn
+ *  vị, không lấy cả ô (ô đó chứa cả mã lẫn tên, nối lại thành một chuỗi vô nghĩa). */
+function maDonViDangHien(): string[] {
+  return screen.getAllByTestId('o-ky').map((o) => {
+    const ma = o.parentElement!.querySelector('.font-mono')
+    if (!ma) throw new Error('dòng không có mã đơn vị — cột Đơn vị mất rồi?')
+    return ma.textContent!.trim()
+  })
+}
+
+describe('/reports — ô tìm đơn vị (Lát 6)', () => {
+  beforeEach(() => {
+    useSession.setState({ permissions: new Set(['report.approve']) })
+  })
+
+  it('lọc theo TÊN và không gọi lại API — chỉ lọc trên dữ liệu đang có', async () => {
+    const f = moiApi(U_TIM)
+    renderReports()
+    await screen.findByText('Chờ duyệt (4)')
+    const truoc = f.mock.calls.length
+
+    await userEvent.type(screen.getByLabelText('Tìm đơn vị'), 'Đình')
+    await waitFor(() => expect(screen.getAllByTestId('o-ky')).toHaveLength(1))
+    expect(maDonViDangHien()).toEqual(['U22'])
+    expect(f.mock.calls.length).toBe(truoc)
+  })
+
+  it('lọc được theo MÃ đơn vị, không chỉ theo tên', async () => {
+    moiApi(U_TIM)
+    renderReports()
+    await screen.findByText('Chờ duyệt (4)')
+
+    await userEvent.type(screen.getByLabelText('Tìm đơn vị'), 'p05')
+    await waitFor(() => expect(screen.getAllByTestId('o-ky')).toHaveLength(1))
+    expect(maDonViDangHien()).toEqual(['P05'])
+  })
+
+  // Gõ KHÔNG DẤU là cách gõ nhanh thường ngày; "dinh vu" phải ra "PTSC Đình Vũ". Ca này cũng khoá
+  // luôn vế `đ`: `normalize('NFD')` một mình không tách được `đ` thành `d`, nên nếu bỏ phép thay
+  // tay thì chuỗi này trượt.
+  it('gõ KHÔNG DẤU vẫn khớp chữ có dấu (kể cả chữ đ)', async () => {
+    moiApi(U_TIM)
+    renderReports()
+    await screen.findByText('Chờ duyệt (4)')
+
+    await userEvent.type(screen.getByLabelText('Tìm đơn vị'), 'dinh vu')
+    await waitFor(() => expect(screen.getAllByTestId('o-ky')).toHaveLength(1))
+    expect(maDonViDangHien()).toEqual(['U22'])
+  })
+
+  it('chữ `đ` THƯỜNG giữa từ cũng khớp — không chỉ `Đ` hoa đầu từ', async () => {
+    moiApi(U_TIM)
+    renderReports()
+    await screen.findByText('Chờ duyệt (4)')
+
+    await userEvent.type(screen.getByLabelText('Tìm đơn vị'), 'dieu do')
+    await waitFor(() => expect(screen.getAllByTestId('o-ky')).toHaveLength(1))
+    expect(maDonViDangHien()).toEqual(['X09'])
+  })
+
+  // Con số ở tiêu đề trả lời "hàng đợi còn bao nhiêu việc" — nó KHÔNG được đổi theo chuỗi vừa gõ,
+  // nếu không thì mỗi lần tìm là một lần trang báo sai khối lượng công việc còn lại.
+  it('tiêu đề vẫn đếm CẢ hàng đợi khi đang lọc; số dòng khớp nằm cạnh ô tìm', async () => {
+    moiApi(U_TIM)
+    renderReports()
+    await screen.findByText('Chờ duyệt (4)')
+
+    await userEvent.type(screen.getByLabelText('Tìm đơn vị'), 'Đình')
+    await waitFor(() => expect(screen.getAllByTestId('o-ky')).toHaveLength(1))
+    expect(screen.getByText('Chờ duyệt (4)')).toBeTruthy()
+    expect(screen.getByText('1/4 dòng')).toBeTruthy()
+  })
+
+  // Lọc rỗng KHÁC hàng đợi rỗng: một cái do chuỗi vừa gõ (có lối thoát), một cái do không có việc.
+  // Dùng chung câu "Không có báo cáo chờ duyệt" cho cả hai là nói sai ở cảnh thứ nhất.
+  it('lọc không ra dòng nào: câu RIÊNG + nút Xoá bộ lọc trả lại đủ danh sách', async () => {
+    moiApi(U_TIM)
+    renderReports()
+    await screen.findByText('Chờ duyệt (4)')
+
+    await userEvent.type(screen.getByLabelText('Tìm đơn vị'), 'zzz')
+    expect(await screen.findByText(/Không có đơn vị nào khớp/)).toBeTruthy()
+    expect(screen.queryByText('Không có báo cáo chờ duyệt')).toBeNull()
+
+    await userEvent.click(screen.getByRole('button', { name: /Xoá bộ lọc/ }))
+    await waitFor(() => expect(screen.getAllByTestId('o-ky')).toHaveLength(4))
+  })
+
+  it('hàng đợi RỖNG thì không bày ô tìm, nhưng vẫn giữ bộ lọc trạng thái (lối thoát duy nhất)', async () => {
+    moiApi([])
+    renderReports()
+    await screen.findByText('Không có báo cáo chờ duyệt')
+    expect(screen.queryByLabelText('Tìm đơn vị')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Tất cả' })).toBeTruthy()
+  })
+
+  it('người nộp KHÔNG có ô tìm (chỉ xem đúng một đơn vị của mình)', async () => {
+    useSession.setState({ permissions: new Set(['report.view_own_unit']) })
+    moiApi([{ id: 9, period_key: '2026-08', state: 'draft' }])
+    renderReports()
+    await screen.findByRole('link', { name: 'Mở' })
+    expect(screen.queryByLabelText('Tìm đơn vị')).toBeNull()
+  })
+})
+
+describe('/reports — nút chính chỉ ở dòng đang chờ CHÍNH người xem (Lát 6)', () => {
+  const nen = (el: Element) => resolveCascadeWinner((el as HTMLElement).className, 'background-color')
+
+  /** Nút hành động của dòng có `o-ky` thứ `i` — khoanh trong chính `<tr>` đó, không phải "nút nào đó". */
+  function nutDong(i: number): Element {
+    const tr = screen.getAllByTestId('o-ky')[i].closest('tr')!
+    return within(tr as HTMLElement).getByRole('link')
+  }
+
+  it('người duyệt: dòng ĐÃ NỘP là nút chính, dòng đã duyệt thì không', async () => {
+    useSession.setState({ permissions: new Set(['report.approve']) })
+    moiApi(U_TIM)
+    renderReports()
+    await screen.findByText('Chờ duyệt (4)')
+
+    expect(nen(nutDong(0))).toBe('bg-primary')
+    expect(nen(nutDong(1))).not.toBe('bg-primary')
+  })
+
+  // Viewer (report.view_all, KHÔNG có report.approve) không duyệt được, nên KHÔNG dòng nào là việc
+  // của họ — kể cả dòng `submitted`. Chữ nút vẫn là "Mở" (hợp đồng cũ), chỉ sức nặng đổi.
+  it('viewer: KHÔNG dòng nào là nút chính, kể cả dòng đã nộp', async () => {
+    useSession.setState({ permissions: new Set(['report.view_all']) })
+    moiApi(U_TIM)
+    renderReports()
+    await screen.findByText('Báo cáo đã nộp (4)')
+
+    expect(nutDong(0).textContent).toBe('Mở')
+    expect(nen(nutDong(0))).not.toBe('bg-primary')
   })
 })

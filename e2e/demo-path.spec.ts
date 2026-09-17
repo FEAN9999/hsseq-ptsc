@@ -51,14 +51,20 @@ function hangKy(page: Page, ky: string): Locator {
  *  Brief viết `getByLabel('LTI trong kỳ')` — không khớp gì cả: `components/ui/Tile.tsx` vẽ nhãn
  *  bằng một `<div>` thường, `aria-label` duy nhất trên ô là `"chưa có dữ liệu"` và chỉ nằm trên
  *  dấu `—`. Lấy nhãn rồi trèo lên phần tử cha (chính là ô KPI) là cách đọc đúng cấu trúc thật. */
+/** Khung cuộn của BẢNG chỉ tiêu trong form — không phải khung cuộn đầu tiên của tài liệu. */
+const SEL_KHUNG_BANG = 'div.overflow-auto:has(table)'
+
 function oKpi(page: Page, nhan: string): Locator {
   return page.getByText(nhan, { exact: true }).locator('xpath=..')
 }
 
-/** Giá trị số trong một ô KPI (dòng ngay dưới nhãn). */
+/** Giá trị số trong một ô KPI.
+ *
+ *  Đọc phần tử MANG CON SỐ (`.font-mono` — chỉ con số trong ô dùng phông mono) chứ không đếm con
+ *  thứ mấy của ô: từ Lát 4, đơn vị đo nằm cùng dòng với con số nên `> div` thứ hai trả về cả
+ *  "63 số vụ", và `doSoVi` cho `null` — một ô KPI đúng vẫn làm ca đỏ. */
 async function soKpi(page: Page, nhan: string): Promise<number | null> {
-  const tile = oKpi(page, nhan)
-  const chu = await tile.locator('> div').nth(1).innerText()
+  const chu = await oKpi(page, nhan).locator('.font-mono').first().innerText()
   return doSoVi(chu)
 }
 
@@ -649,13 +655,19 @@ test.describe('phân đoạn 2 của buổi demo', () => {
     // hành vi đúng của trình duyệt chứ không phải lỗi, và phép đo mất nghĩa.
     await expect(o).toBeInViewport()
 
-    const khung = page.locator('div.overflow-auto').filter({ has: page.locator('table') }).first()
+    // `khung` (Locator) và `SEL_KHUNG_BANG` (chuỗi cho `page.evaluate`) phải trỏ CÙNG một phần tử.
+    // Trước đây hai bên lệch nhau: Locator lọc `has: table`, còn `evaluate` nhận chuỗi
+    // `'div.overflow-auto'` trần rồi `querySelector` lấy phần tử ĐẦU TIÊN của tài liệu. Từ khi
+    // sidebar dựng trên shadcn (`sidebar.tsx`, SidebarContent mang `overflow-auto`), phần tử đầu
+    // tiên đó là KHUNG SIDEBAR — `scrollTop` luôn 0 nên phép đo "khung bảng có cuộn không" đo nhầm
+    // chỗ. `:has(table)` khoá đúng khung bảng, cùng vị ngữ với Locator.
+    const khung = page.locator(SEL_KHUNG_BANG).first()
     const truoc = await page.evaluate(
       (sel) => ({
         trang: window.scrollY,
         bang: document.querySelector(sel)?.scrollTop ?? -1,
       }),
-      'div.overflow-auto',
+      SEL_KHUNG_BANG,
     )
     expect(truoc.bang, 'phải cuộn được xuống giữa bảng thì phép đo mới có nghĩa').toBeGreaterThan(0)
 
@@ -683,7 +695,7 @@ test.describe('phân đoạn 2 của buổi demo', () => {
         trang: window.scrollY,
         bang: document.querySelector(sel)?.scrollTop ?? -1,
       }),
-      'div.overflow-auto',
+      SEL_KHUNG_BANG,
     )
     expect(sau.trang, `trang nhảy ${sau.trang - truoc.trang}px sau Ctrl+S`).toBe(truoc.trang)
     expect(sau.bang, `khung bảng nhảy ${sau.bang - truoc.bang}px sau Ctrl+S`).toBe(truoc.bang)
@@ -947,7 +959,15 @@ test.describe('phân đoạn 2 của buổi demo', () => {
         const el = Array.from(document.querySelectorAll('h1')).find((h) =>
           new RegExp(ten).test(h.textContent ?? ''),
         )
-        const thanh = el?.parentElement // div titlebar bọc h1 + điều khiển bên phải
+        // "Titlebar" = khối ĐẦU của trang, tức tổ tiên của `<h1>` nằm NGAY dưới gốc trang; gốc
+        // trang là con đầu của `[data-slot="noi-dung"]` (AppShell). Bản trước lấy thẳng
+        // `h1.parentElement`: đúng khi `<h1>` là con trực tiếp của titlebar, nhưng SAI ngay khi
+        // một trang bọc `<h1>` cùng dòng phụ đề trong một `<div>` con — lúc đó `nextElementSibling`
+        // là khối điều khiển BÊN PHẢI cùng hàng flex, và phép đo trả về khoảng cách ÂM (đo được
+        // -34px ở /reports sau Lát 6) chứ không phải khe dưới titlebar.
+        const goc = document.querySelector('[data-slot="noi-dung"]')?.firstElementChild
+        let thanh = el as Element | null | undefined
+        while (thanh && thanh.parentElement !== goc) thanh = thanh.parentElement
         const sau = thanh?.nextElementSibling
         if (!thanh || !sau) return null
         const a = thanh.getBoundingClientRect()
@@ -992,5 +1012,133 @@ test.describe('phân đoạn 2 của buổi demo', () => {
     expect(dash!.khe).toBeGreaterThan(0)
     expect(reports!.khe).toBeGreaterThan(0)
     expect(status!.khe).toBeGreaterThan(0)
+  })
+
+  // Lát 6 — KHÔNG TRANG NÀO ĐƯỢC ĐẨY CẢ TÀI LIỆU RỘNG RA THEO CHIỀU NGANG.
+  //
+  // Mỗi bảng trong app đã tự nằm trong một khung `overflow-x-auto`, nhưng khung đó chỉ cuộn được
+  // khi tổ tiên của nó CHỊU CO. `SidebarInset` của shadcn là một flex item `w-full flex-1` và mặc
+  // định `min-width:auto` của flex item làm nó từ chối co xuống dưới bề rộng nội dung — đo được ở
+  // /reports "Tất cả" trên 1024 zoom 125%: `scrollWidth` 1118 trên `clientWidth` 1024, tức CẢ
+  // sidebar lẫn thanh đầu trang trượt khỏi màn hình khi người dùng kéo ngang để xem nốt một cột.
+  //
+  // Đây là lỗi TẦNG KHUNG (một lớp `min-w-0` thiếu ở AppShell), nên ca canh cũng đặt ở tầng khung:
+  // đi qua MỌI trang có bảng, ở CẢ HAI khung nhìn, và chỉ hỏi đúng một câu. jsdom không nạp CSS nên
+  // không ca đơn vị nào thấy được chuyện này — nó phải sống ở đây.
+  test('C-Lát6 — không trang nào đẩy cả tài liệu rộng ra ngang (khung phải co, bảng mới cuộn)', async ({
+    page,
+  }) => {
+    await dangNhap(page, 'admin@ptsc.local')
+
+    const doTran = () =>
+      page.evaluate(() => ({
+        scrollWidth: document.documentElement.scrollWidth,
+        clientWidth: document.documentElement.clientWidth,
+      }))
+
+    await page.goto('/dashboard')
+    await expect(page.locator('tbody tr')).toHaveCount(22)
+    expect(await doTran(), '/dashboard').toMatchObject({ scrollWidth: (await doTran()).clientWidth })
+
+    await page.goto('/status')
+    await expect(page.locator('tbody tr')).toHaveCount(23)
+    expect(await doTran(), '/status').toMatchObject({ scrollWidth: (await doTran()).clientWidth })
+
+    // Bảng RỘNG NHẤT của app: 66 dòng, 6 cột, cấm ngắt dòng — chính là cảnh đã lộ ra lỗi.
+    await page.goto('/reports')
+    await page.getByRole('button', { name: 'Tất cả' }).click()
+    await expect(page.locator('tbody tr')).toHaveCount(66)
+    expect(await doTran(), '/reports (Tất cả)').toMatchObject({
+      scrollWidth: (await doTran()).clientWidth,
+    })
+
+    // Vế thứ hai, và là vế THẬT SỰ phân biệt: khung bọc bảng phải BỊ GIỚI HẠN trong vùng nội dung.
+    // Chỉ đo "tài liệu không tràn" là chưa đủ — ở 1280 bảng vốn đã vừa, nên ca sẽ xanh kể cả khi
+    // mắt xích `min-w-0` lại biến mất. Đây mới là thứ hỏng: khung rộng HƠN vùng chứa nó, tức nó
+    // không nhận phần tràn mà đùn ra ngoài. (Đo `scrollWidth > clientWidth` thay vào đây thì ca
+    // đỏ ở 1280 vì ở đó không có gì để cuộn — một điều kiện của KHUNG NHÌN, không phải của bố cục.)
+    const khung = await page.evaluate(() => {
+      const k = document.querySelector('div.overflow-x-auto:has(table)') as HTMLElement
+      const vung = document.querySelector('[data-slot="noi-dung"]') as HTMLElement
+      return { khungW: k.clientWidth, vungW: vung.clientWidth }
+    })
+    expect(khung.khungW, 'khung bọc bảng rộng hơn vùng nội dung ⇒ nó đùn tràn ra ngoài').toBeLessThanOrEqual(
+      khung.vungW,
+    )
+  })
+
+  // Lát 8 — BA MÀN QUẢN TRỊ. Hai ca, hai câu hỏi khác nhau.
+  //
+  // Ca 1 hỏi câu của TẦNG KHUNG, y như C-Lát6 ngay trên: ba màn này là ba bảng MỚI, mà bài học
+  // Lát 6 là một mắt xích `min-w-0` thiếu ở tầng trên làm mọi `overflow-x-auto` bên dưới vô hiệu —
+  // một lớp lỗi không trang nào tự phát hiện được cho mình. Và nó đi tới ba màn bằng cách BẤM vào
+  // mục nav thật, không `goto()`: ba mục đó vừa hết khoá ở Lát 8, nên "bấm vào có tới nơi không"
+  // là chính thứ vừa thay đổi.
+  test('C-Lát8/1 — ba màn quản trị: bấm mục nav tới đúng nơi, không màn nào đẩy tài liệu rộng ra', async ({
+    page,
+  }) => {
+    await dangNhap(page, 'admin@ptsc.local')
+
+    for (const [nhan, duong, neo] of [
+      ['Mẫu báo cáo', '/admin/templates', 'Kỳ của FM01'],
+      ['Tổ chức', '/admin/org', 'đầu mối báo cáo'],
+      ['Người dùng', '/admin/users', 'tài khoản'],
+    ] as const) {
+      await page.getByRole('link', { name: nhan, exact: true }).click()
+      await page.waitForURL((u) => u.pathname === duong)
+      // Trang đã dựng THẬT (không chỉ đổi URL rồi treo ở skeleton).
+      await expect(page.getByText(neo).first()).toBeVisible()
+      // Breadcrumb nói đúng nhóm — nhóm này chưa từng xuất hiện trước Lát 8.
+      await expect(page.locator('header')).toContainText('Quản trị nền tảng')
+
+      expect(await tranNgang(page), `${duong} tràn ngang: ${(await thuPhamTranNgang(page)).join(' · ')}`).toBe(0)
+    }
+  })
+
+  // Ca 2 hỏi câu của ĐƯỜNG GHI: nút "Đóng kỳ"/"Mở kỳ" có thật sự tới được máy chủ và đổi được
+  // trạng thái không. Đây là thao tác GHI duy nhất Lát 8 thêm vào, và là thứ duy nhất trong lát
+  // mà một lỗi nối dây (sai động từ HTTP, sai đường dẫn, quên thân) sẽ không ca đơn vị nào thấy —
+  // chúng chạy trên `fetch` giả.
+  //
+  // Chọn kỳ 06/2026 CÓ LÝ DO, không tuỳ tiện: nó ĐANG ĐÓNG trong seed, nên ca này mở rồi đóng lại
+  // và kết thúc ở ĐÚNG trạng thái ban đầu. Hai kỳ đang mở (08, 09) là bối cảnh của cả buổi demo —
+  // đụng vào chúng là để lại một database không còn demo được, và `reset_demo.py` (insert-if-absent)
+  // KHÔNG đặt lại `is_open` của một kỳ đã có. Mở 06/2026 cũng không đổi số dòng của `/reports`:
+  // kỳ đó đã đủ báo cáo cho cả 22 đầu mối nên các dòng ấy hiện ra bất kể `is_open`.
+  test('C-Lát8/2 — mở kỳ đi thẳng, đóng kỳ phải xác nhận; cả hai đổi thật trên máy chủ', async ({
+    page,
+  }) => {
+    boQuaNeuKhongResetDuoc()
+    await dangNhap(page, 'admin@ptsc.local')
+    await page.goto('/admin/templates')
+
+    const hang = page.getByRole('row').filter({ hasText: '06/2026' })
+    await expect(hang.getByText('Đã đóng')).toBeVisible()
+
+    // ── Mở: một cú bấm, không hộp thoại ───────────────────────────────────────────────────────
+    const choMo = page.waitForResponse(
+      (r) => r.url().includes('/templates/FM01/periods/2026-06') && r.request().method() === 'PATCH',
+    )
+    await hang.getByRole('button', { name: 'Mở kỳ' }).click()
+    expect((await choMo).ok(), 'PATCH mở kỳ không thành công').toBeTruthy()
+    await expect(hang.getByText('Đang mở')).toBeVisible()
+    // Đối chứng âm: không hộp thoại nào chen vào đường này.
+    await expect(page.getByRole('dialog')).toHaveCount(0)
+
+    // ── Đóng lại: PHẢI qua hộp thoại ──────────────────────────────────────────────────────────
+    await hang.getByRole('button', { name: 'Đóng kỳ' }).click()
+    const hop = page.getByRole('dialog')
+    await expect(hop).toBeVisible()
+    await expect(hop).toContainText('Đóng kỳ 06/2026?')
+    const choDong = page.waitForResponse(
+      (r) => r.url().includes('/templates/FM01/periods/2026-06') && r.request().method() === 'PATCH',
+    )
+    await hop.getByRole('button', { name: 'Đóng kỳ' }).click()
+    expect((await choDong).ok(), 'PATCH đóng kỳ không thành công').toBeTruthy()
+    await expect(hang.getByText('Đã đóng')).toBeVisible()
+
+    // Đổi THẬT chứ không chỉ đổi trên màn: tải lại trang, đọc lại từ máy chủ.
+    await page.reload()
+    await expect(page.getByRole('row').filter({ hasText: '06/2026' }).getByText('Đã đóng')).toBeVisible()
   })
 })

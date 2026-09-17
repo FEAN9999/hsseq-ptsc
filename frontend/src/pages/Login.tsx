@@ -20,12 +20,18 @@
 // C1: đăng nhập là HAI lời gọi HTTP nối tiếp — POST /auth/login chỉ trả access_token, thông tin
 // phiên (user, roles, permissions, org_unit) nằm ở GET /auth/me. Phải gắn token vào store TRƯỚC
 // khi gọi /auth/me (api.get đọc token từ store để gắn header Authorization).
+import { Check, Loader2, TriangleAlert, WifiOff } from 'lucide-react'
 import { useEffect, useState, type FormEvent } from 'react'
 import { flushSync } from 'react-dom'
 import { useNavigate, type NavigateFunction } from 'react-router-dom'
 import { api, ApiError, BASE, noiLaJson } from '../api/client'
 import { useSession, type SessionOrgUnit, type SessionUser } from '../app/session'
 import { Wordmark } from '../components/ui/Wordmark'
+
+const O_NHAP =
+  'block h-10 w-full rounded-md border border-border bg-card px-3 text-foreground focus:outline-2 focus:outline-ring focus:-outline-offset-2'
+/** Khe thông báo dưới nút — cùng hình dạng cho cả ba trạng thái, chỉ khác màu và icon. */
+const KHE_BAO = 'mt-3 flex items-start gap-2 rounded-md border px-3 py-2.5 text-[13px]'
 
 const TIMEOUT_HEALTH_MS = 90_000
 const CHAM_HIEN_DANH_THUC_MS = 3_000 // sau 3s /health chưa xong thì hiện dòng đánh thức
@@ -219,70 +225,126 @@ export function Login() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-canvas px-6">
-      <div className="w-[360px]">
-        <div className="mb-5">
-          <Wordmark />
+    <div className="grid min-h-screen lg:grid-cols-[1.05fr_1fr]">
+      {/* Nửa trái nền tối (mockup `Redesign shadcn.dc.html` mục 01). Ẩn dưới `lg`: dưới bề rộng
+          đó nó chỉ còn là một dải trang trí đẩy form xuống dưới nếp gấp.
+
+          Mockup có một bộ đếm "giờ công an toàn" lớn ở đây. KHÔNG dựng: trước khi đăng nhập,
+          trang này không có quyền đọc bất kỳ số liệu nào — chỉ `/health` là gọi được, và nó chỉ
+          trả trạng thái máy chủ. Một con số bịa ở màn đầu tiên của một hệ thống AN TOÀN là thứ
+          tệ nhất có thể đặt ở đây. Muốn có nó thì phải thêm một endpoint công khai. */}
+      <aside className="relative hidden flex-col justify-between bg-dark-panel p-10 text-white lg:flex">
+        <img src="/ptsc-wordmark-white.png" alt="PTSC" className="h-8 w-auto self-start" />
+        <div className="max-w-[420px]">
+          <h1 className="text-[32px] font-medium leading-[1.15] tracking-[-0.6px]">
+            Hệ thống báo cáo SKATMT
+          </h1>
+          <p className="mt-3 text-sm leading-relaxed text-on-dark">
+            An toàn · Sức khoẻ · Môi trường · Chất lượng. Biểu mẫu FM01, nộp theo kỳ tháng, tổng hợp
+            toàn Tổng công ty.
+          </p>
+          <ul className="mt-6 grid gap-2.5 text-sm text-on-dark">
+            {['53 chỉ tiêu trên một trang, cuộn liền', 'Lũy kế tự cộng theo kỳ đã duyệt', 'Đơn vị nộp — Ban ATCL duyệt'].map(
+              (y) => (
+                <li key={y} className="flex items-start gap-2.5">
+                  <Check className="mt-0.5 size-4 shrink-0" />
+                  {y}
+                </li>
+              ),
+            )}
+          </ul>
         </div>
-        <h2 className="text-[20px] font-medium text-ink mb-5">Đăng nhập HSEQ</h2>
-        <form onSubmit={xuLySubmit}>
-          <div className="mb-3.5">
-            <label htmlFor="dn-email" className="block text-[12px] font-medium text-soot mb-1">
-              Email
-            </label>
-            <input
-              id="dn-email"
-              type="email"
-              autoFocus
-              autoComplete="username"
-              required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="block w-full h-9 border border-hair rounded-input px-2.5 bg-surface text-ink"
-            />
+        <p className="text-xs text-on-dark">
+          Tổng công ty CP Dịch vụ Kỹ thuật Dầu khí Việt Nam
+        </p>
+      </aside>
+
+      <main className="flex items-center justify-center bg-background px-6 py-12">
+        <div className="w-full max-w-[360px]">
+          {/* Chỉ hiện khi nửa trái bị ẩn — không để màn hẹp mất sạch dấu hiệu đây là hệ của ai. */}
+          <div className="mb-6 lg:hidden">
+            <Wordmark />
           </div>
-          <div className="mb-3.5">
-            <label htmlFor="dn-mat-khau" className="block text-[12px] font-medium text-soot mb-1">
-              Mật khẩu
-            </label>
-            <input
-              id="dn-mat-khau"
-              type="password"
-              autoComplete="current-password"
-              required
-              value={matKhau}
-              onChange={(e) => setMatKhau(e.target.value)}
-              className="block w-full h-9 border border-hair rounded-input px-2.5 bg-surface text-ink"
-            />
-          </div>
-          <button
-            type="submit"
-            disabled={dangGui}
-            className="w-full h-9 mt-1.5 rounded-input bg-cyan border border-cyanEdge text-white text-[13px] font-medium disabled:opacity-50"
-          >
-            {dangGui ? 'Đang đăng nhập…' : 'Đăng nhập'}
-          </button>
-          {dangDanhThuc && (
-            <p className="text-[13px] mt-2.5 text-sec">Đang đánh thức máy chủ… (thường mất dưới 1 phút)</p>
-          )}
-          {loiKetNoi && (
-            <p className="text-[13px] mt-2.5 text-danger">
-              Không kết nối được máy chủ ·{' '}
-              <button
-                type="button"
-                onClick={() => {
-                  setLoiKetNoi(false)
-                  setLanThuLaiHealth((n) => n + 1)
-                }}
-                className="underline font-medium bg-transparent border-0 p-0 cursor-pointer text-danger"
-              >
-                Thử lại
-              </button>
-            </p>
-          )}
-          {loiDangNhap && <p className="text-[13px] mt-2.5 text-danger">{loiDangNhap}</p>}
-        </form>
-      </div>
+          <h2 className="text-[22px] font-medium leading-[1.2] tracking-[-0.3px] text-foreground">
+            Đăng nhập HSEQ
+          </h2>
+          <p className="mt-1 mb-6 text-[13px] text-muted-foreground">
+            Dùng tài khoản nội bộ do Ban An toàn Chất lượng cấp.
+          </p>
+          <form onSubmit={xuLySubmit}>
+            <div className="mb-3.5">
+              <label htmlFor="dn-email" className="mb-1 block text-[12px] font-medium text-secondary-foreground">
+                Email
+              </label>
+              <input
+                id="dn-email"
+                type="email"
+                autoFocus
+                autoComplete="username"
+                required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className={O_NHAP}
+              />
+            </div>
+            <div className="mb-3.5">
+              <label htmlFor="dn-mat-khau" className="mb-1 block text-[12px] font-medium text-secondary-foreground">
+                Mật khẩu
+              </label>
+              <input
+                id="dn-mat-khau"
+                type="password"
+                autoComplete="current-password"
+                required
+                value={matKhau}
+                onChange={(e) => setMatKhau(e.target.value)}
+                className={O_NHAP}
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={dangGui}
+              className="mt-1.5 h-10 w-full rounded-md border border-primary bg-primary text-[13px] font-medium text-white hover:bg-primary/90 disabled:opacity-50"
+            >
+              {dangGui ? 'Đang đăng nhập…' : 'Đăng nhập'}
+            </button>
+
+            {/* Ba trạng thái của cùng MỘT khe thông báo dưới nút — hộp có viền, không còn là dòng
+                chữ trần: chúng nói về máy chủ chứ không phải về ô vừa gõ, và ở màn đầu tiên của
+                buổi demo (Render ngủ dậy) đây là thứ người trình bày phải đọc được từ xa. */}
+            {dangDanhThuc && (
+              <p className={`${KHE_BAO} border-border bg-muted text-secondary-foreground`}>
+                <Loader2 className="mt-0.5 size-4 shrink-0 animate-spin" />
+                Đang đánh thức máy chủ… (thường mất dưới 1 phút)
+              </p>
+            )}
+            {loiKetNoi && (
+              <p className={`${KHE_BAO} border-destructive/30 bg-destructive-bg text-destructive`}>
+                <WifiOff className="mt-0.5 size-4 shrink-0" />
+                <span>
+                  Không kết nối được máy chủ ·{' '}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setLoiKetNoi(false)
+                      setLanThuLaiHealth((n) => n + 1)
+                    }}
+                    className="cursor-pointer border-0 bg-transparent p-0 font-medium text-destructive underline"
+                  >
+                    Thử lại
+                  </button>
+                </span>
+              </p>
+            )}
+            {loiDangNhap && (
+              <p className={`${KHE_BAO} border-destructive/30 bg-destructive-bg text-destructive`}>
+                <TriangleAlert className="mt-0.5 size-4 shrink-0" />
+                {loiDangNhap}
+              </p>
+            )}
+          </form>
+        </div>
+      </main>
     </div>
   )
 }

@@ -13,16 +13,19 @@
 // (Ruling 177). Hai ca /reports dưới đây khoá đúng: chưa đăng nhập bị đá về /login (bỏ
 // RequireAuth ở routes.tsx phải làm ca này ĐỎ), có đăng nhập thấy đúng khung AppShell quanh trang.
 import { useEffect } from 'react'
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createMemoryRouter, MemoryRouter } from 'react-router-dom'
+
+import { QueryClientProvider } from '@tanstack/react-query'
 
 import { App, routeObjects } from './routes'
 import { queryClient } from './queryClient'
 import { duongDanDieuHuongTrongTrang } from './routeScan'
 import { useToast } from '../components/ui/Toast'
 import { useSession } from './session'
+import { SidebarProvider } from '../components/ui/sidebar'
 import { Sidebar } from '../components/Sidebar'
 
 // Login.tsx tự gọi fetch('/health') lúc mount (carry C2) — stub để mọi lần dựng /login trong file
@@ -53,9 +56,47 @@ describe('bảng route', () => {
     expect(screen.getByLabelText('Email')).toBeTruthy()
   })
 
-  it('vào /: đổi sang /login', () => {
+  it('vào / khi CHƯA có token: đổi sang /login', () => {
     duong('/')
     expect(screen.getByText('Đăng nhập HSEQ')).toBeTruthy()
+  })
+
+  // Lát 2 — `/` là LỐI VÀO, không phải bí danh của `/login`. Đây là vế mà hai màn lỗi 403/404 dựa
+  // vào: nút thoát duy nhất của chúng trỏ `/`, nên nếu `/` lại dẫn về form đăng nhập cho một người
+  // ĐANG đăng nhập thì cả hai màn lỗi vẫn là ngõ cụt — đúng như trước bản vá.
+  //
+  // Đích phải được quyết SAU khi phiên nạp lại xong: một lần mở `/` bằng cách gõ địa chỉ chỉ có
+  // `token` (sessionStorage), `permissions` còn rỗng cho tới lượt `/auth/me`. Hai ca dưới dựng đúng
+  // cảnh đó — chỉ đặt `token`, để `RequireAuth` tự đi hỏi — nên chúng đo cả chuỗi thật, không chỉ
+  // một nhánh `if`.
+  function moLoiVao(quyen: string[]) {
+    useSession.setState({ token: 'tok', user: null, orgUnit: null, permissions: new Set() })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          user: { id: 1, email: 'x@ptsc.local', full_name: 'X', position: null },
+          org_unit: { id: 1, code: 'MC', name: 'PTSC M&C' },
+          permissions: quyen,
+          roles: [],
+        }),
+      }),
+    )
+    return duong('/')
+  }
+
+  it('vào / khi ĐANG đăng nhập và có dashboard.view: tới Dashboard, KHÔNG thấy form đăng nhập', async () => {
+    moLoiVao(['dashboard.view', 'report.approve', 'status.view'])
+    expect(await screen.findByRole('heading', { name: 'Dashboard SKATMT' })).toBeTruthy()
+    expect(screen.queryByText('Đăng nhập HSEQ')).toBeNull()
+  })
+
+  it('vào / khi ĐANG đăng nhập mà KHÔNG có dashboard.view: tới trang báo cáo của đơn vị', async () => {
+    moLoiVao(['report.view_own_unit', 'report.edit'])
+    expect(await screen.findByRole('heading', { name: 'Báo cáo SKATMT' })).toBeTruthy()
+    expect(screen.queryByText('Đăng nhập HSEQ')).toBeNull()
   })
 
   it('vào một path bịa: thấy NotFound', () => {
@@ -87,7 +128,7 @@ describe('bảng route', () => {
     )
     duong('/reports')
     expect(await screen.findByText('Chưa có kỳ báo cáo nào đang mở')).toBeTruthy()
-    expect(screen.getByText('Đăng xuất')).toBeTruthy()
+    expect(screen.getByText('Ban An toàn Chất lượng')).toBeTruthy() // AppShell/Sidebar có mặt
   })
 
   // Vòng sửa 1 Task 25 (task-25-fix-1.md A1, review N26 — mục 1 CẦN SỬA "NẶNG", vi phạm Ruling
@@ -134,7 +175,7 @@ describe('bảng route', () => {
     vi.stubGlobal('fetch', f)
     duong('/dashboard')
     expect(await screen.findByText('Dashboard SKATMT')).toBeTruthy()
-    expect(screen.getByText('Đăng xuất')).toBeTruthy()
+    expect(screen.getByText('Ban An toàn Chất lượng')).toBeTruthy() // AppShell/Sidebar có mặt
     // Vòng sửa 2 (task-25-fix-2.md P4/C2, task-25-rereview-1.md mục 8 [NHẸ]): tự vệ ĐỘC LẬP với
     // `queryClient.clear()` ở `beforeEach` trên — "Dashboard SKATMT" tự vẽ ngay cả khi CHƯA có dữ
     // liệu (carry ghi ở ca N26 trên), nên riêng khẳng định <h1> không buộc fetch của CHÍNH ca này
@@ -176,7 +217,7 @@ describe('bảng route', () => {
     vi.stubGlobal('fetch', f)
     duong('/status')
     expect(await screen.findByText('Tình trạng nộp · FM01')).toBeTruthy()
-    expect(screen.getByText('Đăng xuất')).toBeTruthy()
+    expect(screen.getByText('Ban An toàn Chất lượng')).toBeTruthy() // AppShell/Sidebar có mặt
     expect(f.mock.calls.some(([u]) => String(u).includes('/templates/FM01/periods'))).toBe(true)
   })
 
@@ -249,7 +290,7 @@ describe('bảng route', () => {
     duong('/reports')
     expect(screen.getByText('Đang tải…')).toBeTruthy()
     expect(await screen.findByText('Chưa có kỳ báo cáo nào đang mở')).toBeTruthy()
-    expect(screen.getByText('Đăng xuất')).toBeTruthy()
+    expect(screen.getByText('Ban An toàn Chất lượng')).toBeTruthy() // AppShell/Sidebar có mặt
     expect(screen.queryByText('Đăng nhập HSEQ')).toBeNull()
   })
 
@@ -343,15 +384,20 @@ describe('bảng route', () => {
     })
     vi.stubGlobal('fetch', f)
 
-    duong('/reports/12')
+    const { container } = duong('/reports/12')
     expect(await screen.findByRole('heading', { name: 'PTSC Miền Trung · FM01 · 08/2026' })).toBeTruthy()
     // Danh mục phải lấy theo template_code của CHÍNH báo cáo, không phải chuỗi "FM01" viết cứng.
     expect(f.mock.calls.some(([u]) => String(u).includes('/templates/FM01'))).toBe(true)
     expect(screen.getByLabelText('B-1.1 TCT PTSC, Lũy kế tháng trước').textContent).toBe('402.100')
-    expect(screen.getByText('Đăng xuất')).toBeTruthy() // AppShell/Sidebar có mặt
-    // Breadcrumb (chỉ ReportDetail mới có): "<đơn vị> · <kỳ>" — khác chuỗi của <h1> nên khớp đúng
-    // một phần tử, trong khi nhãn "Báo cáo của đơn vị" bị trùng với link Sidebar.
-    expect(screen.getByText('PTSC Miền Trung · 08/2026')).toBeTruthy()
+    expect(screen.getByText('Ban An toàn Chất lượng')).toBeTruthy() // AppShell/Sidebar có mặt
+    // Nút quay lại (chỉ ReportDetail mới có — `ReportForm` không dựng lối về nào) chứng minh
+    // route dừng ở ĐÚNG trang, không phải chỉ ở form. Lát 7 bỏ vệt breadcrumb "<đơn vị> · <kỳ>"
+    // vì nó lặp nguyên chữ của <h1> ngay dưới, nên phải neo bằng thứ khác. Khoanh trong vùng nội
+    // dung: nhãn này trùng với một link của Sidebar.
+    const noiDung = container.querySelector('[data-slot="noi-dung"]') as HTMLElement
+    expect(within(noiDung).getByRole('link', { name: 'Báo cáo của đơn vị' }).getAttribute('href')).toBe(
+      '/reports',
+    )
   })
 
   it('Toast có mặt đúng MỘT lần ở cấp toàn cục', async () => {
@@ -409,12 +455,26 @@ describe('C3 + C5 (task-26-carry.md): mọi đích điều hướng dẫn tới 
         'tok-1',
         { id: 1, email: 'admin@ptsc.local', full_name: 'Quản trị Ban ATCL', position: null },
         { id: 1, code: 'HO', name: 'Ban ATCL' },
-        ['dashboard.view', 'status.view', 'report.view_own_unit'],
+        // Lát 8: BA quyền quản trị thêm vào đây có mục đích — ba mục "Mẫu báo cáo / Tổ chức /
+        // Người dùng" chỉ dựng ra href khi có đúng quyền của chúng, nên thiếu chúng ở đây là ba
+        // đích mới KHÔNG được nguồn 1 kiểm, dù đó chính là việc của nguồn 1.
+        ['dashboard.view', 'status.view', 'report.view_own_unit',
+         'template.manage', 'org.manage', 'user.manage'],
       )
+    // Từ Lát 5, Sidebar đọc `/dashboard/summary` để hiện hai huy hiệu đếm nên nó cần thêm một
+    // QueryClient — vẫn là ĐÚNG singleton sản xuất, theo doctrine của file này (xem đầu file), chứ
+    // không phải một client riêng. `fetch` đã bị stub trả `{status:'ok'}` cho MỌI URL, nên thân
+    // tổng hợp là một object méo: Sidebar phải tự chịu được và không vẽ huy hiệu nào. Ca này chỉ
+    // đo ĐÍCH của các href.
     const { container } = render(
-      <MemoryRouter>
-        <Sidebar />
-      </MemoryRouter>,
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          {/* Sidebar dựng trên bộ shadcn từ Lát 1 nên cần context của SidebarProvider. */}
+          <SidebarProvider>
+            <Sidebar />
+          </SidebarProvider>
+        </MemoryRouter>
+      </QueryClientProvider>,
     )
     const hrefs = [...container.querySelectorAll('a')].map((a) => a.getAttribute('href') ?? '')
     expect(hrefs.length).toBeGreaterThan(0)
@@ -504,9 +564,22 @@ describe('C3 + C5 (task-26-carry.md): mọi đích điều hướng dẫn tới 
   // bỏ sót hoàn toàn. Trước bản vá này, ca này khoá đúng LỖ THỦNG (thiếu `/dashboard`) chứ không
   // khoá hành vi đúng — nới rộng bộ quét ra đúng mà ca lại đỏ, tự chặn chính bản vá của nó. Tập kỳ
   // vọng dưới đây cập nhật CÙNG LÚC với bản vá routeScan.ts, không tách rời.
+  // Lát 4: `/status?period=${period}` (BaoPhuKy.tsx — lối "Tình trạng nộp →" trên lưới bao phủ) là
+  // phần tử MỚI. Nó KHÔNG chuẩn hoá trùng vào đích nào có sẵn vì mang query, nên tập nở thêm một
+  // phần tử — đúng ý ca này: mỗi lối đi mới phải được khai ở đây rồi mới được ca it.each dưới kiểm.
+  // Lát 2: `/login` là phần tử MỚI — `navigate('/login')` của nút "Đổi tài khoản" trên `Forbidden.tsx`.
+  // Đây là lần ĐẦU một trang trong `src/pages` tự điều hướng về `/login`; trước đó chỉ `RequireAuth`
+  // (ở `src/app/`, ngoài ba thư mục quét) làm việc đó.
   it('nguồn 4: routeScan.ts quét đúng TẬP đích hiện có (khoá tránh regex hẹp lại mà không ai biết)', () => {
     expect(new Set(DUONG_DAN_TRONG_TRANG)).toEqual(
-      new Set(['/reports', '/reports/1', '/reports/1?from=dashboard&period=1#1', '/dashboard']),
+      new Set([
+        '/reports',
+        '/reports/1',
+        '/reports/1?from=dashboard&period=1#1',
+        '/dashboard',
+        '/status?period=1',
+        '/login',
+      ]),
     )
   })
 

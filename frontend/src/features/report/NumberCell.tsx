@@ -187,12 +187,12 @@ export function NumberCell({ value, decimals, ariaLabel, loiNgoai, onChange, onC
         // nên ô nhập cao bằng cả dòng sẽ đặt viền dưới của nó chồng đúng lên hairline của `<td>` —
         // viền đôi mà task-22-carry.md C11 cảnh báo. Bản vẽ chốt sẵn con số: `.cell{height:28px}`.
         // `focus:outline` là "viền trong 2px cyan" của thiết kế (Pass 6), không phải trang trí.
-        className={`block w-full h-7 border rounded-input px-2 bg-surface text-right tnum focus:outline-2 focus:outline-cyan focus:-outline-offset-2 ${
-          loiHienThi ? 'border-danger text-danger' : 'border-hair text-ink'
+        className={`block w-full h-7 border rounded-md px-2 bg-card text-right tnum focus:outline-2 focus:outline-ring focus:-outline-offset-2 ${
+          loiHienThi ? 'border-destructive text-destructive' : 'border-border text-foreground'
         }`}
       />
       {loiHienThi && (
-        <span id={loiId} className="block text-[11px] leading-[1.3] text-danger">
+        <span id={loiId} className="block text-[11px] leading-[1.3] text-destructive">
           {loiHienThi}
         </span>
       )}

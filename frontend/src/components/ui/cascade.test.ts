@@ -20,20 +20,20 @@ describe('resolveCascadeWinnerFromCss — quy tắc lõi', () => {
   })
 
   it('lớp là TIỀN TỐ của lớp khác (border-warning không tồn tại, chỉ border-warningEdge có) → null', () => {
-    // Xác nhận biên khớp lớp không lẫn vào một tên lớp DÀI HƠN có chứa nó làm tiền tố — đúng cặp
-    // tên thật trong dự án (tailwind.config.ts có cả "warning" lẫn "warningEdge").
+    // Xác nhận biên khớp lớp không lẫn vào tên lớp DÀI HƠN có chứa nó làm tiền tố — chuỗi CSS ở
+    // đây tự dựng, không phải token thật (hôm nay chỉ có `--warning`, không có `warningEdge`).
     const css = '.border-warningEdge{border-color:#f59e0b}'
     expect(resolveCascadeWinnerFromCss(css, 'border-warning', 'border-color')).toBeNull()
   })
 
   it('lớp không tồn tại trong CSS → null', () => {
-    const css = '.bg-surface{background-color:#ffffff}'
+    const css = '.bg-card{background-color:#ffffff}'
     expect(resolveCascadeWinnerFromCss(css, 'khong-ton-tai', 'background-color')).toBeNull()
   })
 
   it('lớp tồn tại nhưng KHÔNG khai báo thuộc tính đang hỏi → null', () => {
-    const css = '.border-hair{border-color:#e8e6e5}'
-    expect(resolveCascadeWinnerFromCss(css, 'border-hair', 'margin-top')).toBeNull()
+    const css = '.border-border{border-color:#e8e6e5}'
+    expect(resolveCascadeWinnerFromCss(css, 'border-border', 'margin-top')).toBeNull()
   })
 
   it('lớp có ký tự đặc biệt trong tên (mt-1.5, text-[12px]) → vẫn khớp được', () => {
@@ -53,27 +53,27 @@ describe('resolveCascadeWinnerFromCss — quy tắc lõi', () => {
   })
 
   it('lớp hover: → null — CỐ Ý (P3), không phải bỏ sót', () => {
-    // Resolver chỉ trả lời cho trạng thái NGHỈ. Rule của hover:bg-mutedbg nằm trong
+    // Resolver chỉ trả lời cho trạng thái NGHỈ. Rule của hover:bg-muted nằm trong
     // @media (hover:hover) và có :hover ngay sau tên lớp trong selector — cả hai đặc điểm đều là
     // dấu hiệu "chỉ áp dụng lúc tương tác", bị loại có chủ đích, không phải regex tình cờ trượt.
-    const css = '@media (hover:hover){.hover\\:bg-mutedbg:hover{background-color:#f5f5f4}}'
-    expect(resolveCascadeWinnerFromCss(css, 'hover:bg-mutedbg', 'background-color')).toBeNull()
+    const css = '@media (hover:hover){.hover\\:bg-muted:hover{background-color:#f5f5f4}}'
+    expect(resolveCascadeWinnerFromCss(css, 'hover:bg-muted', 'background-color')).toBeNull()
   })
 
   it('nút có cả nền nghỉ lẫn hover: → chỉ tính nền nghỉ, bỏ qua rule hover (kịch bản Task 18-26)', () => {
-    // Đúng hình dạng nút thật trong InlineError.tsx: "bg-surface ... hover:bg-mutedbg". Nếu
+    // Đúng hình dạng nút thật trong InlineError.tsx: "bg-card ... hover:bg-muted". Nếu
     // resolver lỡ tính luôn rule hover (đứng sau trong CSS thật, offset lớn hơn), kết quả cho
-    // trạng thái nghỉ sẽ sai thành bg-mutedbg dù nút chưa được hover.
+    // trạng thái nghỉ sẽ sai thành bg-muted dù nút chưa được hover.
     const css =
-      '.bg-surface{background-color:#ffffff}@media (hover:hover){.hover\\:bg-mutedbg:hover{background-color:#f5f5f4}}'
-    expect(resolveCascadeWinnerFromCss(css, 'bg-surface hover:bg-mutedbg', 'background-color')).toBe('bg-surface')
+      '.bg-card{background-color:#ffffff}@media (hover:hover){.hover\\:bg-muted:hover{background-color:#f5f5f4}}'
+    expect(resolveCascadeWinnerFromCss(css, 'bg-card hover:bg-muted', 'background-color')).toBe('bg-card')
   })
 })
 
-// fix-3 L9 (R14/R13). `resolveDeclaredValue` là thứ DUY NHẤT bù cho việc `Dialog` không gọi
+// fix-3 L9 (R14/R13). `resolveDeclaredValue` là thứ DUY NHẤT bù cho việc `DialogXacNhan` không gọi
 // `showModal()` — hai ca "lớp phủ phủ kín bốn cạnh" và "z-index lớp phủ > z-index header cột dính"
 // đều so GIÁ TRỊ. Trước vòng này nó không có một ca đơn vị nào, và đã đo được: đổi sentinel `null`
-// thành `'0'` rồi bỏ `inset-0` khỏi lớp phủ thì `Dialog.test.tsx` vẫn 35/35 xanh.
+// thành `'0'` rồi bỏ `inset-0` khỏi lớp phủ thì `DialogXacNhan.test.tsx` vẫn 35/35 xanh.
 describe('resolveDeclaredValueFromCss — giá trị của lớp thắng', () => {
   it('lấy GIÁ TRỊ của lớp thắng, không phải tên lớp', () => {
     const css = '.z-50{z-index:50}'

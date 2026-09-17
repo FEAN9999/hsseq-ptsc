@@ -13,27 +13,27 @@ const LABEL: Record<ChipKind, string> = {
 // Chữ theo tokens.css: .c-ok/.c-sub/.c-ret/.c-draft/.c-none — "late" dùng chung màu với
 // "submitted" (đúng mockup status.html). Nền tách riêng ở KIND_BG bên dưới — xem lý do ở đó.
 const KIND_TEXT: Record<ChipKind, string> = {
-  approved: 'text-success',
-  submitted: 'text-warning',
-  late: 'text-warning',
-  returned: 'text-danger',
-  draft: 'text-draft',
-  missing: 'text-sec',
+  approved: 'text-success-foreground',
+  submitted: 'text-warning-foreground',
+  late: 'text-warning-foreground',
+  returned: 'text-destructive',
+  draft: 'text-secondary-foreground',
+  missing: 'text-muted-foreground',
 }
 
 // Nền riêng theo kind — cùng lý do tách KIND_BORDER (fix S1, vòng sửa 1): utility background-color
 // trong Tailwind cùng độ đặc hiệu, đứng sau trong CSS build ra là thắng bất kể thứ tự viết trong
 // JSX. Vòng sửa 3 — P1: trước đây outline CỘNG THÊM 'bg-transparent' cạnh bg-* của kind thay vì
 // THAY THẾ, nên kind nào có nền đứng SAU 'bg-transparent' trong CSS thật (submitted/late:
-// bg-warningBg) vẫn thắng, chip outline hiện nền vàng thay vì trong suốt — đúng lỗi S1, chỉ khác
+// bg-warning-bg) vẫn thắng, chip outline hiện nền vàng thay vì trong suốt — đúng lỗi S1, chỉ khác
 // background-color thay vì border-color. Sửa triệt để như S1: tách bg-* khỏi KIND_TEXT, để mỗi
 // chip chỉ được phép có ĐÚNG MỘT utility background-color (xem hàm Chip bên dưới).
 const KIND_BG: Record<ChipKind, string> = {
-  approved: 'bg-successBg',
-  submitted: 'bg-warningBg',
-  late: 'bg-warningBg',
-  returned: 'bg-dangerBg',
-  draft: 'bg-mutedbg',
+  approved: 'bg-success-bg',
+  submitted: 'bg-warning-bg',
+  late: 'bg-warning-bg',
+  returned: 'bg-destructive-bg',
+  draft: 'bg-muted',
   missing: 'bg-transparent',
 }
 
@@ -45,7 +45,7 @@ const KIND_BORDER: Record<ChipKind, string> = {
   late: 'border-transparent',
   returned: 'border-transparent',
   draft: 'border-transparent',
-  missing: 'border-hair',
+  missing: 'border-border',
 }
 
 // Task 26: testId/ariaDisabled — hai prop TUỲ CHỌN, mặc định không render thuộc tính nào (không

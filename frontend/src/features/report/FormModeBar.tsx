@@ -79,15 +79,15 @@ export function FormModeBar({
     // nút bên phải nằm ĐÚNG dưới Toast (`fixed right-6 bottom-6`) — bấm Duyệt xong, nút tiếp theo
     // không ăn suốt 4 giây. `bottom-[var(--toast-cao)]` cho thanh lùi lên đúng dải Toast đang
     // chiếm; biến mặc định `0px` (index.css) nên khi không có Toast thì thanh đứng y chỗ cũ.
-    <div className="sticky bottom-[var(--toast-cao)] -mx-6 -mb-6 mt-3 flex items-center justify-between gap-4 bg-surface border-t border-hair px-5 py-3 text-table">
+    <div className="sticky bottom-[var(--toast-cao)] -mx-6 -mb-6 mt-3 flex items-center justify-between gap-4 bg-card border-t border-border px-5 py-3 text-sm">
       <div>
         {cauDan !== null ? (
-          <span className="text-warning">{cauDan}</span>
+          <span className="text-warning-foreground">{cauDan}</span>
         ) : thieuBatBuoc.length > 0 ? (
-          <span className="text-danger">
+          <span className="text-destructive">
             Thiếu {thieuBatBuoc.length} ô bắt buộc:{' '}
             {hienThi.map((ma) => (
-              <a key={ma} href={`#${maNeo(ma)}`} className="text-danger font-medium underline mr-1.5">
+              <a key={ma} href={`#${maNeo(ma)}`} className="text-destructive font-medium underline mr-1.5">
                 {ma}
               </a>
             ))}
@@ -97,7 +97,7 @@ export function FormModeBar({
           // D25: bộ đếm lệch KHÔNG chặn nộp — câu này chỉ để người duyệt (và người nộp) biết vì
           // sao không có gì chặn họ lại.
           soDemLech > 0 && (
-            <span className="text-warning">
+            <span className="text-warning-foreground">
               {soDemLech} bộ đếm lệch công thức chưa có ghi chú · vẫn được nộp
             </span>
           )

@@ -23,7 +23,7 @@ import { useEffect, useMemo, useReducer, useRef } from 'react'
 import { useBlocker } from 'react-router-dom'
 
 import { Banner } from '../../components/ui/Banner'
-import { Dialog } from '../../components/ui/Dialog'
+import { DialogXacNhan } from '../../components/ui/DialogXacNhan'
 import { useSession } from '../../app/session'
 import type { ApiErrorItem } from '../../api/client'
 import { parseViNumber } from '../../lib/parseViNumber'
@@ -361,7 +361,7 @@ function dongTrangThaiLuu(l: KetQuaLuu, loiLamMoi: boolean): { chu: string; canh
 
 // ---------------------------------------------------------------- ô của bảng
 
-const TD = 'h-9 px-3 border-b border-hair align-middle'
+const TD = 'h-9 px-3 border-b border-border align-middle'
 
 /** Ô CHỈ ĐỌC: `<td>` chữ thường. `aria-label` trên chính `<td>` (không phải trên một `<span>` bên
  * trong) để trình đọc màn hình và test gọi ô bằng đúng một cái tên với ô nhập cùng cột.
@@ -370,7 +370,7 @@ const TD = 'h-9 px-3 border-b border-hair align-middle'
  * (`.num.sec`) để tách khỏi số do người nhập gõ, vốn giữ màu mực chính kể cả khi form đã khoá. */
 function ODoc({ nhan, value, decimals, mo }: { nhan: string; value: number | null; decimals: number; mo: boolean }) {
   return (
-    <td aria-label={nhan} className={`${TD} text-right tnum ${mo ? 'text-sec' : 'text-ink'}`}>
+    <td aria-label={nhan} className={`${TD} text-right tnum ${mo ? 'text-muted-foreground' : 'text-foreground'}`}>
       {dinhDangSoBang(value, decimals)}
     </td>
   )
@@ -669,38 +669,50 @@ export function ReportForm({ mau, chiTiet, loiLamMoi = false }: ReportFormProps)
         </Banner>
       )}
 
-      <div className="grid grid-cols-[1fr_160px] gap-4 items-start">
+      {/* Dưới 1280px, mục lục KHÔNG còn là một cột bên phải mà xuống thành một dải nằm TRÊN bảng.
+          Lý do là số học: ở 1024px (đúng 1280 xem ở 125%, viewport `zoom-125` của bộ e2e) chỗ
+          trống thật chỉ 1024 − 256 sidebar − 48 đệm = 720px; cắt thêm 176px cho mục lục thì bảng
+          còn 528px và hai cột phải nằm ngoài tầm nhìn — đúng lúc người trình bày phóng to để dễ
+          đọc thì lại mất cột "Cộng dồn" vừa đổi. Xuống dải thì bảng lấy trọn 720px và vừa khít.
+          Mục lục vẫn nằm nguyên trong DOM ở mọi bề rộng — không `display:none`, không đánh đổi
+          bằng việc bộ test jsdom (không nạp CSS) xanh vì một lý do không có thật trên trình duyệt. */}
+      <div className="grid grid-cols-1 items-start gap-3 xl:grid-cols-[1fr_176px] xl:gap-4">
         <div
           // Khung cuộn RIÊNG của bảng, cuộn cả hai chiều: header cột `sticky top-0` chỉ dính được
           // bên trong một khung CÓ cuộn dọc. `overflow-x-auto` trần (như bản vẽ tĩnh viết) biến
           // khung thành vùng cuộn nhưng cao bằng nội dung, nên không có gì để dính vào và header
           // trôi mất theo trang. Cao tối đa = màn hình trừ dải đầu + thanh dưới.
-          className="min-w-0 max-h-[calc(100vh-13rem)] overflow-auto border border-hair bg-surface rounded-input"
+          className="order-2 min-w-0 max-h-[calc(100vh-13rem)] overflow-auto border border-border bg-card rounded-xl xl:order-1"
         >
-          <table className="w-full border-collapse text-table">
+          {/* `min-w-[700px]` đặt trên BẢNG, không phải trên từng cột: đó là bề rộng tối thiểu để
+              bảy cột còn đọc được, và dưới ngưỡng đó thì cuộn ngang TRONG khung là hành vi đúng.
+              Trước đây mỗi cột tự khai bề rộng cứng (`Chỉ tiêu` 400px, `Ghi chú` min 240px) cộng
+              lại 1088px — quá chỗ trống thật (1280 − sidebar 256 − đệm 48 − mục lục 176 = 800px),
+              nên ở đúng viewport demo cột "Cộng dồn" bị cắt mất. Nay hai cột chữ co giãn theo %. */}
+          <table className="w-full min-w-[700px] border-collapse text-sm">
             <thead>
               <tr>
-                <th className="sticky top-0 z-20 h-9 px-3 bg-mutedbg border-b border-hair text-tableHead font-semibold text-left w-[400px] min-w-[400px] whitespace-normal">
+                <th className="sticky top-0 z-20 h-9 px-3 bg-muted border-b border-border text-[13.5px] text-sec font-semibold text-left w-[34%] min-w-[190px] whitespace-normal">
                   Chỉ tiêu
                 </th>
-                <th className="sticky top-0 z-20 h-9 px-3 bg-mutedbg border-b border-hair text-tableHead font-semibold text-left w-16 whitespace-nowrap">
+                <th className="sticky top-0 z-20 h-9 px-3 bg-muted border-b border-border text-[13.5px] text-sec font-semibold text-left w-14 whitespace-nowrap">
                   ĐVT
                 </th>
-                <th className="sticky top-0 z-20 h-9 px-3 bg-mutedbg border-b border-hair text-tableHead font-semibold text-right w-32 whitespace-nowrap">
+                <th className="sticky top-0 z-20 h-9 px-3 bg-muted border-b border-border text-[13.5px] text-sec font-semibold text-right w-[100px] whitespace-nowrap">
                   Lũy kế tháng trước
                 </th>
-                <th className="sticky top-0 z-20 h-9 px-3 bg-mutedbg border-b border-hair text-tableHead font-semibold text-right w-32 whitespace-nowrap">
+                <th className="sticky top-0 z-20 h-9 px-3 bg-muted border-b border-border text-[13.5px] text-sec font-semibold text-right w-[100px] whitespace-nowrap">
                   Tháng này
                 </th>
-                <th className="sticky top-0 z-20 h-9 px-3 bg-mutedbg border-b border-hair text-tableHead font-semibold text-right w-32 whitespace-nowrap">
+                <th className="sticky top-0 z-20 h-9 px-3 bg-muted border-b border-border text-[13.5px] text-sec font-semibold text-right w-[100px] whitespace-nowrap">
                   Cộng dồn
                 </th>
                 {coCotLech && (
-                  <th className="sticky top-0 z-20 h-9 px-3 bg-mutedbg border-b border-hair text-tableHead font-semibold text-right w-24 whitespace-nowrap">
+                  <th className="sticky top-0 z-20 h-9 px-3 bg-muted border-b border-border text-[13.5px] text-sec font-semibold text-right w-20 whitespace-nowrap">
                     Lệch
                   </th>
                 )}
-                <th className="sticky top-0 z-20 h-9 px-3 bg-mutedbg border-b border-hair text-tableHead font-semibold text-left min-w-[240px]">
+                <th className="sticky top-0 z-20 h-9 px-3 bg-muted border-b border-border text-[13.5px] text-sec font-semibold text-left min-w-[110px]">
                   Ghi chú
                 </th>
               </tr>
@@ -729,7 +741,11 @@ export function ReportForm({ mau, chiTiet, loiLamMoi = false }: ReportFormProps)
             hai nhóm đó không sinh hàng nào trong bảng nhưng vẫn là hai đích nhảy mà approve.html
             vẽ rõ; nhóm C nằm dưới 53 dòng nên mất mục lục là mất đúng cú nhảy một phát (fix-1 S6).
             Lọc `nhomCoDong` chỉ đúng cho HÀNG TIÊU ĐỀ trong bảng, không đúng cho điều hướng trang. */}
-        <nav className="sticky top-4 bg-surface border border-hair rounded-tile py-2.5 text-xs">
+        <nav
+          // Dải hẹp: MỘT dòng cuộn ngang, không phải khối tự xuống dòng — ở 640px chiều cao (viewport
+          // `zoom-125`) một khối ba dòng ăn mất ~90px, đúng phần chỗ mà bảng 53 dòng đang cần.
+          className="order-1 flex gap-x-1 overflow-x-auto rounded-xl border border-border bg-card p-1.5 text-xs xl:sticky xl:top-4 xl:order-2 xl:block xl:overflow-visible xl:p-0 xl:py-2.5"
+        >
           {/* P7 (Ruling 427): bỏ ĐÚNG mục A khi `FormHeader` không dựng khối phần đầu — cùng vị từ
               `coPhanDau`, không phải một điều kiện chép lại. Lọc theo MÃ chứ không theo "nhóm có
               sinh hàng không": lọc kiểu sau nuốt luôn C (3 ô văn bản dưới bảng), đúng lỗi fix-1 S6
@@ -737,7 +753,11 @@ export function ReportForm({ mau, chiTiet, loiLamMoi = false }: ReportFormProps)
           {mau.sections
             .filter((nhom) => nhom.code !== MA_NHOM_PHAN_DAU || coPhanDau(chiTiet.header))
             .map((nhom) => (
-              <a key={nhom.code} href={`#${nhom.code}`} className="block px-3 py-1.5 text-soot no-underline hover:bg-mutedbg">
+              <a
+                key={nhom.code}
+                href={`#${nhom.code}`}
+                className="shrink-0 whitespace-nowrap rounded-md px-2 py-1 text-secondary-foreground no-underline hover:bg-muted xl:block xl:whitespace-normal xl:rounded-none xl:px-3 xl:py-1.5"
+              >
                 {nhom.code}. {nhom.name_vi}
               </a>
             ))}
@@ -777,15 +797,15 @@ export function ReportForm({ mau, chiTiet, loiLamMoi = false }: ReportFormProps)
       />
 
       {/* MỘT cổng duy nhất: `dangHoi !== null` vừa là điều kiện dựng vừa là "hộp thoại đang mở".
-          `Dialog` cố ý KHÔNG có prop `open` — giữ cả hai thì prop `open` không bao giờ `false`
+          `DialogXacNhan` cố ý KHÔNG có prop `open` — giữ cả hai thì prop `open` không bao giờ `false`
           trong app thật, một nhánh chỉ test đi qua. `dangHoi` gán ra `const` trước: phép
           thu hẹp "khác null" của TypeScript chỉ sống trong closure `onConfirm` khi nó nhìn vào
           một binding không đổi. */}
-      {/* P4: hộp thoại của đường CHẶN. Cùng `Dialog` với bốn chuyển trạng thái — không dựng khuôn
+      {/* P4: hộp thoại của đường CHẶN. Cùng `DialogXacNhan` với bốn chuyển trạng thái — không dựng khuôn
           hỏi thứ hai. `danger` vì nút chính đúng là phá đi thứ người dùng vừa gõ. Câu nói ra ĐÚNG
           số ô sẽ mất: "Bạn có chắc không?" chỉ là một câu câm kiểu khác. */}
       {chanRoiTrang.state === 'blocked' && (
-        <Dialog
+        <DialogXacNhan
           title="Còn ô chưa lưu"
           body={`${luuGiaTri.dirtyCount} ô vừa nhập chưa được gửi lên máy chủ. Rời trang bây giờ là mất số đó.`}
           confirmLabel="Rời trang, bỏ số"
@@ -796,7 +816,7 @@ export function ReportForm({ mau, chiTiet, loiLamMoi = false }: ReportFormProps)
       )}
 
       {dangHoi !== null && (
-        <Dialog
+        <DialogXacNhan
           {...noiDungDialog(dangHoi, chiTiet.header)}
           pending={chuyen.pending}
           // `s.version` chứ không phải `chiTiet.version`: mỗi lần lưu server trả về số mới và
@@ -916,19 +936,19 @@ function Dong({
       if (kq.error === null) markDirty(ct.code, oDoi(cot, kq.value))
     }
   return (
-    <tr id={maNeo(ct.code)} className="scroll-mt-20 focus-within:bg-canvas">
-      <td className={`${TD} whitespace-normal text-ink`} title={ct.name_en}>
+    <tr id={maNeo(ct.code)} className="scroll-mt-20 focus-within:bg-background">
+      <td className={`${TD} whitespace-normal text-foreground`} title={ct.name_en}>
         {ten}
         {ct.formula && (
           // D9: dòng tự tính nói bằng icon khoá + title công thức, KHÔNG bằng một dòng chữ giải
           // thích dưới dòng (ghi chú wireframe lọt thành footer là một hard rejection).
-          <span className="ml-1 text-[11px] text-sec" title={`Tự tính = ${ct.formula.split(',').join(' + ')}`}>
+          <span className="ml-1 text-[11px] text-muted-foreground" title={`Tự tính = ${ct.formula.split(',').join(' + ')}`}>
             🔒 tự tính
           </span>
         )}
-        {lech && <span className="block text-[11px] leading-[1.3] text-warning whitespace-normal">{lech}</span>}
+        {lech && <span className="block text-[11px] leading-[1.3] text-warning-foreground whitespace-normal">{lech}</span>}
       </td>
-      <td className={`${TD} text-sec whitespace-nowrap`}>{ct.unit ?? ''}</td>
+      <td className={`${TD} text-muted-foreground whitespace-nowrap`}>{ct.unit ?? ''}</td>
       <OGiaTri
         mode={cs.accPrev}
         suaDuoc={suaDuoc}
@@ -977,11 +997,14 @@ function Dong({
             onBlur={() => {
               if (ghiChu !== (sv.note ?? '')) markDirty(ct.code, { note: ghiChu })
             }}
-            className="block w-full h-7 border border-hair rounded-input px-2 bg-surface text-ink focus:outline-2 focus:outline-cyan focus:-outline-offset-2"
+            // Viền TRONG SUỐT cho tới khi rê chuột/đặt con trỏ: 53 ô ghi chú luôn-có-viền là 53
+            // cái hộp rỗng tranh mắt với hai cột số — thứ người nhập thật sự phải nhìn. Giữ
+            // nguyên `border` (chỉ đổi MÀU) để lúc hiện viền không đẩy lệch một pixel nào.
+            className="block h-7 w-full rounded-md border border-transparent bg-transparent px-2 text-foreground hover:border-border focus:border-border focus:bg-card focus:outline-2 focus:outline-ring focus:-outline-offset-2"
           />
         </td>
       ) : (
-        <td className={`${TD} text-soot whitespace-normal`}>{ghiChu}</td>
+        <td className={`${TD} text-secondary-foreground whitespace-normal`}>{ghiChu}</td>
       )}
     </tr>
   )
@@ -1010,7 +1033,7 @@ function OChu({
     <div>
       {suaDuoc ? (
         <>
-          <label htmlFor={`chu-${ma}`} className="block text-xs font-medium text-soot mb-1">
+          <label htmlFor={`chu-${ma}`} className="block text-xs font-medium text-secondary-foreground mb-1">
             {ma}. {nhan}
           </label>
           <textarea
@@ -1024,18 +1047,18 @@ function OChu({
               onDoi(e.target.value)
             }}
             onBlur={onRoiO}
-            className="block w-full min-h-24 border border-hair rounded-input px-2.5 py-2 bg-surface text-table text-soot focus:outline-2 focus:outline-cyan focus:-outline-offset-2"
+            className="block w-full min-h-24 border border-border rounded-md px-2.5 py-2 bg-card text-sm text-secondary-foreground focus:outline-2 focus:outline-ring focus:-outline-offset-2"
           />
-          <div className="text-[11px] text-sec text-right mt-0.5">
+          <div className="text-[11px] text-muted-foreground text-right mt-0.5">
             {noiDung.length}/{TOI_DA_CHU}
           </div>
         </>
       ) : (
         <>
-          <div className="block text-xs font-medium text-soot mb-1">
+          <div className="block text-xs font-medium text-secondary-foreground mb-1">
             {ma}. {nhan}
           </div>
-          <div className="min-h-24 border border-hair rounded-input px-2.5 py-2 bg-surface text-table text-soot whitespace-pre-wrap">
+          <div className="min-h-24 border border-border rounded-md px-2.5 py-2 bg-card text-sm text-secondary-foreground whitespace-pre-wrap">
             {noiDung}
           </div>
         </>

@@ -9,7 +9,7 @@
 //   1) `.closest('div')` của brief KHÔNG tới được div gốc của Tile: label/value trong Tile.tsx
 //      (carry C4, không được sửa) TỰ nó đã là <div>, nên `.closest('div')` trả về CHÍNH nó (MDN:
 //      closest() tự kiểm phần tử trước khi lên tổ tiên) — assert luôn xem nhầm className của
-//      div nhãn/số, không phải div gốc mang 'bg-dangerBg'/'flash'. Sửa bằng `.closest('.rounded-tile')`
+//      div nhãn/số, không phải div gốc mang màu nền/'flash'. Sửa bằng `.closest('.rounded-xl')`
 //      (test 2, dùng chung Dashboard) và `container.firstElementChild` (test 7, render Tile đơn lẻ
 ///     — đúng khuôn ui.test.tsx đã dùng cho chính Tile).
 //   2) Neo `#B-2-1` (brief) là mã FAT, không phải LTI — app/seed/catalog_fm01.py:77-78 xác nhận
@@ -24,10 +24,12 @@ import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
+import { MemoryRouter, Route, Routes, useLocation, useSearchParams } from 'react-router-dom'
 
 import { Dashboard } from './Dashboard'
-import { KpiTile } from '../features/dashboard/KpiTile'
+import { BangChiSo } from '../features/dashboard/BangChiSo'
+import { TheSoLieu } from '../features/dashboard/TheSoLieu'
+import type { KpiItem } from '../features/dashboard/useSummary'
 import type { UnitRow } from '../features/dashboard/useUnits'
 import { queryClient as queryClientSanXuat } from '../app/queryClient'
 
@@ -138,13 +140,43 @@ function DichDen() {
   )
 }
 
-function renderDashboard(initialPath = '/dashboard') {
+// Ô trên panel tối "Chỉ số an toàn": từ NHÃN đi lên khối ô rồi lấy phần tử mang con số. Đi qua
+// nhãn (chữ bản vẽ) thay vì chỉ số cứng để một lần hoán vị hai ô vẫn lộ ra.
+function soCuaO(nhan: HTMLElement): HTMLElement {
+  const o = nhan.parentElement!
+  const so = o.querySelector('.font-mono')
+  if (!so) throw new Error(`không tìm thấy phần tử số trong ô "${nhan.textContent}"`)
+  return so as HTMLElement
+}
+
+// Bộ chọn kỳ nay chỉ còn trên sidebar (ca của nó ở AppShell.test.tsx), nhưng vài ca DƯỚI ĐÂY đo
+// chính phản ứng của Dashboard khi `?period=` ĐỔI — keepPreviousData, tính ổn định của key dòng.
+// Nút này là cách gõ vào đúng cái công tắc thật (tham số URL) mà không phải dựng cả AppShell; nó
+// chỉ có mặt khi ca test xin, để không thêm một <button> lạ vào mọi ca khác.
+function NutDoiKyTest({ den }: { den: string }) {
+  const [, setSearchParams] = useSearchParams()
+  return (
+    <button type="button" onClick={() => setSearchParams({ period: den }, { replace: true })}>
+      đổi-kỳ-test
+    </button>
+  )
+}
+
+function renderDashboard(initialPath = '/dashboard', doiKyDen?: string) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={qc}>
       <MemoryRouter initialEntries={[initialPath]}>
         <Routes>
-          <Route path="/dashboard" element={<Dashboard />} />
+          <Route
+            path="/dashboard"
+            element={
+              <>
+                <Dashboard />
+                {doiKyDen !== undefined && <NutDoiKyTest den={doiKyDen} />}
+              </>
+            }
+          />
           <Route path="*" element={<DichDen />} />
         </Routes>
       </MemoryRouter>
@@ -171,10 +203,10 @@ describe('/dashboard', () => {
     expect(screen.queryByText('0')).toBeNull()
     // Vòng sửa 2 (task-25-fix-2.md P6-P10/M-11+M-32, task-25-rereview-1.md mục 9 [NHẸ]): nhánh
     // `approvedCount === 0` (Coverage.tsx) — bỏ `mb-5` (M-11, mất khoảng cách dưới dòng coverage,
-    // đẩy sát lưới KPI) hoặc đổi `text-sec` thành `text-ink` (M-32, mất tín hiệu "đây là dòng phụ,
+    // đẩy sát lưới KPI) hoặc đổi `text-sec` thành `text-foreground` (M-32, mất tín hiệu "đây là dòng phụ,
     // không phải nội dung chính") đều vẫn xanh vì không ca nào đọc class của CHÍNH nhánh này.
     expect(coverage.className).toContain('mb-5')
-    expect(coverage.className).toContain('text-sec')
+    expect(coverage.className).toContain('text-muted-foreground')
   })
 
   it('LTI > 0 thì ô đỏ', async () => {
@@ -183,8 +215,9 @@ describe('/dashboard', () => {
       kpis: DEFAULT_SUMMARY.kpis.map((k) => (k.code === 'B-2.2' ? { ...k, value: 2 } : k)),
     })
     renderDashboard()
-    const nhan = await screen.findByText('LTI trong kỳ')
-    expect(nhan.closest('.rounded-tile')?.className).toContain('bg-dangerBg')
+    // Lát 4: ba chỉ tiêu mục tiêu-0 nằm trên panel TỐI, nên tín hiệu đỏ là MÀU SỐ
+    // (`text-danger-on-dark`), không còn là nền `bg-destructive-bg` của Tile nền sáng.
+    expect(soCuaO(await screen.findByText('LTI trong kỳ')).className).toContain('text-danger-on-dark')
   })
 
   // Nửa sau của tên ca 2 (brief chỉ assert nửa đầu ở thân ca gốc) — khoá luôn nhánh còn lại để
@@ -195,8 +228,9 @@ describe('/dashboard', () => {
       kpis: DEFAULT_SUMMARY.kpis.map((k) => (k.code === 'B-2.2' ? { ...k, value: 0 } : k)),
     })
     renderDashboard()
-    const nhan = await screen.findByText('LTI trong kỳ')
-    expect(nhan.closest('.rounded-tile')?.className).not.toContain('bg-dangerBg')
+    const so = soCuaO(await screen.findByText('LTI trong kỳ'))
+    expect(so.className).not.toContain('text-danger-on-dark')
+    expect(so.className).toContain('text-white')
   })
 
   it('coverage liệt kê tối đa 4 tên đơn vị chưa nộp rồi +n', async () => {
@@ -283,10 +317,10 @@ describe('/dashboard', () => {
 
   it('đổi kỳ giữ dữ liệu cũ trong lúc tải (keepPreviousData), không nháy skeleton', async () => {
     moiApi()
-    renderDashboard()
+    renderDashboard('/dashboard', '2026-07')
     await screen.findByText('PTSC Đình Vũ')
     const fCham = moiApiCham() // request kỳ mới treo
-    await userEvent.click(screen.getByRole('button', { name: '‹ 07/2026' }))
+    await userEvent.click(screen.getByRole('button', { name: 'đổi-kỳ-test' }))
     expect(screen.getByText('PTSC Đình Vũ')).toBeTruthy() // bảng cũ còn nguyên
     expect(screen.queryByTestId('skeleton')).toBeNull()
     // Xác nhận kỳ ĐÃ thật sự đổi (không phải nút không làm gì nên hai khẳng định "không đổi gì" ở
@@ -309,38 +343,14 @@ describe('/dashboard', () => {
   // tái dùng ĐÚNG node cũ (cùng tham chiếu), key đổi mỗi lần render (Math.random()) thì không.
   it('key theo mã đơn vị ổn định: đổi kỳ (keepPreviousData) không dựng lại DOM node của dòng (M-47)', async () => {
     moiApi()
-    renderDashboard()
+    renderDashboard('/dashboard', '2026-07')
     await screen.findByText('PTSC Đình Vũ')
     const dongTruoc = screen.getByText('Đơn vị U05').closest('tr')!
     moiApiCham() // request kỳ mới treo — buộc re-render với rows CŨ (keepPreviousData)
-    await userEvent.click(screen.getByRole('button', { name: '‹ 07/2026' }))
+    await userEvent.click(screen.getByRole('button', { name: 'đổi-kỳ-test' }))
     expect(screen.queryByTestId('skeleton')).toBeNull() // đã re-render thật, không còn ở lần tải đầu
     const dongSau = screen.getByText('Đơn vị U05').closest('tr')!
     expect(dongSau).toBe(dongTruoc)
-  })
-
-  it('nút kỳ sau hiện đúng "09/2026 ›" và bấm vào đổi đúng period', async () => {
-    const f = moiApi()
-    renderDashboard()
-    await screen.findByText('PTSC Đình Vũ')
-    await userEvent.click(await screen.findByRole('button', { name: '09/2026 ›' }))
-    await waitFor(() => {
-      const urls = f.mock.calls.map(([u]) => String(u))
-      expect(urls.some((u) => u.includes('period=2026-09'))).toBe(true)
-    })
-  })
-
-  // congThang dùng Date.UTC nên tự tràn năm đúng (JS chuẩn hoá tháng âm/>11) — không test qua ranh
-  // giới năm thì mutation "lấy `nam` gốc thay vì d.getUTCFullYear()" (đúng với MỌI kỳ giữa năm,
-  // vd. 2026-08 dùng ở các ca trên) sống sót, chỉ lộ sai ở kỳ đầu/cuối năm.
-  //
-  // P2: dải kỳ của ca này phải BAO kỳ 2026-01 và kỳ liền trước nó — nếu không, 2026-01 rơi vào
-  // nhánh "kỳ ngoài dải" và PeriodNav không còn được vẽ, ca mất đối tượng đo. Dải riêng giữ ĐÚNG
-  // thứ ca này đang đo (số học tràn năm), không đo lây sang chuyện biên.
-  it('congThang qua ranh giới năm: kỳ 01/2026 thì nút lùi hiện "‹ 12/2025"', async () => {
-    moiApi({}, ['2025-11', '2025-12', '2026-01', '2026-02'].map((period_key) => ({ period_key, is_open: false })))
-    renderDashboard('/dashboard?period=2026-01')
-    expect(await screen.findByRole('button', { name: '‹ 12/2025' })).toBeTruthy()
   })
 
   it('click số LTI của một đơn vị mở đúng báo cáo bằng điều hướng SPA thật', async () => {
@@ -360,9 +370,15 @@ describe('/dashboard', () => {
     moiApi()
     renderDashboard()
     // "Near miss" khớp CẢ nhãn ô KPI lẫn tiêu đề cột bảng (cùng chữ) — lọc lấy đúng cái nằm trong
-    // một ô KPI (.rounded-tile), bỏ qua tiêu đề cột.
-    const oKpi = (await screen.findAllByText('Near miss')).find((el) => el.closest('.rounded-tile'))
-    expect(oKpi?.closest('.rounded-tile')?.className).not.toContain('bg-dangerBg')
+    // một ô KPI (.rounded-xl). rounded-xl không còn là tên RIÊNG của Tile (card.tsx của shadcn
+    // cũng dùng), nhưng .closest() lấy tổ tiên GẦN NHẤT: nhãn "Near miss" của bảng nằm trong
+    // .rounded-md (UnitsTable.tsx), không có tổ tiên .rounded-xl nào cho tới document — đã đo
+    // trực tiếp, không phải bằng grep: gốc bảng tự khai bán kính NHỎ HƠN (UnitsTable.tsx:87), còn
+    // hai nơi DUY NHẤT trong Dashboard.tsx tự khai bán kính LỚN đó (dòng 117, 138) là hai nhánh
+    // trạng thái rỗng/lỗi, trả về TRƯỚC khi tới bảng ở dòng 215 — không bọc bảng — nên phép lọc
+    // vẫn đúng, bỏ qua tiêu đề cột.
+    const oKpi = (await screen.findAllByText('Near miss')).find((el) => el.closest('.rounded-xl'))
+    expect(oKpi?.closest('.rounded-xl')?.className).not.toContain('bg-destructive-bg')
   })
 
   it('trạng thái: đơn vị có báo cáo hiện chip Đã duyệt, đơn vị chưa nộp hiện chip Chưa nộp', async () => {
@@ -425,11 +441,11 @@ describe('/dashboard', () => {
     const dongChuaNop = (await screen.findByText('PTSC Đình Vũ')).closest('tr')!
     const oChuaNop = within(dongChuaNop).getAllByRole('cell')
     expect(oChuaNop.length).toBeGreaterThan(0)
-    for (const o of oChuaNop) expect(o.className).toContain('text-sec')
+    for (const o of oChuaNop) expect(o.className).toContain('text-muted-foreground')
 
     const dongDaDuyet = screen.getByText('Đơn vị U05').closest('tr')!
     const oDaDuyet = within(dongDaDuyet).getAllByRole('cell')
-    for (const o of oDaDuyet) expect(o.className).not.toContain('text-sec')
+    for (const o of oDaDuyet) expect(o.className).not.toContain('text-muted-foreground')
   })
 
   // Vòng sửa 2 (task-25-fix-2.md P6-P10/M-02+M-25, task-25-rereview-1.md mục 6 [NHẸ]): không ca
@@ -532,9 +548,9 @@ describe('/dashboard', () => {
     // còn sống khi trang đang ở màn 403.
     expect(screen.getByRole('heading', { name: 'Dashboard SKATMT' })).toBeTruthy()
     // Vòng sửa 2 (task-25-fix-2.md P6-P10/M-31, task-25-rereview-1.md mục 9 [NHẸ]): đổi
-    // `rounded-tile` của khung 403 thành `rounded-input` vẫn xanh — không ca nào đọc class bo góc
+    // `rounded-xl` của khung 403 thành `rounded-md` vẫn xanh — không ca nào đọc class bo góc
     // của khung này.
-    expect(screen.getByText('Bạn không có quyền xem dashboard này').className).toContain('rounded-tile')
+    expect(screen.getByText('Bạn không có quyền xem dashboard này').className).toContain('rounded-xl')
   })
 
   // Vòng sửa 2 (task-25-fix-2.md P2/M-01, task-25-rereview-1.md M-01 [VỪA]): `renderDashboard()`
@@ -629,8 +645,7 @@ describe('/dashboard', () => {
       kpis: DEFAULT_SUMMARY.kpis.map((k) => (k.code === 'B-2.1' ? { ...k, value: 1 } : k)),
     })
     renderDashboard()
-    const nhan = await screen.findByText('FAT trong kỳ')
-    expect(nhan.closest('.rounded-tile')?.className).toContain('bg-dangerBg')
+    expect(soCuaO(await screen.findByText('FAT trong kỳ')).className).toContain('text-danger-on-dark')
   })
 
   // B2 (N6, N25): đọc theo HÀNG, ánh xạ tiêu đề cột → giá trị — không theo chỉ số cứng (chỉ số
@@ -656,7 +671,7 @@ describe('/dashboard', () => {
     moiApi()
     renderDashboard()
     const oDau = await screen.findByText('LTI trong kỳ')
-    const luoi = oDau.closest('.rounded-tile')!.parentElement!
+    const luoi = oDau.closest('.rounded-xl')!.parentElement!
     const text = luoi.textContent ?? ''
     const viTri = DEFAULT_SUMMARY.kpis.map((k) => text.indexOf(k.label))
     expect(viTri.every((v) => v !== -1)).toBe(true)
@@ -715,9 +730,9 @@ describe('/dashboard', () => {
     const khungSkeleton = await screen.findByTestId('skeleton')
     expect(khungSkeleton).toBeTruthy()
     // Vòng sửa 2 (task-25-fix-2.md P6-P10/M-21, task-25-rereview-1.md mục 9 [NHẸ]): đổi
-    // `<Skeleton rows={10}/>` (Dashboard.tsx) thành `rows={3}` vẫn xanh — không ca nào đếm số
-    // dòng placeholder thật sự vẽ ra. `.rounded` định vị đúng các <div> DÒNG (Skeleton.tsx) —
-    // <div> bọc ngoài của chính Skeleton không có class này nên không lẫn vào số đếm.
+    // `<SkeletonDong rows={10}/>` (Dashboard.tsx) thành `rows={3}` vẫn xanh — không ca nào đếm số
+    // dòng placeholder thật sự vẽ ra. `.rounded` định vị đúng các <div> DÒNG (SkeletonDong.tsx) —
+    // <div> bọc ngoài của chính SkeletonDong không có class này nên không lẫn vào số đếm.
     expect(khungSkeleton.querySelectorAll('.rounded')).toHaveLength(10)
   })
 
@@ -761,15 +776,6 @@ describe('/dashboard', () => {
   })
 
   // B10 (N5): ô kỳ ĐANG XEM (span giữa) phải hiện đúng kỳ hiện tại, không phải kỳ liền trước —
-  // getByText khớp CHÍNH XÁC toàn bộ text riêng của phần tử, nên không lẫn với chữ "‹ 07/2026"
-  // của nút (nút mang CẢ ký tự "‹ " trong cùng text, khác chuỗi "08/2026" đứng riêng của span).
-  it('ô kỳ đang xem hiện ĐÚNG kỳ đang xem, không phải kỳ liền trước (B10, N5)', async () => {
-    moiApi()
-    renderDashboard()
-    await screen.findByText('PTSC Đình Vũ')
-    expect(screen.getByText('08/2026')).toBeTruthy()
-  })
-
   // B11 (N15): period_key hiện trên dòng bao phủ phải lấy từ MÁY CHỦ trả về, không phải tham số
   // URL — hai nguồn tình cờ trùng nhau ở mọi ca khác nên không phân biệt được nếu không cố ý lệch.
   it('dòng bao phủ lấy period_key theo MÁY CHỦ trả về, không theo tham số URL (B11, N15)', async () => {
@@ -778,41 +784,6 @@ describe('/dashboard', () => {
     expect(await screen.findByText(/Kỳ 07\/2026/)).toBeTruthy()
   })
 
-  // B12 (N16): đổi kỳ phải dùng {replace:true} — nếu không, bấm đổi kỳ rồi bấm Back một lần sẽ
-  // quay lại kỳ TRƯỚC đó thay vì không đi đâu cả (mỗi lần đổi kỳ chỉ THAY chỗ đứng hiện tại, không
-  // đẩy thêm một mục lịch sử mới).
-  it('đổi kỳ dùng {replace:true}: Back một lần sau khi đổi 1 lần KHÔNG quay lại kỳ cũ (B12, N16)', async () => {
-    moiApi()
-    function LuiLai() {
-      const navigate = useNavigate()
-      return (
-        <button type="button" onClick={() => navigate(-1)}>
-          Lùi
-        </button>
-      )
-    }
-    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    render(
-      <QueryClientProvider client={qc}>
-        <MemoryRouter initialEntries={['/dashboard']}>
-          <LuiLai />
-          <Routes>
-            <Route path="/dashboard" element={<Dashboard />} />
-            <Route path="*" element={<DichDen />} />
-          </Routes>
-        </MemoryRouter>
-      </QueryClientProvider>,
-    )
-    await screen.findByText('PTSC Đình Vũ')
-    await userEvent.click(await screen.findByRole('button', { name: '09/2026 ›' }))
-    expect(await screen.findByText('09/2026')).toBeTruthy()
-    await userEvent.click(screen.getByRole('button', { name: 'Lùi' }))
-    // Không có mục lịch sử nào TRƯỚC lần đổi kỳ đầu tiên (nó THAY chỗ đứng ban đầu, không đẩy
-    // thêm) — Back phải là một bước đi vào chỗ trống, kỳ vẫn còn là 09/2026.
-    expect(screen.getByText('09/2026')).toBeTruthy()
-  })
-
-  // B14 (N10): brief nêu MINH THỊ thứ tự khối — coverage → 6 KPI → bảng.
   it('thứ tự khối trên trang: coverage → 6 KPI → bảng (B14, N10)', async () => {
     moiApi()
     const { container } = renderDashboard()
@@ -826,12 +797,18 @@ describe('/dashboard', () => {
     expect(iBang).toBeGreaterThan(iKpi)
   })
 
-  // B14 (N11): brief nêu MINH THỊ lưới 3×2 (grid-cols-3) — grid-cols-2 đẩy bảng xuống dưới màn.
-  it('lưới KPI dùng đúng 3 cột (grid-cols-3), không phải 2 (B14, N11)', async () => {
+  // B14 (N11): brief cũ nêu lưới 3×2 (grid-cols-3). Lát 4 chia sáu KPI làm hai hàng BA — ba chỉ
+  // tiêu mục tiêu-0 trên panel tối, ba chỉ tiêu khối lượng ở thẻ dưới — nên "3 cột" vẫn là ràng
+  // buộc, chỉ đổi chỗ đo. Ý nguyên bản của N11 (đừng xếp 2 cột, đẩy bảng xuống dưới màn) còn nguyên.
+  it('sáu KPI xếp thành hai hàng BA, không phải hai cột (B14, N11)', async () => {
     moiApi()
     renderDashboard()
-    const the = await screen.findByText('LTI trong kỳ')
-    expect(the.closest('.rounded-tile')?.parentElement?.className).toContain('grid-cols-3')
+    // Hàng 1: ba ô cùng một khối trên panel tối.
+    const panel = (await screen.findByText('LTI trong kỳ')).closest('section')!
+    expect(within(panel).getAllByText(/trong kỳ|Đơn vị có LTI/)).toHaveLength(3)
+    // Hàng 2: ba thẻ khối lượng trong một lưới 3 cột.
+    const the = screen.getByText('Tổng giờ công')
+    expect(the.closest('.rounded-xl')?.parentElement?.className).toContain('grid-cols-3')
   })
 
   // B15 (N4): "Kỳ MM/YYYY ·" là tiền tố CỐ ĐỊNH của dòng bao phủ ở nhánh bình thường.
@@ -879,52 +856,18 @@ describe('/dashboard', () => {
 // ---- P2 (final-fix-FE.md, Ruling 424 · final-review-R2-report.md §A3) — BA CỬA của cùng một câu
 // hỏi: "kỳ này có thật không?".
 //
-// Vì sao ba ca chứ không một: mỗi cửa mở bằng một cách KHÁC NHAU và bịt một cửa không bịt hai cửa
-// kia. (1) bấm `›` ở kỳ cuối dải — `congThang` luôn cho một kỳ mới, không có biên; (2) gõ tay
+// Vì sao ba cửa chứ không một: mỗi cửa mở bằng một cách KHÁC NHAU và bịt một cửa không bịt hai
+// cửa kia. (1) bấm `›` ở kỳ cuối dải — `congThang` luôn cho một kỳ mới, không có biên; (2) gõ tay
 // `?period=2026-10` — ĐÚNG định dạng, chỉ là không tồn tại, nên siết `pattern` phía backend không
-// bắt được; (3) `?period=xyz` — sai cả định dạng, làm `formatPeriod` in "undefined/xyz" và
-// `congThang` in "NaN/NaN".
+// bắt được; (3) `?period=xyz` — sai cả định dạng, làm `formatPeriod` in "undefined/xyz".
+//
+// Cửa 1 nay đóng ở BỘ CHỌN KỲ TRÊN SIDEBAR (ba ca của nó nằm trong `components/AppShell.test.tsx`)
+// vì bộ chọn kỳ đã rời khỏi đầu trang này. Hai cửa còn lại vẫn là việc của Dashboard: chúng vào
+// bằng URL, không bằng nút bấm nào cả.
 //
 // Cả ba đóng bằng MỘT nguồn: GET /templates/FM01/periods, đúng nguồn Status.tsx đã dùng (cùng
 // queryKey nên hai trang dùng chung một lượt tải).
 describe('/dashboard — kỳ ngoài dải (P2)', () => {
-  // Cửa 1. Kịch bản demo nguyên văn: người trình bày đang ở kỳ CUỐI dải (2026-09) bấm `›` đúng một
-  // lần. Trước bản vá, màn hình nhảy sang 2026-10 và hiện "0 đã duyệt / 22 chưa nộp" — không phân
-  // biệt được với mất sạch dữ liệu.
-  it('cửa 1 — ở kỳ CUỐI dải thì nút `›` bị khoá, bấm KHÔNG đẩy sang kỳ không có thật', async () => {
-    const f = moiApi()
-    renderDashboard('/dashboard?period=2026-09')
-    await screen.findByText('PTSC Đình Vũ')
-
-    const nutSau = screen.getByRole('button', { name: '10/2026 ›' })
-    expect(nutSau.hasAttribute('disabled')).toBe(true)
-    await userEvent.click(nutSau)
-
-    // Khoá bằng CẢ HAI mặt: không request nào mang period=2026-10 bay lên, VÀ ô kỳ đang xem vẫn là
-    // 09/2026. Chỉ khẳng định "không có request" thì một nút render ra rồi bị chặn ở tầng khác vẫn
-    // qua; chỉ khẳng định "ô kỳ không đổi" thì một lượt tải ngầm sai kỳ vẫn lọt.
-    expect(f.mock.calls.map(([u]) => String(u)).some((u) => u.includes('period=2026-10'))).toBe(false)
-    expect(screen.getByText('09/2026')).toBeTruthy()
-  })
-
-  // Nửa ÂM của cùng vị ngữ (bài học K2 — lỗi trốn ở mặt âm): khoá biên mà khoá quá tay thì nút `›`
-  // chết ở GIỮA dải, và đó là đường đi bình thường của buổi demo. Không có ca này thì
-  // `disabled={true}` cứng cũng xanh.
-  it('cửa 1 (mặt âm) — ở GIỮA dải thì CẢ HAI nút còn bấm được', async () => {
-    moiApi()
-    renderDashboard('/dashboard?period=2026-07')
-    await screen.findByText('PTSC Đình Vũ')
-    expect(screen.getByRole('button', { name: '‹ 06/2026' }).hasAttribute('disabled')).toBe(false)
-    expect(screen.getByRole('button', { name: '08/2026 ›' }).hasAttribute('disabled')).toBe(false)
-  })
-
-  it('cửa 1 — ở kỳ ĐẦU dải thì nút `‹` bị khoá', async () => {
-    moiApi()
-    renderDashboard('/dashboard?period=2026-06')
-    await screen.findByText('PTSC Đình Vũ')
-    expect(screen.getByRole('button', { name: '‹ 05/2026' }).hasAttribute('disabled')).toBe(true)
-  })
-
   // Cửa 2. URL gõ tay / bookmark cũ: đúng định dạng YYYY-MM, chỉ là kỳ không tồn tại.
   it('cửa 2 — `?period=2026-10` (đúng định dạng, không có thật): một câu tử tế + lối về, KHÔNG phải màn 0/22', async () => {
     moiApi()
@@ -946,8 +889,8 @@ describe('/dashboard — kỳ ngoài dải (P2)', () => {
     expect(screen.queryByText('Kỳ 10/2026 chưa có trong hệ thống')).toBeNull()
   })
 
-  // Cửa 3. Chuỗi rác — trước bản vá cho "undefined/xyz" trên thanh coverage và "NaN/NaN" trên
-  // PeriodNav. Khẳng định KHÔNG có hai chuỗi đó ở BẤT KỲ đâu trên trang, không chỉ ở một phần tử.
+  // Cửa 3. Chuỗi rác — trước bản vá cho "undefined/xyz" trên thanh coverage. Khẳng định KHÔNG có
+  // chuỗi hỏng nào ở BẤT KỲ đâu trên trang, không chỉ ở một phần tử.
   it('cửa 3 — `?period=xyz`: không NaN/NaN, không undefined/xyz, chỉ một câu tử tế', async () => {
     moiApi()
     const { container } = renderDashboard('/dashboard?period=xyz')
@@ -979,8 +922,6 @@ describe('/dashboard — kỳ ngoài dải (P2)', () => {
     renderDashboard()
     expect(await screen.findByText('PTSC Đình Vũ')).toBeTruthy()
     expect(screen.queryByText(/chưa có trong hệ thống/)).toBeNull()
-    // Và không khoá nhầm nút nào khi chưa biết dải — khoá "phòng xa" ở đây là chặn đường đi đúng.
-    expect(screen.getByRole('button', { name: '09/2026 ›' }).hasAttribute('disabled')).toBe(false)
   })
 
   // Khe hở thời gian của CHÍNH bản vá: `/dashboard/*` luôn nhanh hơn (2 query) còn dải kỳ là lượt
@@ -1027,30 +968,67 @@ describe('/dashboard — kỳ ngoài dải (P2)', () => {
   })
 })
 
-describe('KpiTile', () => {
-  it('ô đổi số sau refetch thì nháy 600 ms; prefers-reduced-motion tắt bằng CSS (index.css), không JS', () => {
-    const { container, rerender } = render(<KpiTile label="LTI trong kỳ" value={1} unit="vụ" />)
-    rerender(<KpiTile label="LTI trong kỳ" value={2} unit="vụ" />)
+// ---- Nháy ô KPI khi số đổi (D18 của thiết kế đã duyệt; nhịp cuối kịch bản demo) ----
+//
+// Trước Lát 4 hành vi này nằm trong `KpiTile` + `ui/Tile`; Lát 4 dựng lại ô KPI thành hai
+// component trên HAI NỀN và đánh rơi nó. Nay logic ở `useNhaySo`, còn LỚP CSS thì mỗi nền một
+// loại — nên ca test bám vào hai component thật, không bám vào hook, để lần đánh rơi sau bị bắt
+// tại chỗ nó xảy ra.
+//
+// Dùng `classList.contains` chứ không `className.toContain`: chuỗi 'flash' nằm TRONG 'flash-toi',
+// nên một phép so chuỗi sẽ coi bản tối là bản sáng và ca "đúng lớp cho đúng nền" thành vô nghĩa.
+
+const KPI_TOI: KpiItem[] = [{ code: 'B-2.1', label: 'LTI trong kỳ', value: 1, unit: 'vụ' }]
+const KPI_SANG = (gia: number | null): KpiItem[] => [
+  { code: 'B-1.4', label: 'Tổng giờ công', value: gia, unit: 'giờ' },
+]
+
+/** Ô nền TRẮNG (`TheSoLieu`) — phần tử mang lớp nháy là chính `<section>` của thẻ. */
+function oSang(container: HTMLElement): HTMLElement {
+  return container.querySelector('section')!
+}
+
+/** Ô trên PANEL TỐI (`BangChiSo`) — nhãn là con đầu của ô, nên bố nó chính là ô. */
+function oToi(): HTMLElement {
+  return screen.getByText('LTI trong kỳ').parentElement!
+}
+
+describe('nháy ô KPI khi số đổi (D18)', () => {
+  it('thẻ nền trắng đổi số thì nháy bằng .flash', () => {
+    const { container, rerender } = render(<TheSoLieu kpis={KPI_SANG(1)} />)
+    rerender(<TheSoLieu kpis={KPI_SANG(2)} />)
     expect(screen.getByText('2')).toBeTruthy()
-    expect(container.firstElementChild?.className).toContain('flash')
+    expect(oSang(container).classList.contains('flash')).toBe(true)
   })
 
-  // Không có ca này thì mutation "khởi tạo giá trị-trước bằng null/undefined thay vì value" (thay
-  // vì useRef(value)) sống sót: mount lần đầu sẽ bị coi là "đổi số" và nháy ngay dù chưa refetch
-  // lần nào — sai với "chuyển động DUY NHẤT khi số ĐỔI SAU REFETCH" (thiết kế dòng 623).
-  it('mới mount (chưa refetch lần nào) thì KHÔNG nháy', () => {
-    const { container } = render(<KpiTile label="LTI trong kỳ" value={1} unit="vụ" />)
-    expect(container.firstElementChild?.className).not.toContain('flash')
+  // Ca này là lý do `.flash-toi` tồn tại: `@keyframes flash-bg` kết ở nền TRẮNG, chạy trên panel
+  // tối thì ô loé trắng rồi mới tối lại — nháy ngược. Dùng nhầm lớp sáng ở đây là ca đỏ.
+  it('ô trên panel tối đổi số thì nháy bằng .flash-toi, KHÔNG phải bản sáng', () => {
+    const { rerender } = render(<BangChiSo kpis={KPI_TOI} maCoLti={[]} />)
+    rerender(<BangChiSo kpis={[{ ...KPI_TOI[0], value: 2 }]} maCoLti={[]} />)
+    expect(oToi().classList.contains('flash-toi')).toBe(true)
+    expect(oToi().classList.contains('flash')).toBe(false)
   })
 
-  it('flash tự tắt sau đúng 600ms (khớp @keyframes flash-bg trong index.css)', async () => {
+  // Không có ca này thì mutation "khởi tạo giá trị-trước bằng null/undefined thay vì gia" (thay vì
+  // useRef(gia)) sống sót: mount lần đầu sẽ bị coi là "đổi số" và nháy ngay dù chưa refetch lần
+  // nào — sai với "chuyển động DUY NHẤT khi số ĐỔI SAU REFETCH" (thiết kế dòng 623).
+  it('mới mount (chưa refetch lần nào) thì KHÔNG nháy — cả hai nền', () => {
+    const { container, unmount } = render(<TheSoLieu kpis={KPI_SANG(1)} />)
+    expect(oSang(container).classList.contains('flash')).toBe(false)
+    unmount()
+    render(<BangChiSo kpis={KPI_TOI} maCoLti={[]} />)
+    expect(oToi().classList.contains('flash-toi')).toBe(false)
+  })
+
+  it('nháy tự tắt sau đúng 600ms (khớp @keyframes flash-bg trong index.css)', async () => {
     vi.useFakeTimers()
     try {
-      const { container, rerender } = render(<KpiTile label="LTI trong kỳ" value={1} unit="vụ" />)
-      rerender(<KpiTile label="LTI trong kỳ" value={2} unit="vụ" />)
-      expect(container.firstElementChild?.className).toContain('flash')
+      const { container, rerender } = render(<TheSoLieu kpis={KPI_SANG(1)} />)
+      rerender(<TheSoLieu kpis={KPI_SANG(2)} />)
+      expect(oSang(container).classList.contains('flash')).toBe(true)
       await vi.advanceTimersByTimeAsync(600)
-      expect(container.firstElementChild?.className).not.toContain('flash')
+      expect(oSang(container).classList.contains('flash')).toBe(false)
     } finally {
       vi.useRealTimers()
     }
@@ -1059,18 +1037,18 @@ describe('KpiTile', () => {
   // B13 (N1): số QUAY VỀ giá trị CŨ (2→3→2) vẫn phải nháy lần thứ hai — nếu `gtTruoc.current`
   // không được cập nhật mỗi lần đổi, lần quay-về sẽ trùng giá trị-trước-khi-cập-nhật và bị coi là
   // "không đổi gì", im lặng bỏ qua. Phải để nháy lần 1 TẮT HẲN trước khi đổi lần 2, nếu không cả
-  // mã đúng lẫn mã lỗi đều để lại flash=true (đúng vì retrigger thật, lỗi vì timeout cũ bị huỷ mà
-  // flash chưa từng được đặt lại false) — không phân biệt được nếu thiếu bước tắt hẳn ở giữa.
+  // mã đúng lẫn mã lỗi đều để lại nhay=true (đúng vì retrigger thật, lỗi vì timeout cũ bị huỷ mà
+  // nhay chưa từng được đặt lại false) — không phân biệt được nếu thiếu bước tắt hẳn ở giữa.
   it('số quay về giá trị CŨ (2→3→2) vẫn phải nháy lần thứ hai (B13, N1)', async () => {
     vi.useFakeTimers()
     try {
-      const { container, rerender } = render(<KpiTile label="LTI trong kỳ" value={2} unit="vụ" />)
-      rerender(<KpiTile label="LTI trong kỳ" value={3} unit="vụ" />)
-      expect(container.firstElementChild?.className).toContain('flash')
+      const { container, rerender } = render(<TheSoLieu kpis={KPI_SANG(2)} />)
+      rerender(<TheSoLieu kpis={KPI_SANG(3)} />)
+      expect(oSang(container).classList.contains('flash')).toBe(true)
       await vi.advanceTimersByTimeAsync(600) // để nháy lần 1 tắt HẲN
-      expect(container.firstElementChild?.className).not.toContain('flash')
-      rerender(<KpiTile label="LTI trong kỳ" value={2} unit="vụ" />) // quay lại giá trị BAN ĐẦU
-      expect(container.firstElementChild?.className).toContain('flash')
+      expect(oSang(container).classList.contains('flash')).toBe(false)
+      rerender(<TheSoLieu kpis={KPI_SANG(2)} />) // quay lại giá trị BAN ĐẦU
+      expect(oSang(container).classList.contains('flash')).toBe(true)
     } finally {
       vi.useRealTimers()
     }
@@ -1083,12 +1061,12 @@ describe('KpiTile', () => {
   it('hai lần làm mới liên tiếp: hẹn giờ CŨ không được tắt sớm cái nháy thứ hai (B13, N22)', async () => {
     vi.useFakeTimers()
     try {
-      const { container, rerender } = render(<KpiTile label="LTI trong kỳ" value={1} unit="vụ" />)
-      rerender(<KpiTile label="LTI trong kỳ" value={2} unit="vụ" />) // nháy lần 1, hẹn tắt ở t=600
+      const { container, rerender } = render(<TheSoLieu kpis={KPI_SANG(1)} />)
+      rerender(<TheSoLieu kpis={KPI_SANG(2)} />) // nháy lần 1, hẹn tắt ở t=600
       await vi.advanceTimersByTimeAsync(300) // t=300 — giữa chừng
-      rerender(<KpiTile label="LTI trong kỳ" value={3} unit="vụ" />) // nháy lần 2, hẹn tắt ở t=900
+      rerender(<TheSoLieu kpis={KPI_SANG(3)} />) // nháy lần 2, hẹn tắt ở t=900
       await vi.advanceTimersByTimeAsync(300) // t=600 — hẹn CŨ (nếu còn sống) tắt nhầm ở đây
-      expect(container.firstElementChild?.className).toContain('flash') // còn phải cháy tới t=900
+      expect(oSang(container).classList.contains('flash')).toBe(true) // còn phải cháy tới t=900
     } finally {
       vi.useRealTimers()
     }

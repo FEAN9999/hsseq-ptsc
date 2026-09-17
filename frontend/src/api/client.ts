@@ -198,4 +198,7 @@ export const api = {
   get: <T>(path: string) => request<T>('GET', path),
   post: <T>(path: string, body?: unknown) => request<T>('POST', path, body),
   put: <T>(path: string, body?: unknown) => request<T>('PUT', path, body),
+  // Lát 8: `PATCH /templates/{code}/periods/{key}` là lượt ghi MỘT TRƯỜNG duy nhất (`is_open`) trên
+  // một bản ghi đã có — đúng nghĩa PATCH, không phải PUT (PUT ở đây sẽ hứa gửi cả bản ghi).
+  patch: <T>(path: string, body?: unknown) => request<T>('PATCH', path, body),
 }

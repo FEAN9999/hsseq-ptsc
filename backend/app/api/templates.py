@@ -1,16 +1,18 @@
 # backend/app/api/templates.py
-"""Danh mục mẫu báo cáo — chỉ đọc (MVP). `PUT`/`POST` cho `template.manage`
-là giai đoạn 2. Mọi vai (reporter, viewer, admin) đều cần đọc danh mục để
-dựng form/bộ lọc, nhưng vẫn phải còn quyền xem báo cáo — xem
-`deps.yeu_cau_xem_bao_cao`.
+"""Danh mục mẫu báo cáo — chỉ đọc, TRỪ một thao tác: mở/đóng kỳ
+(`PATCH /{code}/periods/{period_key}`, Lát 8). Mọi vai (reporter, viewer,
+admin) đều cần đọc danh mục để dựng form/bộ lọc, nhưng vẫn phải còn quyền xem
+báo cáo — xem `deps.yeu_cau_xem_bao_cao`. Sửa danh mục chỉ tiêu vẫn là giai
+đoạn 2.
 """
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session, aliased
 
-from app.api.deps import CurrentUser, yeu_cau_xem_bao_cao
+from app.api.deps import CurrentUser, require_permission, yeu_cau_xem_bao_cao
 from app.core.db import get_db
 from app.core.errors import NotFoundError
 from app.models import (
+    AuditLog,
     Indicator,
     Permission,
     ReportingPeriod,
@@ -20,6 +22,7 @@ from app.models import (
     WorkflowState,
     WorkflowTransition,
 )
+from app.schemas.base import ApiModel
 
 router = APIRouter(prefix="/templates")
 
@@ -110,6 +113,14 @@ def chi_tiet_mau(code: str, u: CurrentUser = Depends(yeu_cau_xem_bao_cao),
     }
 
 
+def _ky_json(k: ReportingPeriod) -> dict:
+    """Một kỳ ra JSON. `GET /periods` và `PATCH /periods/{key}` trả CÙNG hình
+    dạng — FE thay thẳng dòng vừa sửa vào danh sách đang hiển thị, nên hai nơi
+    lệch một trường là một dòng méo trên bảng cho tới lượt tải lại."""
+    return {"period_key": k.period_key, "start_date": k.start_date, "end_date": k.end_date,
+            "due_at": k.due_at, "is_open": k.is_open}
+
+
 @router.get("/{code}/periods")
 def ds_ky(code: str, u: CurrentUser = Depends(yeu_cau_xem_bao_cao),
           db: Session = Depends(get_db)):
@@ -120,8 +131,50 @@ def ds_ky(code: str, u: CurrentUser = Depends(yeu_cau_xem_bao_cao),
         db.query(ReportingPeriod).filter_by(template_id=tpl.id)
         .order_by(ReportingPeriod.start_date).all()
     )
-    return [
-        {"period_key": k.period_key, "start_date": k.start_date, "end_date": k.end_date,
-         "due_at": k.due_at, "is_open": k.is_open}
-        for k in ky
-    ]
+    return [_ky_json(k) for k in ky]
+
+
+class DoiKyIn(ApiModel):
+    is_open: bool
+
+
+@router.patch("/{code}/periods/{period_key}")
+def doi_ky(code: str, period_key: str, payload: DoiKyIn,
+           u: CurrentUser = Depends(require_permission("template.manage")),
+           db: Session = Depends(get_db)):
+    """Mở / đóng một kỳ báo cáo. Thao tác GHI DUY NHẤT của nhóm `/templates`.
+
+    `is_open` ĐÓNG đúng hai cửa, không nhiều hơn — màn quản trị phải nói đúng
+    bấy nhiêu, đừng hứa hơn:
+      1. `POST /reports` từ chối 409 "Kỳ báo cáo đã đóng" (api/reports.py:89);
+      2. ô TRỐNG (đơn vị chưa tạo báo cáo) của kỳ đó biến khỏi `GET /reports`
+         (services/reports.py:353) — đơn vị chưa động tới thì mất luôn lối vào.
+    KHÔNG chặn nộp/duyệt một báo cáo ĐÃ tạo: `apply_transition` không đọc
+    `is_open` bao giờ. Đóng kỳ là "ngừng nhận bài mới", không phải "khoá sổ".
+
+    Thao tác này đảo ngược được (mở lại), nên không hỏi `version` như báo cáo:
+    không có nội dung nào để mất khi hai quản trị viên bấm cùng lúc — người sau
+    thắng, và cả hai lượt đều nằm trong `audit_log`.
+    """
+    tpl = db.query(ReportTemplate).filter_by(code=code).one_or_none()
+    if tpl is None:
+        raise NotFoundError("Không tìm thấy mẫu báo cáo")
+    ky = (
+        db.query(ReportingPeriod)
+        .filter_by(template_id=tpl.id, period_key=period_key).one_or_none()
+    )
+    if ky is None:
+        raise NotFoundError("Không tìm thấy kỳ báo cáo")
+
+    truoc = ky.is_open
+    ky.is_open = payload.is_open
+    # Cùng transaction với lượt ghi (khuôn services/workflow.py:249): một dòng
+    # audit ghi ngoài transaction sẽ sống sót cả khi lượt ghi bị rollback.
+    db.add(AuditLog(
+        entity="reporting_period", entity_id=ky.id,
+        action="open_period" if payload.is_open else "close_period",
+        actor_id=u.id,
+        before_json={"is_open": truoc}, after_json={"is_open": payload.is_open},
+    ))
+    db.flush()
+    return _ky_json(ky)

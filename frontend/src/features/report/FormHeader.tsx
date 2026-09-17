@@ -89,8 +89,8 @@ export function luyKeTinhToi(ky: string, kyThieu: string[]): string {
 function OPhanDau({ nhan, giaTri }: { nhan: string; giaTri: string | null }) {
   return (
     <div>
-      <span className="block text-[11px] uppercase tracking-[0.02em] text-sec">{nhan}</span>
-      {giaTri ?? <span className="text-sec">—</span>}
+      <span className="block text-[11px] uppercase tracking-[0.02em] text-muted-foreground">{nhan}</span>
+      {giaTri ?? <span className="text-muted-foreground">—</span>}
     </div>
   )
 }
@@ -115,13 +115,13 @@ export function FormHeader({
 }) {
   const han = formatDue(dau.due_at, now)
   return (
-    <div className="grid grid-cols-[1fr_auto] gap-x-6 gap-y-2 bg-surface border border-hair rounded-tile px-5 py-3.5 mb-3">
+    <div className="grid grid-cols-[1fr_auto] gap-x-6 gap-y-2 bg-card border border-border rounded-xl px-5 py-3.5 mb-3">
       <div>
-        <h1 className="text-pageTitle font-medium text-ink leading-[1.2] m-0">
+        <h1 className="text-2xl tracking-[-0.4px] font-medium text-foreground leading-[1.2] m-0">
           {dau.org_unit.name} · {dau.template_code} · {formatPeriod(dau.period_key)}
         </h1>
-        <div className="text-table text-sec mt-1">
-          <b className="font-medium text-ink">{mocThoiGian(dau, state)}</b>
+        <div className="text-sm text-muted-foreground mt-1">
+          <b className="font-medium text-foreground">{mocThoiGian(dau, state)}</b>
           <span title={han.title}> · Hạn nộp {han.text}</span>
           <span> · Lũy kế đã tính tới {luyKeTinhToi(dau.period_key, kyThieu)}</span>
         </div>
@@ -131,14 +131,14 @@ export function FormHeader({
             người dùng cần biết mà không rời tay khỏi bàn phím. `alert` sẽ cắt ngang họ giữa lúc
             gõ, đúng điều fix-1 S12 đã chốt cho các banner tĩnh. */}
         {trangThaiLuu !== null && (
-          <span role="status" className={`text-xs ${trangThaiLuu.canhBao ? 'text-warning' : 'text-sec'}`}>
+          <span role="status" className={`text-xs ${trangThaiLuu.canhBao ? 'text-warning-foreground' : 'text-muted-foreground'}`}>
             {trangThaiLuu.chu}
           </span>
         )}
         <Chip kind={kindTrangThai(state, isLate)} outline={source === 'seed'} />
         {/* D14 chế độ 4: báo cáo nạp từ file tổng hợp phải nói ra, vì số của nó không do ai trong
             đơn vị gõ — người đọc cần biết trước khi tin vào nó. */}
-        {source === 'seed' && <span className="text-xs text-sec">nạp từ file tổng hợp</span>}
+        {source === 'seed' && <span className="text-xs text-muted-foreground">nạp từ file tổng hợp</span>}
       </div>
       {/* `id="A"`: nhóm A của danh mục ("THÔNG TIN CHUNG") không có chỉ tiêu nào nên không sinh
           hàng nào trong bảng — 5 ô phần đầu này CHÍNH LÀ nhóm A, và là đích nhảy `#A` của mục lục
@@ -148,7 +148,7 @@ export function FormHeader({
       {coPhanDau(dau) && (
         <div
           id={MA_NHOM_PHAN_DAU}
-          className="col-span-2 grid grid-cols-5 gap-x-7 gap-y-1 text-table border-t border-hair pt-2.5 mt-1 scroll-mt-20"
+          className="col-span-2 grid grid-cols-5 gap-x-7 gap-y-1 text-sm border-t border-border pt-2.5 mt-1 scroll-mt-20"
         >
           <OPhanDau nhan="Số báo cáo" giaTri={dau.report_no} />
           <OPhanDau nhan="Địa điểm" giaTri={dau.location} />

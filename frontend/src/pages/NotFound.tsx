@@ -1,18 +1,16 @@
-// Trang 404 — route không khớp bất kỳ path nào.
+// Trang 404 — route không khớp bất kỳ path nào. Ngoài `AppShell` (app/routes.tsx) và ngoài
+// `RequireAuth`, nên cũng phải chạy được cho người chưa đăng nhập: xem `TrangLoi.tsx`.
+import { FileQuestion } from 'lucide-react'
+
+import { TrangLoi } from '../components/TrangLoi'
+
 export function NotFound() {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-canvas px-6">
-      <div className="text-center max-w-sm">
-        <div className="text-kpi font-medium text-sec">404</div>
-        <h1 className="text-pageTitle font-medium text-ink mt-2">Không tìm thấy trang</h1>
-        <p className="text-table text-sec mt-2">Đường dẫn này không tồn tại hoặc đã bị xoá.</p>
-        <a
-          href="/"
-          className="inline-flex items-center justify-center h-8 px-3.5 mt-5 rounded-input bg-cyan border border-cyanEdge text-white text-table font-medium no-underline transition-colors duration-[120ms] hover:bg-cyanEdge"
-        >
-          Về trang chủ
-        </a>
-      </div>
-    </div>
+    <TrangLoi
+      ma="404"
+      Icon={FileQuestion}
+      tieuDe="Không tìm thấy trang"
+      moTa="Đường dẫn này không tồn tại hoặc đã bị xoá."
+    />
   )
 }

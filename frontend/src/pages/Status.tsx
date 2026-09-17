@@ -14,16 +14,16 @@
 // kỳ cùng is_open=true (08 và 09/2026) và "kỳ đang mở" theo brief phải là kỳ MỚI NHẤT (09/2026),
 // không phải kỳ open sớm nhất.
 import { useRef } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 
 import { api, ApiError } from '../api/client'
 import { Chip } from '../components/ui/Chip'
 import { InlineError } from '../components/ui/InlineError'
-import { Skeleton } from '../components/ui/Skeleton'
+import { SkeletonDong } from '../components/ui/SkeletonDong'
 import { StatusGrid, type StatusUnit } from '../features/status/StatusGrid'
 import { useCopyMissing } from '../features/status/useCopyMissing'
-import { formatPeriod } from '../lib/format'
+import { formatPeriod, KY_MAC_DINH } from '../lib/format'
 
 // carry C9: `template=FM01` khoá cứng CÓ CHỦ Ý ở FE, theo đúng tiền lệ useReportList.ts (Task 20)
 // — gỡ khoá cứng là thay đổi TOÀN CỤC, ngoài phạm vi Task 26.
@@ -45,10 +45,17 @@ function kyDangMo(periods: PeriodInfo[]): string | undefined {
 }
 
 function TieuDe({ children }: { children: React.ReactNode }) {
-  return <h1 className="text-pageTitle font-medium text-ink">{children}</h1>
+  return <h1 className="text-2xl tracking-[-0.4px] font-medium text-foreground">{children}</h1>
 }
 
 export function Status() {
+  // Kỳ đang chọn đọc từ `?period=` — CÙNG nguồn sự thật với bộ chọn kỳ trên sidebar và với
+  // Dashboard. Trang này không đổi dữ liệu theo kỳ (lưới luôn vẽ cả dải), chỉ tô cột tương ứng:
+  // nhờ vậy cột được tô LUÔN LUÔN khớp với kỳ bộ chọn ở thanh bên đang hiển thị, kể cả khi URL
+  // chưa có tham số và cả hai cùng rơi về `KY_MAC_DINH`.
+  const [searchParams] = useSearchParams()
+  const kyDangXem = searchParams.get('period') ?? KY_MAC_DINH
+
   const ky = useQuery({
     queryKey: ['templates', TEMPLATE, 'periods'],
     queryFn: () => api.get<PeriodInfo[]>(`/templates/${TEMPLATE}/periods`),
@@ -170,10 +177,10 @@ export function Status() {
     return (
       <div>
         <TieuDe>Tình trạng nộp · {TEMPLATE}</TieuDe>
-        <div className="mt-4 border border-hair bg-surface rounded-tile p-8 text-center text-soot text-table">
+        <div className="mt-4 border border-border bg-card rounded-xl p-8 text-center text-secondary-foreground text-sm">
           Bạn không có quyền xem tình trạng nộp này
           <div className="mt-2.5">
-            <Link to="/reports" className="text-soot font-medium">
+            <Link to="/reports" className="text-secondary-foreground font-medium">
               Về báo cáo của đơn vị
             </Link>
           </div>
@@ -210,7 +217,7 @@ export function Status() {
     return (
       <div>
         <TieuDe>Tình trạng nộp · {TEMPLATE}</TieuDe>
-        <p className="mt-4 text-table text-sec">Chưa có kỳ nào đang mở để hiển thị tình trạng nộp</p>
+        <p className="mt-4 text-sm text-muted-foreground">Chưa có kỳ nào đang mở để hiển thị tình trạng nộp</p>
       </div>
     )
   }
@@ -220,7 +227,7 @@ export function Status() {
       <div>
         <TieuDe>Tình trạng nộp · {TEMPLATE}</TieuDe>
         <div data-testid="skeleton" className="mt-4">
-          <Skeleton rows={10} />
+          <SkeletonDong rows={10} />
         </div>
       </div>
     )
@@ -254,7 +261,7 @@ export function Status() {
           <button
             type="button"
             onClick={() => saoChep(donViChuaNop.map((u) => u.name))}
-            className="inline-flex items-center justify-center h-8 px-3.5 rounded-input border border-hair bg-surface text-table font-medium text-ink transition-colors duration-[120ms] hover:bg-mutedbg"
+            className="inline-flex items-center justify-center h-8 px-3.5 rounded-md border border-border bg-card text-sm font-medium text-foreground transition-colors duration-[120ms] hover:bg-muted"
           >
             Sao chép danh sách chưa nộp ({formatPeriod(kyCuoi)})
           </button>
@@ -269,7 +276,7 @@ export function Status() {
       {duLieuCu && (
         <div
           data-testid="bang-du-lieu-cu"
-          className="flex items-center justify-between gap-4 mb-5 border border-hair bg-mutedbg rounded-tile px-4 py-2.5 text-table text-soot"
+          className="flex items-center justify-between gap-4 mb-5 border border-border bg-muted rounded-xl px-4 py-2.5 text-sm text-secondary-foreground"
         >
           {/* task-26-fix-6.md [V-1b]: băng phải nói ĐÚNG chuyện đang xảy ra. Ở cảnh `den === undefined`
               không có gì hỏng cả — `/periods` vừa về 200 và nói rõ không còn kỳ nào đang mở. Đổ cho
@@ -284,7 +291,7 @@ export function Status() {
           <button
             type="button"
             onClick={thuLai}
-            className="inline-flex items-center justify-center h-[26px] px-2.5 rounded-input border border-hair bg-surface text-xs font-medium text-ink transition-colors duration-[120ms] hover:bg-mutedbg whitespace-nowrap"
+            className="inline-flex items-center justify-center h-[26px] px-2.5 rounded-md border border-border bg-card text-xs font-medium text-foreground transition-colors duration-[120ms] hover:bg-muted whitespace-nowrap"
           >
             Thử lại
           </button>
@@ -306,7 +313,7 @@ export function Status() {
           Đây là một bước đi XA HƠN bản vá một-vế người soát đã đo; ghi ra để người phán xử đảo
           ngược được nếu thấy băng là đủ. */}
       {kyDau !== undefined && (
-        <p className="text-sec text-table mb-5">
+        <p className="text-muted-foreground text-sm mb-5">
           Từ {formatPeriod(kyDau)} (kỳ đầu có dữ liệu) đến {formatPeriod(kyCuoi)}{' '}
           {kyCuoi === den ? '(kỳ đang mở)' : '(kỳ cuối có dữ liệu)'}
         </p>
@@ -321,11 +328,11 @@ export function Status() {
           đổi cách vẽ outline sau này. */}
       {/* task-26-fix-2.md R2: testid CHỈ để ca test khoanh đúng phạm vi (`within`) hai chip chú
           giải — tách khỏi chip cùng chữ "Đã duyệt" trong lưới — không phải hành vi/hiển thị. */}
-      <p data-testid="chu-giai" className="flex items-center gap-1.5 text-sec text-table mb-5">
+      <p data-testid="chu-giai" className="flex items-center gap-1.5 text-muted-foreground text-sm mb-5">
         <Chip kind="approved" outline /> viền rỗng = nạp từ file tổng hợp ·{' '}
         <Chip kind="approved" /> đặc = nộp trên hệ thống
       </p>
-      <StatusGrid periods={data.periods} units={data.units} />
+      <StatusGrid periods={data.periods} units={data.units} kyDangXem={kyDangXem} />
     </div>
   )
 }

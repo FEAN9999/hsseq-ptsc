@@ -24,7 +24,7 @@ export function GroupHeader({ nhom, soCot }: { nhom: NhomMau; soCot: number }) {
     <tr id={nhom.code} className="scroll-mt-20">
       <td
         colSpan={soCot}
-        className="sticky top-9 z-10 h-8 px-3 bg-mutedbg border-b border-hair text-tableHead font-semibold text-soot"
+        className="sticky top-9 z-10 h-8 px-3 bg-muted border-b border-border text-[13.5px] font-semibold text-secondary-foreground"
       >
         {nhom.code}. {nhom.name_vi}
         <small className="ml-2 font-normal text-[11px] text-sec">{nhom.name_en}</small>

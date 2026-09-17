@@ -1,4 +1,10 @@
-// frontend/src/components/ui/Dialog.tsx
+// frontend/src/components/ui/DialogXacNhan.tsx
+//
+// Đổi tên từ `Dialog.tsx` ở Lát 0 redesign. Hai lý do, lý do thứ hai là lý do bắt buộc:
+//   1. Nó KHÔNG phải dialog chung — là hộp xác nhận có `requireNote`/`danger`/`pending`. Tên mới
+//      mô tả đúng việc nó làm.
+//   2. shadcn sinh `ui/dialog.tsx`; trên macOS `Dialog.tsx` và `dialog.tsx` LÀ CÙNG MỘT FILE, nên
+//      `shadcn add dialog` ghi đè mất file này (đã đo thật). Xem src/app/casingScan.test.ts.
 //
 // Hộp thoại xác nhận dùng chung cho bốn chuyển trạng thái (thiết kế D24, spec dòng 682):
 // Nộp / Duyệt nêu hậu quả rồi hỏi lại; Trả lại / Mở lại bắt nhập lý do.
@@ -46,7 +52,7 @@ export const TOI_THIEU_GHI_CHU = 10
 const NHAN_FOCUS = 'button:not([disabled]), textarea:not([disabled])'
 
 
-export interface DialogProps {
+export interface DialogXacNhanProps {
   title: string
   /** Câu hậu quả dưới tiêu đề. Không có thì không dựng khe trống nào. */
   body?: string
@@ -71,7 +77,7 @@ export interface DialogProps {
  *
  * Nhờ "đóng là THÁO" mà mọi state của hộp thoại (chữ trong ô lý do) chết theo, nên lượt hỏi sau
  * luôn bắt đầu từ ô trống mà không cần một effect nào đi dọn. */
-export function Dialog({
+export function DialogXacNhan({
   title,
   body,
   confirmLabel,
@@ -81,7 +87,7 @@ export function Dialog({
   pending = false,
   onConfirm,
   onCancel,
-}: DialogProps) {
+}: DialogXacNhanProps) {
   const [ghiChu, setGhiChu] = useState('')
   const hopRef = useRef<HTMLDialogElement>(null)
   const focusCu = useRef<HTMLElement | null>(null)
@@ -141,7 +147,7 @@ export function Dialog({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-soot/30 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-dark-panel/30 p-4"
       // Bấm vào NỀN MỜ không đóng hộp thoại (đây là câu hỏi "có chắc không", đóng vì một cú bấm
       // trượt là mất luôn câu hỏi) — nhưng nếu để yên thì cú bấm đó đẩy focus về `<body>` và Esc
       // chết theo, vì Esc bắt bằng `keydown` CỦA hộp thoại. Chặn mặc định của `mousedown` là cách
@@ -158,36 +164,36 @@ export function Dialog({
         aria-modal="true"
         aria-labelledby={idTieuDe}
         onKeyDown={batPhim}
-        className="relative m-0 w-[480px] max-w-full p-0 border border-hair rounded-tile bg-surface text-ink shadow-[0_4px_16px_rgba(0,0,0,0.05)]"
+        className="relative m-0 w-[480px] max-w-full p-0 border border-border rounded-xl bg-card text-foreground shadow-[0_4px_16px_rgba(0,0,0,0.05)]"
       >
         <div className="px-5 pt-5 pb-4">
-          <h2 id={idTieuDe} className="m-0 text-[15px] leading-[1.3] font-semibold text-ink">
+          <h2 id={idTieuDe} className="m-0 text-[15px] leading-[1.3] font-semibold text-foreground">
             {title}
           </h2>
-          {body && <p className="mt-2 mb-0 text-table text-soot">{body}</p>}
+          {body && <p className="mt-2 mb-0 text-sm text-secondary-foreground">{body}</p>}
           {requireNote && (
             <div className="mt-3">
-              <label htmlFor={idGhiChu} className="block text-xs font-medium text-soot mb-1">
+              <label htmlFor={idGhiChu} className="block text-xs font-medium text-secondary-foreground mb-1">
                 {noteLabel}
               </label>
               <textarea
                 id={idGhiChu}
                 value={ghiChu}
                 onChange={(e) => setGhiChu(e.target.value)}
-                className="block w-full min-h-20 border border-hair rounded-input px-2.5 py-2 bg-surface text-table text-soot focus:outline-2 focus:outline-cyan focus:-outline-offset-2"
+                className="block w-full min-h-20 border border-border rounded-md px-2.5 py-2 bg-card text-sm text-secondary-foreground focus:outline-2 focus:outline-ring focus:-outline-offset-2"
               />
               {/* Chỉ nói khi còn thiếu: nút đang khoá mà không có câu nào giải thích là chỗ người
                   dùng bấm mãi không được rồi bỏ cuộc. Đủ chữ thì câu biến mất, không đứng lại như
                   một lời nhắc thừa. */}
               {thieuGhiChu && (
-                <div className="text-[11px] text-sec mt-0.5">Cần ít nhất {TOI_THIEU_GHI_CHU} ký tự</div>
+                <div className="text-[11px] text-muted-foreground mt-0.5">Cần ít nhất {TOI_THIEU_GHI_CHU} ký tự</div>
               )}
             </div>
           )}
         </div>
         {/* Nút chính BÊN PHẢI (spec dòng 682) và đứng SAU "Huỷ" trong DOM — thứ tự đọc của trình
             đọc màn hình đi cùng thứ tự nhìn thấy. */}
-        <div className="flex justify-end gap-2 px-5 py-3 border-t border-hair bg-mutedbg">
+        <div className="flex justify-end gap-2 px-5 py-3 border-t border-border bg-muted">
           {/* "Huỷ" KHOÁ lúc đang gửi: request đã bay không rút lại được, nên một nút Huỷ bấm
               được ở đây là lời hứa sai — người dùng bấm nó rồi vẫn thấy toast "Đã nộp báo cáo
               08/2026". Nút chính đang hiện "Đang gửi…" là đủ để biết máy chưa treo. */}

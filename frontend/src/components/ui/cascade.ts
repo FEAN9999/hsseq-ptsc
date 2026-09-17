@@ -203,7 +203,7 @@ export function resolveCascadeWinner(className: string, cssProperty: string): st
  * GIÁ TRỊ mà lớp thắng cascade khai báo, nguyên văn như trong CSS đã build ("50", "fixed", "0").
  * `resolveCascadeWinner` chỉ trả về TÊN lớp, đủ để khoá "lớp nào thắng" nhưng không nói được
  * những bất biến SO SÁNH HAI PHẦN TỬ khác nhau — vd. "lớp phủ hộp thoại phải nằm TRÊN header cột
- * dính", thứ duy nhất bù cho việc `Dialog` không gọi `showModal()` (components/ui/Dialog.tsx).
+ * dính", thứ duy nhất bù cho việc `DialogXacNhan` không gọi `showModal()` (components/ui/DialogXacNhan.tsx).
  * So tên lớp ở đó là tautology; so hai con số mới là đo thật.
  *
  * `null` (chứ không phải `'0'` hay `''`) khi KHÔNG lớp nào khai báo thuộc tính đang hỏi: hai ca

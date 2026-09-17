@@ -1,6 +1,6 @@
 // frontend/src/features/report/useChuyenTrangThai.ts
 //
-// Lớp CHUYỂN TRẠNG THÁI của form FM01: hỏi lại bằng `Dialog`, gửi `POST /reports/{id}/transition`,
+// Lớp CHUYỂN TRẠNG THÁI của form FM01: hỏi lại bằng `DialogXacNhan`, gửi `POST /reports/{id}/transition`,
 // làm mới cache, rồi toast. Tên hook KHÔNG phải `useTransition` — đó là hook có sẵn của React
 // (`import { useTransition } from 'react'`), trùng tên nghĩa là file nào lỡ cần cả hai sẽ vỡ.
 //
@@ -67,7 +67,7 @@ export interface KetQuaChuyen {
   version: number
 }
 
-/** Câu chữ của một hộp thoại xác nhận — đúng bộ prop mà `Dialog` nhận. */
+/** Câu chữ của một hộp thoại xác nhận — đúng bộ prop mà `DialogXacNhan` nhận. */
 export interface NoiDungDialog {
   title: string
   body?: string

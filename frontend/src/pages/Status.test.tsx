@@ -1505,3 +1505,60 @@ describe('/status', () => {
     })
   })
 })
+
+// ---------------------------------------------------------------------------------------------
+// Lát 5 — CỘT CỦA KỲ ĐANG CHỌN.
+//
+// Trước Lát 5, `?period=` (nguồn sự thật dùng chung của bộ chọn kỳ trên sidebar và của Dashboard)
+// KHÔNG có tác dụng gì trên màn này: lưới luôn vẽ cả dải kỳ, nên cả bộ chọn lẫn huy hiệu `x/22`
+// vừa gắn lên sidebar đều không trỏ được vào đâu. Giờ cột tương ứng được tô nhạt.
+//
+// Đo bằng `resolveCascadeWinner` chứ không so chuỗi className (C2, cùng lý do ca chip viền rỗng/
+// đặc): nó đọc CSS ĐÃ BUILD, nên một lớp gõ sai (`bg-primaryX/5`) cho `null` ở CẢ HAI ô và ca ĐỎ —
+// so chuỗi thì chỉ cần khác nhau là xanh, kể cả khi không sinh ra một dòng CSS nào.
+// ---------------------------------------------------------------------------------------------
+describe('Cột kỳ đang chọn — Lát 5', () => {
+  function dauCot(nhan: string): HTMLElement {
+    return screen.getByRole('columnheader', { name: nhan })
+  }
+  function oCua(code: string, ky: string): HTMLElement {
+    const td = screen.getByTestId(`o-${code}-${ky}`).closest('td')
+    if (!td) throw new Error(`chip o-${code}-${ky} không nằm trong <td> nào`)
+    return td as HTMLElement
+  }
+  const nen = (el: HTMLElement) => resolveCascadeWinner(el.className, 'background-color')
+
+  it('tô cột đúng kỳ trên ?period= — cả ô tiêu đề lẫn ô dữ liệu', async () => {
+    moiApi()
+    renderStatus('/status?period=2026-07')
+    await screen.findByText('PTSC Miền Trung')
+
+    expect(nen(dauCot('07/2026'))).not.toBe(nen(dauCot('08/2026')))
+    expect(nen(oCua('U01', '2026-07'))).not.toBe(nen(oCua('U01', '2026-08')))
+  })
+
+  // URL chưa có tham số thì bộ chọn kỳ trên sidebar cũng rơi về KY_MAC_DINH (lib/format.ts) — cột
+  // được tô phải đi theo ĐÚNG giá trị đó, nếu không hai chỗ nói hai kỳ khác nhau trên cùng màn.
+  it('URL chưa có ?period= thì tô cột KY_MAC_DINH, không phải cột đầu hay cột cuối', async () => {
+    moiApi()
+    renderStatus()
+    await screen.findByText('PTSC Miền Trung')
+
+    const khac = nen(dauCot('08/2026'))
+    for (const nhan of ['06/2026', '07/2026', '09/2026']) {
+      expect({ ky: nhan, nen: nen(dauCot(nhan)) }).toEqual({ ky: nhan, nen: nen(dauCot('06/2026')) })
+    }
+    expect(khac).not.toBe(nen(dauCot('06/2026')))
+  })
+
+  // Kỳ ngoài dải đang vẽ: KHÔNG tô cột nào (và không hỏng). Dải hiển thị do `/templates/FM01/periods`
+  // quyết, còn `?period=` là giá trị tự do trên URL — hai thứ không buộc phải trùng nhau bao giờ.
+  it('kỳ ngoài dải đang vẽ: không cột nào được tô, lưới vẫn nguyên', async () => {
+    moiApi()
+    renderStatus('/status?period=2025-01')
+    await screen.findByText('PTSC Miền Trung')
+
+    const mau = ['06/2026', '07/2026', '08/2026', '09/2026'].map((n) => nen(dauCot(n)))
+    expect(new Set(mau).size).toBe(1)
+  })
+})

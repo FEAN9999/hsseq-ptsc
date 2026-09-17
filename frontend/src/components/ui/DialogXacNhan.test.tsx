@@ -1,4 +1,4 @@
-// frontend/src/components/ui/Dialog.test.tsx
+// frontend/src/components/ui/DialogXacNhan.test.tsx
 //
 // BA ĐIỀU ĐỊNH HÌNH BỘ TEST NÀY:
 //
@@ -10,8 +10,8 @@
 //    đều có đột biến ra xanh vì test chỉ khẳng định nút có mặt. Mọi ca "khoá" ở đây bấm thử nút
 //    rồi khẳng định `onConfirm` KHÔNG chạy, chứ không chỉ đọc thuộc tính.
 //
-// 3. HỘP THOẠI PHẢI TỰ ĐƯA FOCUS VÀO TRONG. Không phải để cho đẹp hồ sơ a11y: `Dialog` bắt Esc
-//    bằng `keydown` của chính nó (jsdom 29.1.1 không có `showModal`/`cancel` — xem đầu Dialog.tsx),
+// 3. HỘP THOẠI PHẢI TỰ ĐƯA FOCUS VÀO TRONG. Không phải để cho đẹp hồ sơ a11y: `DialogXacNhan` bắt Esc
+//    bằng `keydown` của chính nó (jsdom 29.1.1 không có `showModal`/`cancel` — xem đầu DialogXacNhan.tsx),
 //    nên focus còn nằm ngoài là Esc không bao giờ tới nơi.
 //
 // PHẢI `npm run build` trước khi chạy file này: ca "nút chính bên phải" đọc CSS THẬT đã build
@@ -21,14 +21,14 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
-import { Dialog, TOI_THIEU_GHI_CHU } from './Dialog'
+import { DialogXacNhan, TOI_THIEU_GHI_CHU } from './DialogXacNhan'
 import { resolveCascadeWinner, resolveDeclaredValue } from './cascade'
 
-function ve(p: Partial<React.ComponentProps<typeof Dialog>> = {}) {
+function ve(p: Partial<React.ComponentProps<typeof DialogXacNhan>> = {}) {
   const onConfirm = vi.fn()
   const onCancel = vi.fn()
   const r = render(
-    <Dialog
+    <DialogXacNhan
       title="Trả lại báo cáo"
       confirmLabel="Trả lại"
       onConfirm={onConfirm}
@@ -43,7 +43,7 @@ function nutChinh(ten: string): HTMLElement {
   return screen.getByRole('button', { name: ten })
 }
 
-describe('Dialog — câu chữ và nút', () => {
+describe('DialogXacNhan — câu chữ và nút', () => {
   it('dialog Nộp nêu đúng hậu quả, và không có ô lý do nào', () => {
     ve({
       title: 'Nộp báo cáo 08/2026 của PTSC Đình Vũ?',
@@ -76,7 +76,7 @@ describe('Dialog — câu chữ và nút', () => {
     expect(t.onConfirm).toHaveBeenCalledTimes(1)
   })
 
-  // Đột biến M11: thứ tự DOM một mình KHÔNG chốt được "nút chính bên phải" — `flex-row-reverse`
+  // Đột biến M11: thứ tự DOM một mình KHÔNG chốt được "nút chính bên phải" — `flex-row-…reverse`
   // giữ nguyên thứ tự đọc mà lật hẳn thứ tự nhìn thấy. Nên ca này hỏi CSS thật đã build thêm hai
   // câu: hàng nút không đảo chiều, và dồn về cuối hàng.
   it('nút chính đứng SAU nút Huỷ trong DOM VÀ nằm bên phải trên màn hình', () => {
@@ -90,11 +90,11 @@ describe('Dialog — câu chữ và nút', () => {
   })
 })
 
-// `Dialog` cố ý KHÔNG gọi `showModal()` (lý do ở đầu Dialog.tsx), nên ba thứ dưới đây là TẤT CẢ
+// `DialogXacNhan` cố ý KHÔNG gọi `showModal()` (lý do ở đầu DialogXacNhan.tsx), nên ba thứ dưới đây là TẤT CẢ
 // những gì thay cho top-layer của trình duyệt. Bỏ bất kỳ cái nào thì hộp thoại rơi xuống cuối
 // trang dưới 53 dòng bảng, hoặc chui xuống dưới header cột dính (`z-20`) — bấm "Nộp báo cáo" xong
 // màn hình không đổi gì. Đo trên CSS THẬT đã build, không hỏi `className.includes`.
-describe('Dialog — lớp phủ thay cho top-layer', () => {
+describe('DialogXacNhan — lớp phủ thay cho top-layer', () => {
   function lopPhu(): HTMLElement {
     return screen.getByRole('dialog').parentElement!
   }
@@ -133,7 +133,7 @@ describe('Dialog — lớp phủ thay cho top-layer', () => {
   })
 })
 
-describe('Dialog — ghi chú bắt buộc', () => {
+describe('DialogXacNhan — ghi chú bắt buộc', () => {
   it('nút danger khoá tới khi ghi chú đủ 10 ký tự', async () => {
     const u = userEvent.setup()
     const t = ve({ requireNote: true, danger: true })
@@ -209,7 +209,7 @@ describe('Dialog — ghi chú bắt buộc', () => {
             mở lại
           </button>
           {mo && (
-            <Dialog
+            <DialogXacNhan
               title="Trả lại báo cáo"
               confirmLabel="Trả lại"
               requireNote
@@ -228,7 +228,7 @@ describe('Dialog — ghi chú bắt buộc', () => {
   })
 })
 
-describe('Dialog — đang gửi', () => {
+describe('DialogXacNhan — đang gửi', () => {
   it('đang gửi thì khoá nút và đổi chữ Đang gửi…', () => {
     ve({ title: 'Duyệt báo cáo này?', confirmLabel: 'Duyệt', pending: true })
     const nut = nutChinh('Đang gửi…')
@@ -280,7 +280,7 @@ describe('Dialog — đang gửi', () => {
       return (
         <>
           <button type="button">Nút ngoài</button>
-          <Dialog
+          <DialogXacNhan
             title="Duyệt báo cáo này?"
             confirmLabel="Duyệt"
             pending={dangGui}
@@ -299,7 +299,7 @@ describe('Dialog — đang gửi', () => {
   })
 })
 
-describe('Dialog — bàn phím và focus', () => {
+describe('DialogXacNhan — bàn phím và focus', () => {
   it('Esc đóng dialog', async () => {
     const u = userEvent.setup()
     const t = ve({ title: 'x', confirmLabel: 'ok' })
@@ -371,7 +371,7 @@ describe('Dialog — bàn phím và focus', () => {
     render(
       <>
         <button type="button">Nút ngoài</button>
-        <Dialog title="Duyệt báo cáo này?" confirmLabel="Duyệt" onConfirm={vi.fn()} onCancel={vi.fn()} />
+        <DialogXacNhan title="Duyệt báo cáo này?" confirmLabel="Duyệt" onConfirm={vi.fn()} onCancel={vi.fn()} />
       </>,
     )
     const ngoai = screen.getByRole('button', { name: 'Nút ngoài' })
@@ -389,7 +389,7 @@ describe('Dialog — bàn phím và focus', () => {
     render(
       <>
         <button type="button">Nút ngoài</button>
-        <Dialog
+        <DialogXacNhan
           title="Trả lại báo cáo"
           confirmLabel="Trả lại"
           requireNote
@@ -420,11 +420,11 @@ describe('Dialog — bàn phím và focus', () => {
       onConfirm: vi.fn(),
       onCancel: vi.fn(),
     }
-    const { rerender } = render(<Dialog {...chung} />)
+    const { rerender } = render(<DialogXacNhan {...chung} />)
     expect(document.activeElement).toBe(screen.getByRole('textbox'))
     await u.tab()
     expect(document.activeElement).toBe(nutChinh('Huỷ'))
-    rerender(<Dialog {...chung} />)
+    rerender(<DialogXacNhan {...chung} />)
     expect(document.activeElement).toBe(nutChinh('Huỷ'))
   })
 
@@ -438,7 +438,7 @@ describe('Dialog — bàn phím và focus', () => {
             Trả lại…
           </button>
           {mo && (
-            <Dialog
+            <DialogXacNhan
               title="Trả lại báo cáo"
               confirmLabel="Trả lại"
               onConfirm={vi.fn()}

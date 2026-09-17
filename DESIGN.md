@@ -1,5 +1,8 @@
 # Seline Analytics — Style Reference
 
+> **Không phải hệ thiết kế của HSSEQ.** Đây là style reference của một sản phẩm khác, app chỉ từng
+> mượn dải stone trung tính. Token đang chạy của HSSEQ nằm ở `frontend/src/index.css`.
+
 > Quiet analyst's desk on warm paper
 
 **Theme:** light
