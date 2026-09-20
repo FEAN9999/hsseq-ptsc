@@ -19,11 +19,22 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { CalendarClock, CircleCheck, CircleSlash } from 'lucide-react'
+import { toast } from 'sonner'
 
 import { api } from '../api/client'
 import { invalidateReportQueries } from '../api/invalidate'
+import { Badge } from '../components/ui/badge'
+import { Button } from '../components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
 import { DialogXacNhan } from '../components/ui/DialogXacNhan'
-import { useToast } from '../components/ui/Toast'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '../components/ui/table'
 import { O_BANG, O_TIEU_DE, TieuDeQuanTri, VungDuLieu } from '../features/admin/khung'
 import { useSession } from '../app/session'
 import { formatDateTime, formatPeriod } from '../lib/format'
@@ -76,18 +87,9 @@ function soDaNop(luoi: LuoiTrangThai, ky: string): number {
   }).length
 }
 
-// MỘT kiểu nút cho cả hai chiều, CỐ Ý. Bản đầu tô "Mở kỳ" bằng nền primary — chụp màn ra thì hai
-// nút đậm nhất trang lại nằm ở 06/2026 và 07/2026, hai kỳ lịch sử đã đóng mà không ai cần mở lại.
-// Màu nhấn là thứ chỉ dùng cho việc NÊN LÀM (luật Lát 6), mà màn này không có việc nào như thế:
-// mở hay đóng kỳ đều là quyết định của người quản trị, không phải gợi ý của giao diện. Sức nặng
-// của thao tác đóng kỳ nằm ở hộp thoại xác nhận, không nằm ở màu nút.
-const NUT =
-  'inline-flex h-7 items-center justify-center rounded-md border border-border bg-card px-2.5 text-xs font-medium text-foreground transition-colors duration-[120ms] hover:bg-muted disabled:opacity-50'
-
 export function QuanTriMau() {
   const quyen = useSession((s) => s.permissions)
   const qc = useQueryClient()
-  const toast = useToast()
   const [dangHoiDong, setDangHoiDong] = useState<Ky | null>(null)
 
   const mau = useQuery({
@@ -148,27 +150,40 @@ export function QuanTriMau() {
       <VungDuLieu q={mau} soDong={3}>
         <div className="mb-6 grid gap-3 sm:grid-cols-2">
           {(mau.data ?? []).map((m) => (
-            <div key={m.code} className="rounded-xl border border-border bg-card p-4">
-              <div className="flex items-center gap-2">
-                <span className="rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-xs">
-                  {m.code}
-                </span>
-                <span className="min-w-0 flex-1 truncate text-sm font-medium">{m.name_vi}</span>
-                <span
-                  className={`inline-flex items-center gap-1 text-xs font-medium ${
-                    m.active ? 'text-success-foreground' : 'text-muted-foreground'
-                  }`}
-                >
-                  {m.active ? <CircleCheck className="size-3.5" /> : <CircleSlash className="size-3.5" />}
-                  {m.active ? 'Đang dùng' : 'Ngừng dùng'}
-                </span>
-              </div>
-              <p className="mt-1.5 truncate text-xs text-muted-foreground">{m.name_en}</p>
-              <p className="mt-2 flex items-center gap-1.5 text-xs text-sec">
-                <CalendarClock className="size-3.5" />
-                {m.period_type === 'month' ? 'Kỳ theo tháng' : `Kỳ: ${m.period_type}`}
-              </p>
-            </div>
+            <Card key={m.code}>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  {/* `outline` + `bg-muted` chứ không `secondary`: giữ lại đường viền hairline mà
+                      bản tự vẽ đã có, và khớp với huy hiệu "Đầu mối" ở QuanTriToChuc.tsx vốn dựng
+                      từ cùng một chuỗi `border border-border bg-muted`. Vẫn đúng MỘT utility mỗi
+                      thuộc tính: `outline` không cấp `bg-*`, và `border-transparent` của lớp nền
+                      Badge bị `border-border` của variant ghi đè, `cn` gỡ hẳn khỏi chuỗi. */}
+                  <Badge variant="outline" className="rounded-md bg-muted font-mono">
+                    {m.code}
+                  </Badge>
+                  <span className="min-w-0 flex-1 truncate text-sm font-medium">{m.name_vi}</span>
+                  {/* Màu chữ cấp qua `className` chứ không thành variant mới trong `badge.tsx` —
+                      `--success-foreground` là token THÊM của gói bàn giao, lần `shadcn add badge`
+                      sau sẽ nuốt mất (cùng tiền lệ `features/report/NhacTruocDuyet.tsx` với Alert).
+                      Icon không còn tự khai cỡ: Badge ép `[&>svg]:size-3!` nên một `size-3.5` viết
+                      tay ở đây chỉ là chữ chết. */}
+                  <Badge
+                    variant="outline"
+                    className={`rounded-md ${m.active ? 'text-success-foreground' : 'text-muted-foreground'}`}
+                  >
+                    {m.active ? <CircleCheck /> : <CircleSlash />}
+                    {m.active ? 'Đang dùng' : 'Ngừng dùng'}
+                  </Badge>
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="truncate text-xs text-muted-foreground">{m.name_en}</p>
+                <p className="mt-2 flex items-center gap-1.5 text-xs text-sec">
+                  <CalendarClock className="size-3.5" />
+                  {m.period_type === 'month' ? 'Kỳ theo tháng' : `Kỳ: ${m.period_type}`}
+                </p>
+              </CardContent>
+            </Card>
           ))}
         </div>
       </VungDuLieu>
@@ -182,63 +197,84 @@ export function QuanTriMau() {
               : 'Cần quyền xem tình trạng nộp mới thấy được số đơn vị đã nộp từng kỳ.'}
           </div>
         </div>
-        <div className="min-w-0 overflow-x-auto">
+        {/* Vỏ này KHÔNG có viền/nền — nó nằm trong khối bọc ngay trên, nên `Card` là thừa. Chỉ
+            `overflow-x-auto` bị bỏ (container của `Table` đã cuộn ngang, giữ cả hai là hai vùng
+            cuộn lồng nhau); `min-w-0` giữ nguyên theo vỏ cũ. */}
+        <div className="min-w-0">
           <VungDuLieu q={ky} soDong={4}>
-            <table className="w-full border-collapse">
-              <thead>
-                <tr>
-                  <th className={O_TIEU_DE}>Kỳ</th>
-                  <th className={O_TIEU_DE}>Bắt đầu</th>
-                  <th className={O_TIEU_DE}>Kết thúc</th>
-                  <th className={O_TIEU_DE}>Hạn nộp</th>
-                  <th className={O_TIEU_DE}>Đã nộp</th>
-                  <th className={O_TIEU_DE}>Trạng thái</th>
-                  <th className={`${O_TIEU_DE} text-right`}>Hành động</th>
-                </tr>
-              </thead>
-              <tbody>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className={O_TIEU_DE}>Kỳ</TableHead>
+                  <TableHead className={O_TIEU_DE}>Bắt đầu</TableHead>
+                  <TableHead className={O_TIEU_DE}>Kết thúc</TableHead>
+                  <TableHead className={O_TIEU_DE}>Hạn nộp</TableHead>
+                  <TableHead className={O_TIEU_DE}>Đã nộp</TableHead>
+                  <TableHead className={O_TIEU_DE}>Trạng thái</TableHead>
+                  <TableHead className={`${O_TIEU_DE} text-right`}>Hành động</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {(ky.data ?? []).map((k) => (
-                  <tr key={k.period_key} className="transition-colors duration-[120ms] hover:bg-muted/50">
-                    <td className={`${O_BANG} font-medium tabular-nums`}>{formatPeriod(k.period_key)}</td>
-                    <td className={`${O_BANG} tabular-nums text-sec`}>{ngay(k.start_date)}</td>
-                    <td className={`${O_BANG} tabular-nums text-sec`}>{ngay(k.end_date)}</td>
-                    <td className={`${O_BANG} tabular-nums text-sec`}>{formatDateTime(k.due_at)}</td>
-                    <td className={`${O_BANG} tabular-nums`} data-testid={`da-nop-${k.period_key}`}>
+                  // Hiệu ứng rê chuột tự viết đã BỎ — `TableRow` mang sẵn
+                  // `transition-colors hover:bg-muted/50`, đúng thứ dòng này vốn tự vẽ.
+                  <TableRow key={k.period_key}>
+                    <TableCell className={`${O_BANG} font-medium tabular-nums`}>
+                      {formatPeriod(k.period_key)}
+                    </TableCell>
+                    <TableCell className={`${O_BANG} tabular-nums text-sec`}>{ngay(k.start_date)}</TableCell>
+                    <TableCell className={`${O_BANG} tabular-nums text-sec`}>{ngay(k.end_date)}</TableCell>
+                    <TableCell className={`${O_BANG} tabular-nums text-sec`}>
+                      {formatDateTime(k.due_at)}
+                    </TableCell>
+                    <TableCell className={`${O_BANG} tabular-nums`} data-testid={`da-nop-${k.period_key}`}>
                       {luoi.data && tongDauMoi
                         ? `${soDaNop(luoi.data, k.period_key)}/${tongDauMoi}`
                         : '—'}
-                    </td>
-                    <td className={O_BANG}>
-                      <span
-                        className={`inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium ${
+                    </TableCell>
+                    <TableCell className={O_BANG}>
+                      {/* `variant="secondary"` chứ không `outline`: hai màu nền dưới đây giữ NGUYÊN
+                          và ô này vốn KHÔNG có viền — variant `outline` sẽ cấp `border-border` và
+                          vẽ thêm một đường viền chưa từng có. `secondary` để nguyên
+                          `border-transparent` của lớp nền Badge, còn `bg-secondary` của nó bị chính
+                          `bg-*` dưới đây gỡ khỏi chuỗi (tailwind-merge), nên vẫn đúng MỘT utility
+                          background-color. */}
+                      <Badge
+                        variant="secondary"
+                        className={`rounded-md ${
                           k.is_open
                             ? 'bg-success-bg text-success-foreground'
                             : 'bg-muted text-secondary-foreground'
                         }`}
                       >
                         {k.is_open ? 'Đang mở' : 'Đã đóng'}
-                      </span>
-                    </td>
-                    <td className={`${O_BANG} text-right`}>
-                      {/* Mở kỳ KHÔNG hỏi lại (chỉ thêm quyền cho đơn vị, không lấy đi gì); đóng kỳ
-                          thì hỏi, vì nó chặn lối vào của 22 đầu mối. Bất đối xứng là CÓ Ý. */}
-                      <button
+                      </Badge>
+                    </TableCell>
+                    <TableCell className={`${O_BANG} text-right`}>
+                      {/* MỘT kiểu nút cho cả hai chiều, CỐ Ý — bản đầu tô "Mở kỳ" bằng nền primary
+                          khiến hai nút đậm nhất trang lại nằm ở hai kỳ lịch sử đã đóng mà không ai
+                          cần mở lại. Màu nhấn chỉ dùng cho việc NÊN LÀM (luật Lát 6), mà mở/đóng kỳ
+                          đều là quyết định của quản trị, không phải gợi ý của giao diện.
+                          Mở kỳ KHÔNG hỏi lại (chỉ thêm quyền cho đơn vị, không lấy đi gì); đóng kỳ
+                          thì hỏi, vì nó chặn lối vào của 22 đầu mối. Bất đối xứng đó là CÓ Ý. */}
+                      <Button
                         type="button"
+                        variant="outline"
+                        size="sm"
                         disabled={doiKy.isPending}
                         onClick={() =>
                           k.is_open
                             ? setDangHoiDong(k)
                             : doiKy.mutate({ period_key: k.period_key, is_open: true })
                         }
-                        className={NUT}
                       >
                         {k.is_open ? 'Đóng kỳ' : 'Mở kỳ'}
-                      </button>
-                    </td>
-                  </tr>
+                      </Button>
+                    </TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           </VungDuLieu>
         </div>
       </div>

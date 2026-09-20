@@ -2947,7 +2947,9 @@ describe('hộp thoại chuyển trạng thái', () => {
     const hop = await moHop(u, 'Trả lại…')
     expect(hop.textContent).toContain('Trả lại báo cáo')
     expect(within(hop).getByLabelText('Lý do trả lại (người nộp sẽ thấy nguyên văn)')).toBeTruthy()
-    expect(resolveCascadeWinner(nutHop('Trả lại').className, 'background-color')).toBe('bg-destructive')
+    // Lát dựng lại NÚT: nút danger giờ là Button variant="destructive" của shadcn — đỏ MỀM
+    // (bg-destructive/10) thay vì đỏ đặc chữ trắng của NUT_NGUY cũ. Đổi có chủ đích (brief-1-button.md).
+    expect(resolveCascadeWinner(nutHop('Trả lại').className, 'background-color')).toBe('bg-destructive/10')
   })
 
   it('Mở lại: cũng bắt nhập lý do, và nêu hậu quả "rời khỏi tổng"', async () => {

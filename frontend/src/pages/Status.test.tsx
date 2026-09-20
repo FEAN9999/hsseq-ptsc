@@ -145,9 +145,10 @@ function DichDen() {
   )
 }
 
-// Toast là store TOÀN CỤC (Task 15) — mount cạnh <Status/> giống production (routes.tsx: <Toast/>
-// đứng cạnh <RouterProvider>, không lồng trong trang) để ca "Đã sao chép n đơn vị" tìm được chữ
-// trên màn hình qua chính useToast() thật, không phải một cơ chế toast riêng của trang.
+// Toast là hàng đợi TOÀN CỤC (Task 15; lát 5 đổi nền từ store zustand sang sonner, vẫn toàn cục)
+// — mount cạnh <Status/> giống production (routes.tsx: <Toast/> đứng cạnh <RouterProvider>, không
+// lồng trong trang) để ca "Đã sao chép n đơn vị" tìm được chữ trên màn hình qua chính `toast()`
+// thật, không phải một cơ chế toast riêng của trang.
 function renderStatus(
   initialPath = '/status',
   qc = new QueryClient({ defaultOptions: { queries: { retry: false } } }),

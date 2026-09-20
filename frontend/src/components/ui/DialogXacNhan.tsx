@@ -40,7 +40,7 @@
 //    "").strip()`, tức chỉ cần khác rỗng. Cố ý lệch, đừng "sửa" server cho khớp.
 import { useEffect, useId, useRef, useState } from 'react'
 
-import { NUT_CHINH, NUT_NGUY, NUT_THUONG } from './nut'
+import { Button } from './button'
 
 /** Độ dài tối thiểu của lý do bắt buộc — spec dòng 682. Đếm trên chuỗi ĐÃ cắt khoảng trắng hai
  * đầu: mười dấu cách không phải một lý do. */
@@ -197,17 +197,17 @@ export function DialogXacNhan({
           {/* "Huỷ" KHOÁ lúc đang gửi: request đã bay không rút lại được, nên một nút Huỷ bấm
               được ở đây là lời hứa sai — người dùng bấm nó rồi vẫn thấy toast "Đã nộp báo cáo
               08/2026". Nút chính đang hiện "Đang gửi…" là đủ để biết máy chưa treo. */}
-          <button type="button" disabled={pending} onClick={onCancel} className={NUT_THUONG}>
+          <Button type="button" variant="outline" disabled={pending} onClick={onCancel}>
             Huỷ
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
+            variant={danger ? 'destructive' : 'default'}
             disabled={khoaNutChinh}
             onClick={() => onConfirm(ghiChu)}
-            className={danger ? NUT_NGUY : NUT_CHINH}
           >
             {pending ? 'Đang gửi…' : confirmLabel}
-          </button>
+          </Button>
         </div>
       </dialog>
     </div>

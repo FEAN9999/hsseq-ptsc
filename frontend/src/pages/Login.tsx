@@ -26,6 +26,7 @@ import { flushSync } from 'react-dom'
 import { useNavigate, type NavigateFunction } from 'react-router-dom'
 import { api, ApiError, BASE, noiLaJson } from '../api/client'
 import { useSession, type SessionOrgUnit, type SessionUser } from '../app/session'
+import { Button } from '../components/ui/button'
 import { Wordmark } from '../components/ui/Wordmark'
 
 const O_NHAP =
@@ -266,7 +267,7 @@ export function Login() {
             <Wordmark />
           </div>
           <h2 className="text-[22px] font-medium leading-[1.2] tracking-[-0.3px] text-foreground">
-            Đăng nhập HSEQ
+            Đăng nhập HSSEQ
           </h2>
           <p className="mt-1 mb-6 text-[13px] text-muted-foreground">
             Dùng tài khoản nội bộ do Ban An toàn Chất lượng cấp.
@@ -301,13 +302,9 @@ export function Login() {
                 className={O_NHAP}
               />
             </div>
-            <button
-              type="submit"
-              disabled={dangGui}
-              className="mt-1.5 h-10 w-full rounded-md border border-primary bg-primary text-[13px] font-medium text-white hover:bg-primary/90 disabled:opacity-50"
-            >
+            <Button type="submit" disabled={dangGui} className="mt-1.5 h-10 w-full">
               {dangGui ? 'Đang đăng nhập…' : 'Đăng nhập'}
-            </button>
+            </Button>
 
             {/* Ba trạng thái của cùng MỘT khe thông báo dưới nút — hộp có viền, không còn là dòng
                 chữ trần: chúng nói về máy chủ chứ không phải về ô vừa gõ, và ở màn đầu tiên của

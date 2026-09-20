@@ -14,6 +14,7 @@
 import { LayoutGrid, ArrowRight } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
+import { Card, CardAction, CardContent, CardHeader, CardTitle } from '../../components/ui/card'
 import type { UnitRow } from './useUnits'
 
 /** Trạng thái báo cáo → lớp nền/chữ của ô vuông. */
@@ -36,33 +37,40 @@ function lopO(state: string | null): string {
 
 export function BaoPhuKy({ units, period }: { units: UnitRow[]; period: string }) {
   return (
-    <section className="mb-4 rounded-xl border border-border bg-card p-4">
-      <div className="flex items-start justify-between gap-4">
-        <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground">
-          <LayoutGrid className="size-4" />
-          Bao phủ kỳ
-        </h2>
-        <Link
-          to={`/status?period=${period}`}
-          className="flex shrink-0 items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-[13px] font-medium text-secondary-foreground hover:bg-muted"
-        >
-          Tình trạng nộp
-          <ArrowRight className="size-3.5" />
-        </Link>
-      </div>
-      <ul className="mt-3 flex flex-wrap gap-1.5">
-        {units.map((u) => (
-          <li key={u.org_unit.code}>
-            <span
-              // `title` mang tên đầy đủ: ô vuông chỉ đủ chỗ cho mã đơn vị.
-              title={`${u.org_unit.code} — ${u.org_unit.name}`}
-              className={`flex h-7 min-w-11 items-center justify-center rounded-md border px-1.5 font-mono text-[11px] tnum ${lopO(u.state)}`}
-            >
-              {u.org_unit.code}
-            </span>
-          </li>
-        ))}
-      </ul>
-    </section>
+    <Card className="mb-4">
+      <CardHeader>
+        <CardTitle>
+          <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground">
+            <LayoutGrid className="size-4" />
+            Bao phủ kỳ
+          </h2>
+        </CardTitle>
+        <CardAction>
+          <Link
+            to={`/status?period=${period}`}
+            className="flex shrink-0 items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-[13px] font-medium text-secondary-foreground hover:bg-muted"
+          >
+            Tình trạng nộp
+            <ArrowRight className="size-3.5" />
+          </Link>
+        </CardAction>
+      </CardHeader>
+      <CardContent>
+        {/* mt-3 cũ bỏ: gap dọc giữa CardHeader và CardContent đã do Card lo (--card-spacing). */}
+        <ul className="flex flex-wrap gap-1.5">
+          {units.map((u) => (
+            <li key={u.org_unit.code}>
+              <span
+                // `title` mang tên đầy đủ: ô vuông chỉ đủ chỗ cho mã đơn vị.
+                title={`${u.org_unit.code} — ${u.org_unit.name}`}
+                className={`flex h-7 min-w-11 items-center justify-center rounded-md border px-1.5 font-mono text-[11px] tnum ${lopO(u.state)}`}
+              >
+                {u.org_unit.code}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </CardContent>
+    </Card>
   )
 }

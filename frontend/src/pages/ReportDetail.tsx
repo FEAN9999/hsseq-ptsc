@@ -16,13 +16,16 @@ import { useQuery } from '@tanstack/react-query'
 
 import { api, ApiError } from '../api/client'
 import { useSession } from '../app/session'
+import { Card, CardContent } from '../components/ui/card'
 import { InlineError } from '../components/ui/InlineError'
 import { SkeletonDong } from '../components/ui/SkeletonDong'
 import { ReportForm, type ChiTietBaoCao, type MauBaoCao } from '../features/report/ReportForm'
 
 function KhungLoi({ children }: { children: React.ReactNode }) {
   return (
-    <div className="border border-border bg-card rounded-xl p-8 text-center text-secondary-foreground text-sm">{children}</div>
+    <Card>
+      <CardContent className="py-4 text-center text-sm text-secondary-foreground">{children}</CardContent>
+    </Card>
   )
 }
 

@@ -3,7 +3,7 @@
 // Khung ứng dụng, dựng lại ở Lát 1 trên `SidebarProvider` + `SidebarInset` của shadcn theo mockup
 // `Redesign shadcn.dc.html`. Chỉ lo BỐ CỤC — mục nào hiện trong sidebar là việc của Sidebar.tsx
 // (theo quyền), trang nào được vào là việc của RequireAuth (src/app/routes.tsx).
-// "HSEQ" chỉ ở <title> (index.html) — không lặp lại chữ đó ở đây.
+// "HSSEQ" chỉ ở <title> (index.html) và wordmark sidebar — không lặp lại chữ đó ở đây.
 //
 // Thanh đầu trang: nút thu/mở sidebar + breadcrumb. Breadcrumb suy từ đường dẫn, KHÔNG nhận props —
 // AppShell bọc ở tầng route nên nó chỉ có `children`, và bắt mọi trang tự truyền breadcrumb là

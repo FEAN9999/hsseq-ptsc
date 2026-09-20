@@ -5,8 +5,9 @@
 // 1. TOAST ĐO TRÊN MÀN HÌNH THẬT, KHÔNG ĐO SPY. Cây test dựng luôn `<Toast/>` và một bảng route
 //    có `/dashboard`, nên "toast có link Xem dashboard" được khẳng định bằng chính cái link người
 //    dùng bấm và bằng trang mà cú bấm đó tới — không phải bằng hình dạng tham số của một hàm giả.
-//    Ca test của brief (`toastSpy` nhận `{text, linkLabel}`) SAI so với `useToast` thật
-//    (`show(message, action?)`, components/ui/Toast.tsx:16,28) — task-24-carry.md C4.
+//    Ca test của brief (`toastSpy` nhận `{text, linkLabel}`) SAI so với API toast thật — hồi đó là
+//    `useToast()` → `show(message, action?)`, lát 5 là `toast(message, { action })` của sonner;
+//    lỗi của brief không phụ thuộc bản nào — task-24-carry.md C4.
 //
 // 2. CÂU TOAST DỰNG TỪ `name_vi` CỦA DỮ LIỆU. Có ca dùng một `name_vi` KHÔNG nằm trong seed để
 //    một bảng chuỗi viết cứng không sống nổi.
@@ -19,6 +20,7 @@ import { act, renderHook, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { toast } from 'sonner'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { api, ApiError } from '../../api/client'
@@ -224,13 +226,18 @@ describe('useChuyenTrangThai — sau khi thành công', () => {
     expect(invalidateSpy).not.toHaveBeenCalled()
   })
 
+  // Lát 5 (Toast → sonner): mọi ca dưới đây đổi `getByRole('status')` thành `findByRole`. Lý do là
+  // CƠ CHẾ, không phải gu viết: sonner đẩy toast vào cây qua `setTimeout(…, 0)` + `flushSync` (dist
+  // ~dòng 1032) và `Toast.tsx` gắn `role="status"` trong một `MutationObserver` — hai chặng nằm
+  // NGOÀI hàng đợi vi tác vụ mà `await act()` rút cạn, nên một khẳng định đồng bộ ngay sau
+  // `xacNhan()` đọc DOM lúc toast chưa tới. Nội dung được khẳng định thì không đổi một chữ.
   it('duyệt xong: toast "Đã duyệt" kèm link "Xem dashboard" bấm được tới đúng /dashboard', async () => {
     const u = userEvent.setup()
     const { result } = ren()
     await act(async () => {
       await result.current.xacNhan(DUYET, 'submitted', 8, '')
     })
-    expect(screen.getByRole('status').textContent).toContain('Đã duyệt')
+    expect((await screen.findByRole('status')).textContent).toContain('Đã duyệt')
     expect(screen.getByText('đang ở trang báo cáo')).toBeTruthy()
 
     await u.click(screen.getByRole('link', { name: 'Xem dashboard' }))
@@ -242,7 +249,7 @@ describe('useChuyenTrangThai — sau khi thành công', () => {
     await act(async () => {
       await result.current.xacNhan(NOP, 'draft', 8, '')
     })
-    expect(screen.getByRole('status').textContent).toBe('Đã nộp báo cáo 08/2026')
+    expect((await screen.findByRole('status')).textContent).toBe('Đã nộp báo cáo 08/2026')
     expect(screen.queryByRole('link')).toBeNull()
   })
 
@@ -251,15 +258,18 @@ describe('useChuyenTrangThai — sau khi thành công', () => {
     await act(async () => {
       await result.current.xacNhan(TRA_LAI, 'submitted', 8, 'Thiếu số B-8.1')
     })
-    expect(screen.getByRole('status').textContent).toBe('Đã trả lại')
+    expect((await screen.findByRole('status')).textContent).toBe('Đã trả lại')
     expect(screen.queryByRole('link')).toBeNull()
     unmount()
+    // Hàng đợi sonner là TOÀN CỤC và `subscribe` phát lại mọi toast còn sống cho `<Toaster>` mới
+    // (xem vitest.setup.ts) — không tắt toast "Đã trả lại" ở đây thì nửa sau của ca có HAI toast.
+    toast.dismiss()
 
     const t2 = ren()
     await act(async () => {
       await t2.result.current.xacNhan(MO_LAI, 'approved', 8, 'Sai số giờ công')
     })
-    expect(screen.getByRole('status').textContent).toBe('Đã mở lại')
+    expect((await screen.findByRole('status')).textContent).toBe('Đã mở lại')
     expect(screen.queryByRole('link')).toBeNull()
   })
 
@@ -273,13 +283,14 @@ describe('useChuyenTrangThai — sau khi thành công', () => {
         'submitted', 8, '',
       )
     })
-    expect(screen.getByRole('status').textContent).toBe('Đã gửi Ban ATCL')
+    expect((await screen.findByRole('status')).textContent).toBe('Đã gửi Ban ATCL')
   })
 
-  // Đo "trước và sau" chứ không đo `queryByRole('status')` là null: store toast của Task 15 là
-  // store TOÀN CỤC (components/ui/Toast.tsx) và chỉ tự tắt sau 4 giây, nên toast của ca test
-  // trước còn nguyên trong store khi ca này chạy. So hai mốc là cách duy nhất khẳng định đúng
-  // điều cần khẳng định: lượt hỏng này không đẻ thêm câu báo thành công nào.
+  // Đo "trước và sau" chứ không đo `queryByRole('status')` là null. Hàng đợi toast vẫn TOÀN CỤC
+  // sau lát 5 (nay là của sonner, không còn là store zustand của Task 15); `vitest.setup.ts` đã dọn
+  // nó sau mỗi ca nên `truoc` thực tế là null, nhưng khẳng định vẫn viết theo hai mốc: nó đo đúng
+  // thứ cần đo — lượt hỏng này không ĐẺ THÊM câu báo thành công nào — mà không phụ thuộc vào việc
+  // hàng đợi có sạch hay không.
   it('gửi hỏng thì KHÔNG đẻ thêm toast nào — không báo thành công cho việc chưa xong', async () => {
     postSpy.mockRejectedValueOnce(new ApiError(403, { detail: 'Bạn không có quyền' }))
     const { result } = ren()

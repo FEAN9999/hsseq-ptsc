@@ -11,6 +11,16 @@
 import { useQuery } from '@tanstack/react-query'
 
 import { api } from '../api/client'
+import { Badge } from '../components/ui/badge'
+import { Card } from '../components/ui/card'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '../components/ui/table'
 import { O_BANG, O_TIEU_DE, TieuDeQuanTri, VungDuLieu } from '../features/admin/khung'
 
 interface VaiCuaNguoi {
@@ -33,13 +43,15 @@ interface NguoiDung {
 
 function HuyHieuVai({ vai }: { vai: VaiCuaNguoi }) {
   return (
-    <span className="inline-flex items-center gap-1 rounded border border-border bg-muted px-1.5 py-0.5 text-xs font-medium text-secondary-foreground">
+    // `bg-muted`/`text-secondary-foreground` giữ NGUYÊN qua `className` (không thành variant mới
+    // trong `badge.tsx`), `variant="outline"` giữ lại đường viền mà bản tự vẽ đã có.
+    <Badge variant="outline" className="rounded-md bg-muted text-secondary-foreground">
       {vai.name}
       {/* Phạm vi chỉ hiện khi CÓ. `null` nghĩa là "toàn Tổng công ty" với admin/viewer — in thêm
           chữ đó vào 2 trong 24 dòng là làm ồn cột này mà không thêm thông tin nào: cột Đơn vị ngay
           bên trái đã nói họ thuộc PTSC. */}
       {vai.scope && <span className="font-mono text-[11px] text-muted-foreground">{vai.scope.code}</span>}
-    </span>
+    </Badge>
   )
 }
 
@@ -66,20 +78,25 @@ export function QuanTriNguoiDung() {
       />
 
       <VungDuLieu q={ds} soDong={10}>
-        <div className="min-w-0 overflow-x-auto rounded-xl border border-border bg-card">
-          <table className="w-full border-collapse">
-            <thead>
-              <tr>
-                <th className={O_TIEU_DE}>Tài khoản</th>
-                <th className={O_TIEU_DE}>Đơn vị</th>
-                <th className={O_TIEU_DE}>Vai</th>
-                <th className={`${O_TIEU_DE} text-right`}>Quyền</th>
-              </tr>
-            </thead>
-            <tbody>
+        {/* Vỏ cuộn tự viết đã BỎ (`Table` tự sinh một `<div overflow-x-auto>`); viền/nền/bo góc
+            chuyển sang `Card`, `py-0` vì bảng tự có đệm dọc. `min-w-0` giữ lại theo đúng vỏ cũ —
+            nó là thứ cho một con flex co nhỏ hơn nội dung, mà container của shadcn không có. */}
+        <Card className="min-w-0 py-0">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className={O_TIEU_DE}>Tài khoản</TableHead>
+                <TableHead className={O_TIEU_DE}>Đơn vị</TableHead>
+                <TableHead className={O_TIEU_DE}>Vai</TableHead>
+                <TableHead className={`${O_TIEU_DE} text-right`}>Quyền</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {(ds.data ?? []).map((n) => (
-                <tr key={n.id} className="transition-colors duration-[120ms] hover:bg-muted/50">
-                  <td className={`${O_BANG} py-2`}>
+                // Hiệu ứng rê chuột tự viết đã BỎ — `TableRow` mang sẵn
+                // `transition-colors hover:bg-muted/50`, đúng thứ dòng này vốn tự vẽ.
+                <TableRow key={n.id}>
+                  <TableCell className={`${O_BANG} py-2`}>
                     {/* KHÔNG có avatar viết tắt (mockup 09 vẽ một cái). Quy ước viết tắt của app là
                         hai chữ đầu của email — đúng cho ô tài khoản ở chân sidebar, nơi chỉ có MỘT
                         người. Ở đây nó gộp `u01@`…`u09@` thành cùng một chữ "U0" trên chín dòng
@@ -95,13 +112,13 @@ export function QuanTriNguoiDung() {
                           một người "đăng nhập không được". Backend từ chối token của họ ngay
                           (deps.current_user), nên đây là một sự thật cần thấy, không phải rác. */}
                       {!n.active && (
-                        <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
+                        <Badge variant="secondary" className="rounded-md text-muted-foreground">
                           Đã khoá
-                        </span>
+                        </Badge>
                       )}
                     </span>
-                  </td>
-                  <td className={O_BANG}>
+                  </TableCell>
+                  <TableCell className={O_BANG}>
                     {n.org_unit ? (
                       <span className="flex items-center gap-2">
                         <span className="font-mono text-xs text-sec">{n.org_unit.code}</span>
@@ -110,8 +127,8 @@ export function QuanTriNguoiDung() {
                     ) : (
                       <span className="text-muted-foreground">—</span>
                     )}
-                  </td>
-                  <td className={O_BANG}>
+                  </TableCell>
+                  <TableCell className={O_BANG}>
                     {n.roles.length === 0 ? (
                       // Không vai = không quyền nào. Người này đăng nhập được nhưng mọi trang đều
                       // 403 — một cấu hình có thật và khó đoán từ phía người dùng, nên gọi tên nó.
@@ -123,15 +140,15 @@ export function QuanTriNguoiDung() {
                         ))}
                       </span>
                     )}
-                  </td>
-                  <td className={`${O_BANG} text-right tabular-nums text-sec`}>
+                  </TableCell>
+                  <TableCell className={`${O_BANG} text-right tabular-nums text-sec`}>
                     {n.permission_count}
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
-        </div>
+            </TableBody>
+          </Table>
+        </Card>
       </VungDuLieu>
     </div>
   )

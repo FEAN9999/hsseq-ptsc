@@ -18,6 +18,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 
 import { api, ApiError } from '../api/client'
+import { Card, CardContent } from '../components/ui/card'
 import { Chip } from '../components/ui/Chip'
 import { InlineError } from '../components/ui/InlineError'
 import { SkeletonDong } from '../components/ui/SkeletonDong'
@@ -177,14 +178,16 @@ export function Status() {
     return (
       <div>
         <TieuDe>Tình trạng nộp · {TEMPLATE}</TieuDe>
-        <div className="mt-4 border border-border bg-card rounded-xl p-8 text-center text-secondary-foreground text-sm">
-          Bạn không có quyền xem tình trạng nộp này
-          <div className="mt-2.5">
-            <Link to="/reports" className="text-secondary-foreground font-medium">
-              Về báo cáo của đơn vị
-            </Link>
-          </div>
-        </div>
+        <Card className="mt-4">
+          <CardContent className="py-4 text-center text-sm text-secondary-foreground">
+            Bạn không có quyền xem tình trạng nộp này
+            <div className="mt-2.5">
+              <Link to="/reports" className="text-secondary-foreground font-medium">
+                Về báo cáo của đơn vị
+              </Link>
+            </div>
+          </CardContent>
+        </Card>
       </div>
     )
   }

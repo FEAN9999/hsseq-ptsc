@@ -25,6 +25,7 @@ import { History, Lock, Sparkles, Table2 } from 'lucide-react'
 
 import { Badge } from '../../components/ui/badge'
 import { Banner } from '../../components/ui/Banner'
+import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card'
 import { DialogXacNhan } from '../../components/ui/DialogXacNhan'
 import { useSession } from '../../app/session'
 import type { ApiErrorItem } from '../../api/client'
@@ -735,6 +736,10 @@ export function ReportForm({ mau, chiTiet, loiLamMoi = false }: ReportFormProps)
               Trước đây mỗi cột tự khai bề rộng cứng (`Chỉ tiêu` 400px, `Ghi chú` min 240px) cộng
               lại 1088px — quá chỗ trống thật (1280 − sidebar 256 − đệm 48 − mục lục 176 = 800px),
               nên ở đúng viewport demo cột "Cộng dồn" bị cắt mất. Nay hai cột chữ co giãn theo %. */}
+          {/* Bảng DUY NHẤT của app còn là `<table>` thuần, CÓ LÝ DO: `Table` (components/ui/table.tsx)
+              tự bọc một `<div overflow-x-auto>` mà KHÔNG nhận className, nên không có cách nào gắn
+              `max-h-…`/`overflow-auto` vào đúng phần tử cuộn — mà đó chính là thứ `<thead sticky
+              top-0>` của bảng 53 dòng này cần để dính. Đổi sang primitive là giết header dính. */}
           <table className="w-full min-w-[700px] border-collapse text-sm">
             <thead>
               <tr>
@@ -1079,47 +1084,61 @@ function OChu({
   // Mockup 04 vẽ ba ô chữ thành ba THẺ đứng cạnh nhau, không phải ba khối xếp chồng dưới bảng:
   // C1/C2/C3 là ba câu hỏi ngang hàng (đã làm gì · sắp làm gì · đề nghị gì), và xếp chồng làm
   // chúng đọc như ba bước nối tiếp.
+  //
+  // CardTitle bọc NGOÀI <label>/<div> thay vì THAY THẾ chúng: CardTitle luôn dựng <div>, mà chế độ
+  // sửa cần đúng thẻ <label htmlFor> để `getByLabelText(nhan)` (ReportForm.test.tsx) tìm ra
+  // textarea — thay bằng CardTitle sẽ mất liên kết đó. mb-2 cũ của label/div bỏ: gap Header→Content
+  // đã do Card lo.
   return (
-    <section className="flex flex-col rounded-xl border border-border bg-card px-5 py-4">
-      {suaDuoc ? (
-        <>
-          <label
-            htmlFor={`chu-${ma}`}
-            className="mb-2 flex items-center gap-2 text-sm font-semibold text-foreground"
-          >
-            <span className="font-mono text-[11.5px] font-medium text-primary">{ma}</span>{' '}
-            {nhan}
-          </label>
-          <textarea
-            id={`chu-${ma}`}
-            value={noiDung}
-            maxLength={TOI_DA_CHU}
-            onChange={(e) => {
-              // "textarea tự giãn": cao theo nội dung, không có thanh cuộn trong ô.
-              e.target.style.height = 'auto'
-              e.target.style.height = `${e.target.scrollHeight}px`
-              onDoi(e.target.value)
-            }}
-            onBlur={onRoiO}
-            className="block min-h-24 w-full flex-1 rounded-md border border-border bg-card px-2.5 py-2 text-sm leading-[1.6] text-secondary-foreground focus:outline-2 focus:-outline-offset-2 focus:outline-ring"
-          />
-          <div className="mt-1.5 text-right font-mono text-[11px] tnum text-muted-foreground">
-            {noiDung.length}/{TOI_DA_CHU}
-          </div>
-        </>
-      ) : (
-        <>
-          <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-foreground">
-            <span className="font-mono text-[11.5px] font-medium text-primary">{ma}</span>{' '}
-            {nhan}
-          </div>
-          {/* Chỉ đọc: KHÔNG vẽ viền ô nhập. Một cái hộp rỗng hình ô nhập trên báo cáo đã duyệt mời
-              người ta bấm vào rồi mới phát hiện không gõ được. Ô trống thì nói ra là trống. */}
-          <div className="flex-1 text-sm leading-[1.6] whitespace-pre-wrap text-secondary-foreground">
-            {noiDung === '' ? <span className="text-muted-foreground">Không có nội dung</span> : noiDung}
-          </div>
-        </>
-      )}
-    </section>
+    <Card>
+      <CardHeader>
+        <CardTitle>
+          {suaDuoc ? (
+            <label
+              htmlFor={`chu-${ma}`}
+              className="flex items-center gap-2 text-sm font-semibold text-foreground"
+            >
+              <span className="font-mono text-[11.5px] font-medium text-primary">{ma}</span>{' '}
+              {nhan}
+            </label>
+          ) : (
+            <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+              <span className="font-mono text-[11.5px] font-medium text-primary">{ma}</span>{' '}
+              {nhan}
+            </div>
+          )}
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="flex flex-1 flex-col">
+        {suaDuoc ? (
+          <>
+            <textarea
+              id={`chu-${ma}`}
+              value={noiDung}
+              maxLength={TOI_DA_CHU}
+              onChange={(e) => {
+                // "textarea tự giãn": cao theo nội dung, không có thanh cuộn trong ô.
+                e.target.style.height = 'auto'
+                e.target.style.height = `${e.target.scrollHeight}px`
+                onDoi(e.target.value)
+              }}
+              onBlur={onRoiO}
+              className="block min-h-24 w-full flex-1 rounded-md border border-border bg-card px-2.5 py-2 text-sm leading-[1.6] text-secondary-foreground focus:outline-2 focus:-outline-offset-2 focus:outline-ring"
+            />
+            <div className="mt-1.5 text-right font-mono text-[11px] tnum text-muted-foreground">
+              {noiDung.length}/{TOI_DA_CHU}
+            </div>
+          </>
+        ) : (
+          <>
+            {/* Chỉ đọc: KHÔNG vẽ viền ô nhập. Một cái hộp rỗng hình ô nhập trên báo cáo đã duyệt mời
+                người ta bấm vào rồi mới phát hiện không gõ được. Ô trống thì nói ra là trống. */}
+            <div className="flex-1 text-sm leading-[1.6] whitespace-pre-wrap text-secondary-foreground">
+              {noiDung === '' ? <span className="text-muted-foreground">Không có nội dung</span> : noiDung}
+            </div>
+          </>
+        )}
+      </CardContent>
+    </Card>
   )
 }

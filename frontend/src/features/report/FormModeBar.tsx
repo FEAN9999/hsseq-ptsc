@@ -15,7 +15,9 @@
 //
 // Dấu "…" gắn vào đúng các chuyển trạng thái `requires_note` — nó là lời hứa "bấm xong còn một
 // hộp thoại nữa" (Trả lại / Mở lại đều bắt nhập lý do, D24), không phải trang trí.
-import { NUT_CHINH, NUT_GHOST, NUT_THUONG } from '../../components/ui/nut'
+import { Check, Save, Undo2 } from 'lucide-react'
+
+import { Button } from '../../components/ui/button'
 import type { ChuyenTrangThai } from './ReportForm'
 
 /** Số mã chỉ tiêu tối đa liệt kê trong thanh trước khi rút gọn thành "+n". Cùng quy ước với thanh
@@ -114,20 +116,22 @@ export function FormModeBar({
       </div>
       <div className="flex gap-2">
         {suaDuoc && (
-          <button type="button" onClick={onLuu} className={NUT_THUONG}>
+          <Button type="button" variant="outline" onClick={onLuu}>
+            <Save />
             Lưu
-          </button>
+          </Button>
         )}
         {chuyenDuoc.map((c) => (
-          <button
+          <Button
             key={`${c.action_code}-${c.from_state}`}
             type="button"
+            variant={c.requires_note ? 'outline' : 'default'}
             onClick={() => onChuyenTrangThai(c)}
-            className={c.requires_note ? NUT_GHOST : NUT_CHINH}
           >
+            {c.requires_note ? <Undo2 /> : <Check />}
             {c.name_vi}
             {c.requires_note ? '…' : ''}
-          </button>
+          </Button>
         ))}
       </div>
     </div>

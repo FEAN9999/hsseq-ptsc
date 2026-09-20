@@ -12,6 +12,7 @@
 import { Clock, Radar, ClipboardList } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 
+import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card'
 import { formatNumber } from '../../lib/format'
 import { useNhaySo } from './useNhaySo'
 import type { KpiItem } from './useSummary'
@@ -29,27 +30,35 @@ function The({ kpi }: { kpi: KpiItem }) {
   const nhay = useNhaySo(kpi.value)
 
   return (
-    <section className={`rounded-xl border border-border bg-card p-4${nhay ? ' flash' : ''}`}>
-      <h3 className="flex items-center gap-2 text-[12px] font-medium uppercase tracking-[0.02em] text-muted-foreground">
-        {Icon && <Icon className="size-4" />}
-        {kpi.label}
-      </h3>
-      {kpi.value === null ? (
-        <div
-          className="mt-1.5 font-mono text-[28px] leading-none tnum text-muted-foreground"
-          aria-label="chưa có dữ liệu"
-        >
-          —
-        </div>
-      ) : (
-        <div className="mt-1.5 flex items-baseline gap-1.5">
-          <span className="font-mono text-[28px] leading-none tnum text-foreground">
-            {formatNumber(kpi.value, 0)}
-          </span>
-          <span className="text-[11px] text-muted-foreground">{kpi.unit.toLowerCase()}</span>
-        </div>
-      )}
-    </section>
+    // .flash phải nằm trên phần tử mang NỀN thật (D18/spec §10) — nay là chính Card, không còn
+    // <section> tay. mt-1.5 cũ của hai div giá trị bỏ: gap Header→Content đã do Card lo.
+    <Card className={nhay ? 'flash' : undefined}>
+      <CardHeader>
+        <CardTitle>
+          <h3 className="flex items-center gap-2 text-[12px] font-medium uppercase tracking-[0.02em] text-muted-foreground">
+            {Icon && <Icon className="size-4" />}
+            {kpi.label}
+          </h3>
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        {kpi.value === null ? (
+          <div
+            className="font-mono text-[28px] leading-none tnum text-muted-foreground"
+            aria-label="chưa có dữ liệu"
+          >
+            —
+          </div>
+        ) : (
+          <div className="flex items-baseline gap-1.5">
+            <span className="font-mono text-[28px] leading-none tnum text-foreground">
+              {formatNumber(kpi.value, 0)}
+            </span>
+            <span className="text-[11px] text-muted-foreground">{kpi.unit.toLowerCase()}</span>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   )
 }
 

@@ -79,7 +79,7 @@ export function formatDue(iso: string, now: Date): { text: string; title: string
 }
 
 /** Số theo vi-VN: dấu chấm ngăn ngàn, dấu phẩy ngăn thập phân. `null` hiện dấu gạch —
- * không hiện "0", vì ô trống và ô nhập 0 mang ý nghĩa khác nhau trong báo cáo HSEQ.
+ * không hiện "0", vì ô trống và ô nhập 0 mang ý nghĩa khác nhau trong báo cáo HSSEQ.
  *
  * task-16-fix-brief.md F7: hiệu số của dòng computed có thể ra `-0` (số học hợp lệ, `-0 === 0`
  * là `true`) — nhưng `Intl.NumberFormat` nhìn vào DẤU BIT của số chứ không phải giá trị so

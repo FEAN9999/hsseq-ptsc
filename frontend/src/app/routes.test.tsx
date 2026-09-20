@@ -19,11 +19,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createMemoryRouter, MemoryRouter } from 'react-router-dom'
 
 import { QueryClientProvider } from '@tanstack/react-query'
+import { toast } from 'sonner'
 
 import { App, routeObjects } from './routes'
 import { queryClient } from './queryClient'
 import { duongDanDieuHuongTrongTrang } from './routeScan'
-import { useToast } from '../components/ui/Toast'
 import { useSession } from './session'
 import { SidebarProvider } from '../components/ui/sidebar'
 import { Sidebar } from '../components/Sidebar'
@@ -52,13 +52,13 @@ function duong(initialPath: string) {
 describe('bảng route', () => {
   it('vào /login khi CHƯA có token: thấy form đăng nhập, không bị đá đi đâu khác', () => {
     duong('/login')
-    expect(screen.getByText('Đăng nhập HSEQ')).toBeTruthy()
+    expect(screen.getByText('Đăng nhập HSSEQ')).toBeTruthy()
     expect(screen.getByLabelText('Email')).toBeTruthy()
   })
 
   it('vào / khi CHƯA có token: đổi sang /login', () => {
     duong('/')
-    expect(screen.getByText('Đăng nhập HSEQ')).toBeTruthy()
+    expect(screen.getByText('Đăng nhập HSSEQ')).toBeTruthy()
   })
 
   // Lát 2 — `/` là LỐI VÀO, không phải bí danh của `/login`. Đây là vế mà hai màn lỗi 403/404 dựa
@@ -90,13 +90,13 @@ describe('bảng route', () => {
   it('vào / khi ĐANG đăng nhập và có dashboard.view: tới Dashboard, KHÔNG thấy form đăng nhập', async () => {
     moLoiVao(['dashboard.view', 'report.approve', 'status.view'])
     expect(await screen.findByRole('heading', { name: 'Dashboard SKATMT' })).toBeTruthy()
-    expect(screen.queryByText('Đăng nhập HSEQ')).toBeNull()
+    expect(screen.queryByText('Đăng nhập HSSEQ')).toBeNull()
   })
 
   it('vào / khi ĐANG đăng nhập mà KHÔNG có dashboard.view: tới trang báo cáo của đơn vị', async () => {
     moLoiVao(['report.view_own_unit', 'report.edit'])
     expect(await screen.findByRole('heading', { name: 'Báo cáo SKATMT' })).toBeTruthy()
-    expect(screen.queryByText('Đăng nhập HSEQ')).toBeNull()
+    expect(screen.queryByText('Đăng nhập HSSEQ')).toBeNull()
   })
 
   it('vào một path bịa: thấy NotFound', () => {
@@ -106,7 +106,7 @@ describe('bảng route', () => {
 
   it('vào /reports khi CHƯA có token: bị đá về /login, KHÔNG thấy nội dung báo cáo (C5)', () => {
     duong('/reports')
-    expect(screen.getByText('Đăng nhập HSEQ')).toBeTruthy()
+    expect(screen.getByText('Đăng nhập HSSEQ')).toBeTruthy()
     expect(screen.queryByText('Chưa có kỳ báo cáo nào đang mở')).toBeNull()
   })
 
@@ -139,7 +139,7 @@ describe('bảng route', () => {
   // đủ để khẳng định "trang có mở hay không" mà không cần dựng fetch riêng cho /dashboard/*.
   it('vào /dashboard khi CHƯA có token: bị đá về /login, KHÔNG lộ số liệu 22 đơn vị (N26)', () => {
     duong('/dashboard')
-    expect(screen.getByText('Đăng nhập HSEQ')).toBeTruthy()
+    expect(screen.getByText('Đăng nhập HSSEQ')).toBeTruthy()
     expect(screen.queryByText('Dashboard SKATMT')).toBeNull()
   })
 
@@ -192,7 +192,7 @@ describe('bảng route', () => {
   // không" mà không cần dựng fetch riêng cho /status.
   it('vào /status khi CHƯA có token: bị đá về /login, KHÔNG lộ lưới tình trạng nộp', () => {
     duong('/status')
-    expect(screen.getByText('Đăng nhập HSEQ')).toBeTruthy()
+    expect(screen.getByText('Đăng nhập HSSEQ')).toBeTruthy()
     expect(screen.queryByText('Tình trạng nộp · FM01')).toBeNull()
   })
 
@@ -291,7 +291,7 @@ describe('bảng route', () => {
     expect(screen.getByText('Đang tải…')).toBeTruthy()
     expect(await screen.findByText('Chưa có kỳ báo cáo nào đang mở')).toBeTruthy()
     expect(screen.getByText('Ban An toàn Chất lượng')).toBeTruthy() // AppShell/Sidebar có mặt
-    expect(screen.queryByText('Đăng nhập HSEQ')).toBeNull()
+    expect(screen.queryByText('Đăng nhập HSSEQ')).toBeNull()
   })
 
   // Task 22 (task-22-carry.md C6, cùng lý do C5 của Task 20): route MỚI phải có ca riêng khoá
@@ -299,7 +299,7 @@ describe('bảng route', () => {
   // nào đỏ — và /reports/:id là màn có toàn bộ số liệu của một đơn vị.
   it('vào /reports/12 khi CHƯA có token: bị đá về /login, KHÔNG lộ nội dung báo cáo', () => {
     duong('/reports/12')
-    expect(screen.getByText('Đăng nhập HSEQ')).toBeTruthy()
+    expect(screen.getByText('Đăng nhập HSSEQ')).toBeTruthy()
     expect(screen.queryByText(/FM01 · 08\/2026/)).toBeNull()
   })
 
@@ -401,11 +401,15 @@ describe('bảng route', () => {
   })
 
   it('Toast có mặt đúng MỘT lần ở cấp toàn cục', async () => {
-    // Toast() tự render null khi chưa có thông điệp (components/ui/Toast.tsx) — không có cách nào
-    // đếm "có mặt" qua DOM nếu không kích hoạt một thông điệp thật qua chính hook useToast().
+    // Toast() không vẽ gì khi chưa có thông điệp — không có cách nào đếm "có mặt" qua DOM nếu
+    // không kích hoạt một thông điệp thật. Lát 5: bắn qua `toast()` của sonner thay cho
+    // `useToast()` đã bỏ. Thứ tự trong cây vẫn giữ nguyên: `ToastState.subscribe` PHÁT LẠI mọi
+    // toast còn sống cho `<Toaster>` mount sau (dist dòng 138-146), nên bắn trước hay sau `<App/>`
+    // đều tới nơi.
     function KichHoatToast() {
-      const hienToast = useToast()
-      useEffect(() => hienToast('kiểm tra'), [hienToast])
+      useEffect(() => {
+        toast('kiểm tra')
+      }, [])
       return null
     }
     const router = createMemoryRouter(routeObjects, { initialEntries: ['/login'] })

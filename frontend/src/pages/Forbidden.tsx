@@ -7,7 +7,8 @@
 import { useNavigate } from 'react-router-dom'
 import { ShieldAlert } from 'lucide-react'
 
-import { NUT_PHU, TrangLoi } from '../components/TrangLoi'
+import { TrangLoi } from '../components/TrangLoi'
+import { Button } from '../components/ui/button'
 import { useSession } from '../app/session'
 
 export function Forbidden() {
@@ -26,16 +27,16 @@ export function Forbidden() {
       moTa="Tài khoản của bạn không có quyền xem trang này."
       phu={
         token !== null && (
-          <button
+          <Button
             type="button"
-            className={NUT_PHU}
+            variant="outline"
             onClick={() => {
               logout()
               navigate('/login')
             }}
           >
             Đổi tài khoản
-          </button>
+          </Button>
         )
       }
     />

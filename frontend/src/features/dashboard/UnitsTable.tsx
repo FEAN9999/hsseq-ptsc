@@ -10,7 +10,16 @@
 // `state !== null` — hai thứ trùng ở dữ liệu hiện có (có Report thì có state_id) nhưng thứ cái
 // link CẦN là id, không phải state.
 import { useNavigate } from 'react-router-dom'
+import { Card } from '../../components/ui/card'
 import { Chip, type ChipKind } from '../../components/ui/Chip'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '../../components/ui/table'
 import { formatNumber } from '../../lib/format'
 import { maNeo } from '../report/FormModeBar'
 import type { UnitRow } from './useUnits'
@@ -20,7 +29,11 @@ import type { UnitRow } from './useUnits'
 // (đó là FAT/"Chết người", catalog_fm01.py:77).
 const MA_CHI_TIEU_LTI = 'B-2.2'
 
-const O_CHUNG = 'h-9 px-3 border-b border-border text-sm'
+// Chỉ còn phần `TableCell` (components/ui/table.tsx) KHÔNG tự có: cỡ ô của kho (`h-9 px-3 py-0`
+// thay `p-2`; `py-0` vì `px-3` chỉ đè được bề ngang của `p-2` — xem `features/admin/khung.tsx`).
+// `border-b border-border` đã chuyển sang `TableRow`, và dòng cuối do `TableBody`
+// (`[&_tr:last-child]:border-0`) lo — giữ cả hai chỗ là viền đôi.
+const O_CHUNG = 'h-9 px-3 py-0 text-sm'
 const O_SO = `${O_CHUNG} text-right tnum`
 // Vòng sửa 1 (task-25-fix-1.md A5-c, review mục 11 "c"): bản vẽ làm MỜ CẢ DÒNG "Chưa nộp"
 // (class="sec" trên mọi ô) — tín hiệu thị giác "dòng này không bấm được" (D4).
@@ -40,17 +53,24 @@ function Dong({ row, period }: { row: UnitRow; period: string }) {
   const mo = coBaoCao ? '' : MO
 
   return (
-    <tr aria-disabled={coBaoCao ? undefined : 'true'}>
-      <td className={O_CHUNG + mo}>
+    // `hover:bg-transparent` chỉ trên dòng CHƯA NỘP: `TableRow` sáng nền mọi dòng khi rê chuột,
+    // mà dòng này vừa `aria-disabled` vừa bị làm mờ cả dòng để nói "không bấm được" (D4) — cho nó
+    // phản ứng theo chuột là nói ngược lại chính hai tín hiệu đó. Dòng CÓ báo cáo giữ hiệu ứng:
+    // số LTI trên đó bấm được, và đây là bảng 8 cột nên vệt sáng giúp dò đúng hàng.
+    <TableRow
+      aria-disabled={coBaoCao ? undefined : 'true'}
+      className={coBaoCao ? undefined : 'hover:bg-transparent'}
+    >
+      <TableCell className={O_CHUNG + mo}>
         <span className="flex items-center gap-2">
           <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
             {row.org_unit.code}
           </span>
           <span className="font-medium">{row.org_unit.name}</span>
         </span>
-      </td>
-      <td className={O_SO + mo}>{formatNumber(row.gio_cong, 0)}</td>
-      <td className={O_SO + mo}>
+      </TableCell>
+      <TableCell className={O_SO + mo}>{formatNumber(row.gio_cong, 0)}</TableCell>
+      <TableCell className={O_SO + mo}>
         {coBaoCao ? (
           <button
             type="button"
@@ -71,15 +91,15 @@ function Dong({ row, period }: { row: UnitRow; period: string }) {
             {formatNumber(row.lti, 0)}
           </span>
         )}
-      </td>
-      <td className={O_SO + mo}>{formatNumber(row.fat, 0)}</td>
-      <td className={O_SO + mo}>{formatNumber(row.near_miss, 0)}</td>
-      <td className={O_SO + mo}>{formatNumber(row.hazob, 0)}</td>
-      <td className={O_SO + mo}>{formatNumber(row.gio_an_toan_tu_lti_cuoi, 0)}</td>
-      <td className={O_CHUNG + mo}>
+      </TableCell>
+      <TableCell className={O_SO + mo}>{formatNumber(row.fat, 0)}</TableCell>
+      <TableCell className={O_SO + mo}>{formatNumber(row.near_miss, 0)}</TableCell>
+      <TableCell className={O_SO + mo}>{formatNumber(row.hazob, 0)}</TableCell>
+      <TableCell className={O_SO + mo}>{formatNumber(row.gio_an_toan_tu_lti_cuoi, 0)}</TableCell>
+      <TableCell className={O_CHUNG + mo}>
         <Chip kind={trangThai(row.state)} />
-      </td>
-    </tr>
+      </TableCell>
+    </TableRow>
   )
 }
 
@@ -99,49 +119,45 @@ export function UnitsTable({ rows, period }: { rows: UnitRow[]; period: string }
   // tự server trả được giữ nguyên — không cần khoá phụ.
   const dsSapXep = [...rows].sort((a, b) => Number((b.lti ?? 0) > 0) - Number((a.lti ?? 0) > 0))
   return (
-    <section className="overflow-hidden rounded-xl border border-border bg-card">
+    // `gap-0 py-0`: Card mặc định là `flex flex-col gap-(--card-spacing)` + đệm dọc — cả hai đều
+    // thừa ở đây vì bảng tự có đệm và khối tiêu đề phải SÁT bảng như bản cũ. Viền ngăn giữa hai
+    // phần chuyển từ `border-t` của vỏ cuộn (nay là container của `Table`, không nhận className)
+    // sang `border-b` của chính khối tiêu đề — cùng một đường 1px, khác chỗ khai.
+    <Card className="gap-0 py-0">
       {/* KHÔNG lặp lại số đầu mối ở đây: dòng Coverage phía trên đã nói, và `rows.length` với
           `reporting_units` là hai con số khác nguồn — in cả hai là mời người đọc so lệch. */}
-      <div className="px-4 py-3">
+      <div className="border-b border-border px-4 py-3">
         <h2 className="text-sm font-semibold text-foreground">Số liệu theo đơn vị</h2>
         <p className="mt-0.5 text-xs text-muted-foreground">
           Bấm số LTI để mở đúng chỉ tiêu trong báo cáo của đơn vị
         </p>
       </div>
-      <div className="overflow-x-auto border-t border-border">
-      {/* Vòng sửa 1 (task-25-fix-1.md A5-h, review mục 11 "h"): bỏ viền dưới của dòng CUỐI trong
-          tbody — cùng khung bo/viền ngoài của chính div này thì viền dưới đó thành viền đôi ngay
-          trước mép khung.
-          Vòng sửa 2 (task-25-fix-2.md P6-P10/M-02+M-25, task-25-rereview-1.md mục 6 [NHẸ]): SỬA
-          LẠI câu trên — nó nói SAI lý do dòng tiêu đề không bị ăn viền. Selector kết ở `_td`, còn
-          `<thead>` dùng `<th>` (không phải `<td>`), nên chính hậu tố `_td` đó — KHÔNG PHẢI scope
-          `tbody` — mới là thứ chặn dòng tiêu đề: bỏ scope `tbody` đi, còn trần `tr:last-child`,
-          vẫn khớp CẢ dòng tiêu đề (last-child của chính `<thead>`) lẫn dòng cuối `tbody`, nhưng
-          dòng tiêu đề không có `<td>` nào để `_td` bắt nên không mất viền. Giữ nguyên scope
-          `tbody` vì nó tự nói đúng Ý ĐỊNH ("dòng cuối PHẦN THÂN bảng") mà không cần suy luận qua
-          thẻ HTML — không phải vì thiếu nó sẽ sai. */}
-      <table className="w-full border-collapse [&_tbody_tr:last-child_td]:border-b-0">
-        <thead>
-          <tr>
+      {/* Vòng sửa 1 (task-25-fix-1.md A5-h, review mục 11 "h"): dòng CUỐI trong tbody không được
+          có viền dưới — cùng khung bo/viền ngoài thì viền đó thành viền đôi ngay trước mép khung.
+          Bất biến GIỮ NGUYÊN, chỗ thực thi đổi: `[&_tbody_tr:last-child_td]:border-b-0` tự viết
+          nay là `[&_tr:last-child]:border-0` sẵn có trong `TableBody` (components/ui/table.tsx),
+          vì viền hàng đã chuyển từ Ô sang DÒNG (`TableRow` mang `border-b`). */}
+      <Table>
+        <TableHeader>
+          <TableRow>
             {TIEU_DE_COT.map((ten) => (
-              <th
+              <TableHead
                 key={ten}
-                className={`h-9 px-3 border-b border-border bg-muted text-[13.5px] text-sec font-semibold whitespace-nowrap ${
+                className={`h-9 px-3 bg-muted text-[13.5px] text-sec font-semibold ${
                   TEN_COT_SO.has(ten) ? 'text-right' : 'text-left'
                 }`}
               >
                 {ten}
-              </th>
+              </TableHead>
             ))}
-          </tr>
-        </thead>
-        <tbody>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
           {dsSapXep.map((row) => (
             <Dong key={row.org_unit.code} row={row} period={period} />
           ))}
-        </tbody>
-      </table>
-      </div>
-    </section>
+        </TableBody>
+      </Table>
+    </Card>
   )
 }

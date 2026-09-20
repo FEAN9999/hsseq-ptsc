@@ -1,8 +1,11 @@
-import { act, render, screen } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { toast as sonnerToast } from 'sonner'
+
 import { Chip } from './Chip'
-import { Toast, useToast } from './Toast'
+import { Toast } from './Toast'
+import { O_BANG } from '../../features/admin/khung'
 // Vòng sửa 2: mọi assert nói về giá trị THIẾT KẾ HIỂN THỊ (màu nền/viền/chữ, margin) phải hỏi
 // resolver "lớp nào thắng cascade trong CSS thật đã build", không hỏi className có chứa chuỗi gì —
 // xem giải thích đầy đủ trong cascade.ts.
@@ -74,7 +77,10 @@ describe('Chip', () => {
     ['submitted', false, 'border-transparent'],
     ['late', false, 'border-transparent'],
     ['returned', false, 'border-transparent'],
-    ['draft', false, 'border-transparent'],
+    // Từ vòng chốt hiện trạng: `draft` CÓ viền, lệch khỏi mockup status.html một cách có chủ ý —
+    // `bg-muted` của nó chênh nền cột kỳ đang chọn (`bg-primary/5`) đúng 1% độ sáng nên chip "Nháp"
+    // đọc như chữ trần trên lưới /status. Lý do đầy đủ ở KIND_BORDER trong Chip.tsx.
+    ['draft', false, 'border-border'],
     ['missing', false, 'border-border'],
     ['approved', true, 'border-current'],
     ['submitted', true, 'border-current'],
@@ -96,6 +102,24 @@ describe('Chip', () => {
   // thua cascade — nhưng SỐ LƯỢNG luôn lộ ra ngay. Regex ở đây phải MỞ (border-<bất kỳ>), không
   // liệt kê sẵn ba tên màu như vòng 1 — danh sách đóng chính là lỗ hổng đã bị bắt ở vòng 2 (mutation
   // thêm màu thứ tư không có trong danh sách đóng vẫn đếm ra 1, sai).
+  //
+  // Lát "dựng lại primitive": phép đếm đổi từ regex `/\bborder-\S+/` sang HỎI CHÍNH CSS ĐÃ BUILD
+  // (`resolveDeclaredValue`), đúng kỹ thuật P6 bên dưới đã dùng cho `color`. Lý do: từ khi Chip
+  // dựng trên `ui/badge.tsx`, chuỗi className mang thêm `focus-visible:border-ring` và
+  // `aria-invalid:border-destructive` — hai utility CÓ ĐIỀU KIỆN, chỉ áp dụng lúc focus/invalid,
+  // không bao giờ đua với border-color lúc nghỉ. Regex đếm cả chúng thành 3; cái regex đếm được
+  // lại không phải cái gây ra cuộc đua. Câu hỏi cần giữ vẫn nguyên vẹn — "có utility nào DƯ cùng
+  // thuộc tính ở TRẠNG THÁI NGHỈ không" — và hỏi thẳng CSS thì không danh sách đóng nào để lách,
+  // đúng tinh thần vòng 2 đã chốt.
+  //
+  // NHƯNG phải nói thẳng: từ lát này, phép đếm CANH MỘT THỨ KHÁC so với lúc nó ra đời. `Badge` gộp
+  // lớp bằng `cn` (clsx + tailwind-merge), mà tailwind-merge GỠ HẲN lớp bị ghi đè khỏi chuỗi — nên
+  // hai utility cùng nhóm không còn cách nào cùng tới DOM, tức cuộc đua S1/P1 không tự tái diễn
+  // trong Chip được nữa (đã kiểm bằng mutation: nhét `bg-primary/5 border-border` dư vào className
+  // làm ĐỎ 24 ca KẾT QUẢ ở trên, nhưng KHÔNG ca đếm nào — `cn` nuốt mất lớp dư trước khi đếm).
+  // Thứ phép đếm canh bây giờ là bất biến ĐỠ ĐẦU cho tất cả những ca kia: "`cn` phải còn là
+  // tailwind-merge". Thay `cn` bằng một hàm nối chuỗi thuần ⇒ border-color đếm ra 3, color đếm ra 2
+  // ⇒ đỏ ngay. Đó là lý do giữ nguyên cả 24 ca chứ không gộp bớt.
   it.each([
     ['approved', false],
     ['submitted', false],
@@ -109,15 +133,24 @@ describe('Chip', () => {
     ['returned', true],
     ['draft', true],
     ['missing', true],
-  ])('kind=%s outline=%s → đúng MỘT utility border-<màu>, không utility nào dư (đếm mở, P2)', (kind, outline) => {
+  ])('kind=%s outline=%s → đúng MỘT utility khai `border-color`, không utility nào dư (đếm mở, P2)', (kind, outline) => {
     const { container } = render(<Chip kind={kind as never} outline={outline as boolean} />)
     const cls = container.firstElementChild?.className ?? ''
-    expect(cls.match(/\bborder-\S+/g)?.length ?? 0).toBe(1)
+    const khaiBorder = cls
+      .split(/\s+/)
+      .filter(Boolean)
+      .filter((c) => resolveDeclaredValue(c, 'border-color') !== null)
+    expect(khaiBorder).toHaveLength(1)
   })
 
   // Vòng sửa 3 — P2 (mở rộng sang background-color): đây chính xác là chỗ P1 đã lọt lưới — vòng 2
   // không có assert đếm nào cho background-color nên chip outline cộng dồn 2 utility bg-* (kind
   // của chip + bg-transparent) không bị bắt cho tới khi reviewer tự đo CSS.
+  //
+  // Lát "dựng lại primitive": đổi sang `resolveDeclaredValue` cùng lý do đã ghi ở phép đếm
+  // border-color ngay trên — `ui/badge.tsx` mang theo `[a]:hover:bg-muted` (biên dịch ra
+  // `:is(a):hover`, chip là <span> nên không bao giờ khớp), regex đếm nó thành một đối thủ không
+  // có thật.
   it.each([
     ['approved', false],
     ['submitted', false],
@@ -131,10 +164,14 @@ describe('Chip', () => {
     ['returned', true],
     ['draft', true],
     ['missing', true],
-  ])('kind=%s outline=%s → đúng MỘT utility bg-<màu>, không utility nào dư (đếm mở, P2)', (kind, outline) => {
+  ])('kind=%s outline=%s → đúng MỘT utility khai `background-color`, không utility nào dư (đếm mở, P2)', (kind, outline) => {
     const { container } = render(<Chip kind={kind as never} outline={outline as boolean} />)
     const cls = container.firstElementChild?.className ?? ''
-    expect(cls.match(/\bbg-\S+/g)?.length ?? 0).toBe(1)
+    const khaiBg = cls
+      .split(/\s+/)
+      .filter(Boolean)
+      .filter((c) => resolveDeclaredValue(c, 'background-color') !== null)
+    expect(khaiBg).toHaveLength(1)
   })
 
   // ---- P6 (final-fix-FE.md · final-review-R3-report.md §A4) — MẶT THỨ BA của đúng cái lỗ đã ship
@@ -213,6 +250,20 @@ describe('Chip', () => {
     const cls = container.firstElementChild?.className ?? ''
     expect(resolveCascadeWinner(cls, 'border-color')).toBe('border-current')
   })
+
+  // Thêm ở lát "dựng lại primitive": README gói bàn giao mục 12 in ĐẬM "`rounded-md`, KHÔNG phải
+  // pill" cho huy hiệu. `ui/badge.tsx` mặc định `rounded-4xl` (pill), nên yêu cầu này sống hay chết
+  // hoàn toàn nhờ một lớp ghi đè trong `Chip.tsx` — thứ dễ rơi nhất trong một lần dọn class. Hỏi
+  // cascade thay vì `toContain('rounded-md')`: chuỗi vẫn "chứa" rounded-md kể cả khi một lớp bo góc
+  // khác đứng sau trong CSS đã đè mất nó, đúng loại lỗi S1/P1 đã trả giá hai lần.
+  it.each(['approved', 'missing'] as const)(
+    'kind=%s → bo góc thắng cascade là rounded-md, KHÔNG phải pill (README mục 12)',
+    (kind) => {
+      const { container } = render(<Chip kind={kind} />)
+      const cls = container.firstElementChild?.className ?? ''
+      expect(resolveCascadeWinner(cls, 'border-radius')).toBe('rounded-md')
+    },
+  )
 })
 
 // ---- P3 (final-fix-FE.md, Ruling 425 · final-review-R3-report.md §A1) ----
@@ -231,9 +282,8 @@ describe('Toast — dải chừa (P3)', () => {
   })
 
   function Bam({ chu }: { chu: string }) {
-    const hien = useToast()
     return (
-      <button type="button" onClick={() => hien(chu)}>
+      <button type="button" onClick={() => sonnerToast(chu)}>
         bật
       </button>
     )
@@ -249,10 +299,12 @@ describe('Toast — dải chừa (P3)', () => {
       </>,
     )
     expect(bien()).toBe('') // chưa có Toast: không chừa gì, bố cục không đổi một pixel
-    await act(async () => {
-      screen.getByRole('button', { name: 'bật' }).click()
-    })
-    expect(screen.getByRole('status').textContent).toContain('Đã duyệt')
+    screen.getByRole('button', { name: 'bật' }).click()
+    // Lát 5: `findBy…` chứ không `act(() => click())`. sonner đẩy toast qua `setTimeout(…, 0)` +
+    // `flushSync` (dist ~dòng 1032) rồi `Toast.tsx` gắn `role="status"` trong một `MutationObserver`
+    // — hai chặng NGOÀI hàng đợi vi tác vụ mà `act` rút cạn, nên một khẳng định đồng bộ ngay sau
+    // cú bấm sẽ đọc DOM lúc chưa có gì.
+    expect((await screen.findByRole('status')).textContent).toContain('Đã duyệt')
     // jsdom trả `getBoundingClientRect()` toàn số 0 nên con số ở đây không mang nghĩa hình học —
     // nó bằng đúng `window.innerHeight`. Chốt DƯƠNG chứ không chỉ "là một độ dài px hợp lệ": một
     // bản vá công bố `0px` vẫn đặt biến, vẫn khớp `/\d+px/`, mà lại chừa đúng 0 pixel — tức không
@@ -271,14 +323,41 @@ describe('Toast — dải chừa (P3)', () => {
         <Toast />
       </>,
     )
-    await act(async () => {
-      screen.getByRole('button', { name: 'bật' }).click()
-    })
+    screen.getByRole('button', { name: 'bật' }).click()
+    await screen.findByRole('status')
     expect(bien()).not.toBe('')
+    // 4000ms là tuổi thọ toast (`TOAST_LIFETIME` của sonner, trùng đúng `TOAST_MS` của bản tự vẽ).
+    // 200ms thêm vào là `TIME_BEFORE_UNMOUNT`: sonner đánh dấu toast `data-removed` để nó trượt ra
+    // rồi mới GỠ khỏi cây sau bấy nhiêu — dải chỉ được trả lại ở mốc gỡ, không phải mốc hết giờ.
     await act(async () => {
-      vi.advanceTimersByTime(4000)
+      vi.advanceTimersByTime(4000 + 200)
     })
-    expect(screen.queryByRole('status')).toBeNull()
+    await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
     expect(bien()).toBe('')
+  })
+})
+
+// Lát 4 (dựng bảng trên `ui/table.tsx`): `TableCell` của shadcn khai `p-2` — đệm VIẾT TẮT, bốn
+// chiều. Các hằng cỡ ô của kho chỉ truyền `px-3`, không chạm chiều dọc, nên 8px trên + 8px dưới
+// của primitive lọt vào và dòng cao thêm 13px (đo thật: Reports 36→49px, StatusGrid 41→57px —
+// riêng bảng /reports là +858px cho một trang 66 dòng). `py-0` là thứ trung hoà nó.
+//
+// Ca này tồn tại vì `py-0` TRÔNG NHƯ một lớp thừa — đúng hình dạng thứ bị "dọn dẹp" trong một lần
+// đọc lại, và trước ca này thì xoá nó đi KHÔNG gì đỏ. Cùng một cái bẫy đã sinh ra ca A5-h ở
+// Dashboard.test.tsx.
+//
+// Giới hạn phải nói rõ: resolver KHÔNG hiểu thuộc tính rút gọn (cascade.ts — P5), nên nó chứng
+// minh được "`py-0` có mặt và khai padding-block: 0", không chứng minh được "nó thắng `p-2`".
+// Vế sau đo tay trên CSS đã build: `.p-2` ở offset 27231, `.py-0` ở 27942 — đứng sau, nên thắng.
+describe('ô bảng — đệm dọc của primitive bị trung hoà (lát 4)', () => {
+  it('`TableCell` thật sự khai đệm viết tắt, nên cần trung hoà', () => {
+    expect(resolveDeclaredValue('p-2', 'padding')).not.toBeNull()
+  })
+
+  // Ba hằng anh em cùng luật, cùng lý do, nhưng không xuất ra nên không khoá được từ đây:
+  // `pages/Reports.tsx` O_BANG · `features/dashboard/UnitsTable.tsx` O_CHUNG ·
+  // `features/status/StatusGrid.tsx` O_KY. Sửa một chỗ thì soát cả bốn.
+  it('O_BANG trung hoà đệm dọc về 0', () => {
+    expect(resolveDeclaredValue(O_BANG, 'padding-block')).toBe('0')
   })
 })

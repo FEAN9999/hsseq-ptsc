@@ -17,12 +17,8 @@ import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 
 import { useSession } from '../app/session'
+import { Button } from './ui/button'
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia } from './ui/empty'
-
-export const NUT_CHINH =
-  'inline-flex h-9 items-center justify-center rounded-md border border-primary bg-primary px-4 text-sm font-medium text-white no-underline transition-colors duration-[120ms] hover:bg-primary/90'
-export const NUT_PHU =
-  'inline-flex h-9 cursor-pointer items-center justify-center rounded-md border border-border bg-card px-4 text-sm font-medium text-foreground no-underline transition-colors duration-[120ms] hover:bg-muted'
 
 /** Nút đi tiếp: ĐÍCH và NHÃN.
  *
@@ -80,9 +76,9 @@ export function TrangLoi({
           <EmptyDescription>{moTa}</EmptyDescription>
         </EmptyHeader>
         <EmptyContent className="flex-row flex-wrap items-center justify-center gap-2">
-          <Link to={dich.to} className={NUT_CHINH}>
-            {dich.nhan}
-          </Link>
+          <Button asChild>
+            <Link to={dich.to}>{dich.nhan}</Link>
+          </Button>
           {phu}
         </EmptyContent>
       </Empty>

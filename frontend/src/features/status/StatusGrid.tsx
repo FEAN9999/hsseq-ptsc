@@ -19,7 +19,16 @@
 // test_status_thu_tu_don_vi_theo_ma canh phía BE) — component này KHÔNG tự sort lại `units`, chỉ
 // render đúng thứ tự mảng nhận được.
 import { Link } from 'react-router-dom'
+import { Card } from '../../components/ui/card'
 import { Chip, type ChipKind } from '../../components/ui/Chip'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '../../components/ui/table'
 import { formatPeriod } from '../../lib/format'
 
 export interface StatusCell {
@@ -46,8 +55,14 @@ function kindTrangThai(state: string | null, isLate: boolean | null): ChipKind {
   return 'missing'
 }
 
-const COT_DON_VI = 'sticky left-0 z-10 border-r border-border w-[260px]'
-const O_KY = 'h-10 px-3 text-sm text-center whitespace-nowrap w-[104px]'
+// `whitespace-normal` phải NÓI RA, khác ba bảng kia: `TableCell`/`TableHead` cấm ngắt dòng mặc
+// định, nhưng bảng này là `table-fixed` + `w-[260px]` nên một tên đơn vị dài KHÔNG kéo cột rộng ra
+// (rồi cuộn ngang) mà tràn đè lên cột kỳ ngay bên phải — và cột này dính trái nên vệt tràn đó nằm
+// đè trên mọi thứ cuộn qua dưới nó. Giữ ngắt dòng đúng như trước lượt dựng lại primitive.
+const COT_DON_VI = 'sticky left-0 z-10 border-r border-border w-[260px] whitespace-normal'
+// `py-0`: nền của `TableCell` là `p-2`, mà `px-3` chỉ đè được bề ngang — để nguyên thì mỗi dòng
+// cao thêm 16px, phá đúng số đo 40px mà bản vẽ chốt riêng cho lưới này (xem đầu tệp).
+const O_KY = 'h-10 px-3 py-0 text-sm text-center w-[104px]'
 
 // Cột của kỳ ĐANG CHỌN (`?period=` trên URL) được tô nhạt. Lý do: trang này vẽ CẢ DẢI kỳ cùng lúc,
 // nên trước Lát 5 bộ chọn kỳ trên sidebar — và huy hiệu `x/22` sinh ra từ chính kỳ đó — không trỏ
@@ -74,17 +89,23 @@ function OTrangThai({ code, cell }: { code: string; cell: StatusCell }) {
 
 function Dong({ unit, kyDangXem }: { unit: StatusUnit; kyDangXem: string }) {
   return (
-    <tr>
-      <td className={`h-10 px-3 border-b border-border text-sm bg-card ${COT_DON_VI}`}>{unit.name}</td>
+    // `hover:bg-transparent` — `TableRow` sáng nền cả dòng khi rê chuột, nhưng ở lưới này nó sẽ
+    // sáng LOANG LỔ: ô Đơn vị dính trái tự mang `bg-card` (bắt buộc, nếu không nội dung cuộn qua
+    // dưới nó) nên phần đó KHÔNG đổi màu, còn các ô kỳ thì có. Trước lượt này lưới không có hiệu
+    // ứng rê chuột nào; giữ nguyên như vậy. Muốn sáng CẢ dòng thì phải thêm `group` trên dòng và
+    // `group-hover:bg-muted/50` trên ô dính (khuôn pages/Reports.tsx) — đó là một hiệu ứng MỚI,
+    // không thuộc lượt dựng lại primitive.
+    <TableRow className="hover:bg-transparent">
+      <TableCell className={`h-10 px-3 py-0 text-sm bg-card ${COT_DON_VI}`}>{unit.name}</TableCell>
       {unit.cells.map((cell) => (
-        <td
+        <TableCell
           key={cell.period_key}
-          className={`${O_KY} border-b border-border ${cell.period_key === kyDangXem ? O_KY_CHON : ''}`}
+          className={`${O_KY} ${cell.period_key === kyDangXem ? O_KY_CHON : ''}`}
         >
           <OTrangThai code={unit.code} cell={cell} />
-        </td>
+        </TableCell>
       ))}
-    </tr>
+    </TableRow>
   )
 }
 
@@ -120,51 +141,54 @@ export function StatusGrid({
   kyDangXem: string
 }) {
   return (
-    <div className="overflow-x-auto border border-border bg-card rounded-xl">
+    // Vỏ cuộn tự viết đã BỎ: `Table` tự sinh một `<div overflow-x-auto>` — giữ thêm một tầng nữa
+    // là hai vùng cuộn lồng nhau. Viền/nền/bo góc chuyển ra `Card`, `py-0` vì bảng tự có đệm dọc.
+    // Cột dính trái vẫn dính: tổ tiên cuộn của nó nay là container của `Table`, vẫn `overflow-x-auto`.
+    <Card className="py-0">
       {/* `w-full` + `minWidth` TÍNH THEO SỐ KỲ, thay cho một bảng chỉ rộng đúng 260 + n×104.
           Dải kỳ của seed hiện có 4 kỳ ⇒ bảng cũ rộng 676px trong một vùng 976px: gần một phần ba
           bề ngang bỏ trống ngay cạnh một lưới 22 dòng. `table-fixed` vẫn giữ tỉ lệ cột như bản vẽ
           (đơn vị rộng gấp 2,5 lần một cột kỳ), chỉ kéo giãn cho vừa chỗ; còn `minWidth` giữ đúng
           sàn 260/104 của bản vẽ để khi dải kỳ dài ra thì cuộn ngang, không bóp cột. */}
-      <table
-        className="w-full border-collapse table-fixed"
-        style={{ minWidth: 260 + periods.length * 104 }}
-      >
-        <thead>
-          <tr>
-            <th
-              className={`h-10 px-3 border-b border-border bg-muted text-[13.5px] text-sec font-semibold text-left ${COT_DON_VI}`}
+      <Table className="table-fixed" style={{ minWidth: 260 + periods.length * 104 }}>
+        <TableHeader>
+          <TableRow className="hover:bg-transparent">
+            <TableHead
+              className={`h-10 px-3 bg-muted text-[13.5px] text-sec font-semibold ${COT_DON_VI}`}
             >
               Đơn vị
-            </th>
+            </TableHead>
             {periods.map((p) => (
-              <th
+              <TableHead
                 key={p}
-                className={`h-10 px-3 border-b border-border text-[13.5px] font-semibold text-center whitespace-nowrap w-[104px] ${p === kyDangXem ? DAU_KY_CHON : DAU_KY_THUONG}`}
+                className={`h-10 px-3 text-[13.5px] font-semibold text-center w-[104px] ${p === kyDangXem ? DAU_KY_CHON : DAU_KY_THUONG}`}
               >
                 {formatPeriod(p)}
-              </th>
+              </TableHead>
             ))}
-          </tr>
-        </thead>
-        <tbody>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
           {units.map((u) => (
             <Dong key={u.code} unit={u} kyDangXem={kyDangXem} />
           ))}
-          {/* Dòng cuối — KHÔNG border-b (tránh viền đôi ngay trước viền ngoài của khung bọc, cùng
-              lý do UnitsTable.tsx dùng [&_tbody_tr:last-child_td]:border-b-0; ở đây đơn giản hơn:
-              dòng này là JSX rời, không đi qua Dong/O_KY dùng chung nên chỉ cần không thêm
-              border-b từ đầu, không cần lớp ghi đè). */}
-          <tr>
-            <td className={`h-10 px-3 text-sm font-medium bg-card ${COT_DON_VI}`}>Tổng theo kỳ</td>
+          {/* Dòng cuối — KHÔNG có viền dưới (tránh viền đôi ngay trước viền ngoài của khung bọc).
+              Trước đây bất biến này được giữ bằng cách dòng này là JSX rời, tự không thêm
+              `border-b`; nay `TableRow` cấp `border-b` cho MỌI dòng nên thứ giữ bất biến là
+              `[&_tr:last-child]:border-0` sẵn có trong `TableBody` — cùng một cơ chế với
+              UnitsTable.tsx và Reports.tsx, không còn mỗi nơi một kiểu. */}
+          <TableRow className="hover:bg-transparent">
+            <TableCell className={`h-10 px-3 py-0 text-sm font-medium bg-card ${COT_DON_VI}`}>
+              Tổng theo kỳ
+            </TableCell>
             {periods.map((p) => (
-              <td key={p} className={`${O_KY} ${p === kyDangXem ? O_KY_CHON : ''}`}>
+              <TableCell key={p} className={`${O_KY} ${p === kyDangXem ? O_KY_CHON : ''}`}>
                 {tongTheoKy(units, p)}
-              </td>
+              </TableCell>
             ))}
-          </tr>
-        </tbody>
-      </table>
-    </div>
+          </TableRow>
+        </TableBody>
+      </Table>
+    </Card>
   )
 }

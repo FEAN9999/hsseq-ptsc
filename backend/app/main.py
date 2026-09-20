@@ -5,7 +5,7 @@ from app.api import auth, dashboard, health, org, reports, status, templates, us
 from app.core.config import settings
 from app.core.errors import dang_ky_handler
 
-app = FastAPI(title="HSEQ PTSC", docs_url="/docs")
+app = FastAPI(title="HSSEQ PTSC", docs_url="/docs")
 dang_ky_handler(app)
 app.add_middleware(
     CORSMiddleware,

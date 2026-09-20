@@ -22,6 +22,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Link, useSearchParams } from 'react-router-dom'
 
 import { api, ApiError } from '../api/client'
+import { Card, CardContent } from '../components/ui/card'
 import { InlineError } from '../components/ui/InlineError'
 import { SkeletonDong } from '../components/ui/SkeletonDong'
 import { BangChiSo } from '../features/dashboard/BangChiSo'
@@ -79,14 +80,16 @@ export function Dashboard() {
     return (
       <div>
         <h1 className={`mb-4 ${LOP_H1}`}>Dashboard SKATMT</h1>
-        <div className="rounded-xl border border-border bg-card p-8 text-center text-sm text-secondary-foreground">
-          Bạn không có quyền xem dashboard này
-          <div className="mt-2.5">
-            <Link to="/reports" className="font-medium text-secondary-foreground">
-              Về báo cáo của đơn vị
-            </Link>
-          </div>
-        </div>
+        <Card>
+          <CardContent className="py-4 text-center text-sm text-secondary-foreground">
+            Bạn không có quyền xem dashboard này
+            <div className="mt-2.5">
+              <Link to="/reports" className="font-medium text-secondary-foreground">
+                Về báo cáo của đơn vị
+              </Link>
+            </div>
+          </CardContent>
+        </Card>
       </div>
     )
   }
@@ -98,18 +101,20 @@ export function Dashboard() {
             thể cách dải bao xa tuỳ ý (gõ tay `?period=`, hoặc không phải kỳ hợp lệ). Lối về nằm
             ngay dưới. */}
         <h1 className={`mb-4 ${LOP_H1}`}>Dashboard SKATMT</h1>
-        <div className="rounded-xl border border-border bg-card p-8 text-center text-sm text-secondary-foreground">
-          Kỳ {nhanKy(period)} chưa có trong hệ thống
-          <div className="mt-2.5">
-            <button
-              type="button"
-              onClick={() => doiKy(kyCuoi!)}
-              className="cursor-pointer border-0 bg-transparent font-medium text-secondary-foreground underline"
-            >
-              Về kỳ {nhanKy(kyCuoi!)}
-            </button>
-          </div>
-        </div>
+        <Card>
+          <CardContent className="py-4 text-center text-sm text-secondary-foreground">
+            Kỳ {nhanKy(period)} chưa có trong hệ thống
+            <div className="mt-2.5">
+              <button
+                type="button"
+                onClick={() => doiKy(kyCuoi!)}
+                className="cursor-pointer border-0 bg-transparent font-medium text-secondary-foreground underline"
+              >
+                Về kỳ {nhanKy(kyCuoi!)}
+              </button>
+            </div>
+          </CardContent>
+        </Card>
       </div>
     )
   }

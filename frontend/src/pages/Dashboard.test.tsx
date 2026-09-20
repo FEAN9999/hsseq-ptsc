@@ -27,6 +27,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes, useLocation, useSearchParams } from 'react-router-dom'
 
 import { Dashboard } from './Dashboard'
+import { resolveDeclaredValue } from '../components/ui/cascade'
 import { BangChiSo } from '../features/dashboard/BangChiSo'
 import { TheSoLieu } from '../features/dashboard/TheSoLieu'
 import type { KpiItem } from '../features/dashboard/useSummary'
@@ -449,13 +450,34 @@ describe('/dashboard', () => {
   })
 
   // Vòng sửa 2 (task-25-fix-2.md P6-P10/M-02+M-25, task-25-rereview-1.md mục 6 [NHẸ]): không ca
-  // nào khoá class bỏ viền dòng cuối (A5-h, UnitsTable.tsx) — xoá hẳn
-  // `[&_tbody_tr:last-child_td]:border-b-0` khỏi `<table>` vẫn xanh.
-  it('bảng có class bỏ viền dưới dòng cuối, tránh viền đôi sát khung ngoài (A5-h)', async () => {
+  // nào khoá việc bỏ viền dòng cuối (A5-h, UnitsTable.tsx) — xoá hẳn nó đi vẫn xanh.
+  //
+  // Lượt "dựng lại primitive" (bảng): BẤT BIẾN KHÔNG ĐỔI — dòng cuối thân bảng không được có gạch
+  // dưới, nếu không nó thành viền đôi ngay trước mép khung — chỉ đổi CHỖ THỰC THI. Lớp tự viết
+  // `[&_tbody_tr:last-child_td]:border-b-0` trên `<table>` nay là `border-b` của `TableRow` cộng
+  // `[&_tr:last-child]:border-0` của `TableBody` (components/ui/table.tsx), vì viền hàng chuyển
+  // từ Ô sang DÒNG.
+  //
+  // Đo bằng `resolveDeclaredValue` (đọc CSS ĐÃ BUILD) chứ không `className.toContain`: một tên lớp
+  // gõ sai vẫn "chứa chuỗi" mà không sinh ra một dòng CSS nào — đúng thứ mù mà ca này sinh ra để
+  // chặn. `null` (không lớp nào khai thuộc tính) cho `NaN`, nên cả hai khẳng định dưới đây ĐỎ chứ
+  // không lặng lẽ xanh.
+  it('dòng cuối thân bảng KHÔNG có gạch dưới, tránh viền đôi sát khung ngoài (A5-h)', async () => {
     moiApi()
     renderDashboard()
     const bang = await screen.findByRole('table')
-    expect(bang.className).toContain('[&_tbody_tr:last-child_td]:border-b-0')
+    const than = bang.querySelector('tbody')!
+    const dong = [...than.querySelectorAll('tr')]
+    expect(dong.length).toBeGreaterThan(1)
+    // (a) mọi dòng đều CÓ gạch dưới thật — nếu không thì vế (b) dưới đây vô nghĩa.
+    for (const d of dong) {
+      expect(
+        parseFloat(resolveDeclaredValue(d.className, 'border-bottom-width') ?? ''),
+      ).toBeGreaterThan(0)
+    }
+    // (b) và `tbody` gỡ viền khỏi ĐÚNG dòng cuối (selector `tr:last-child`, độ đặc hiệu cao hơn
+    //     `.border-b` nên thắng bất kể thứ tự trong file CSS).
+    expect(parseFloat(resolveDeclaredValue(than.className, 'border-width') ?? '')).toBe(0)
   })
 
   // Không có trong 7 ca trích của brief, nhưng cùng khuôn InlineError đã dùng ở Reports.tsx
@@ -550,7 +572,11 @@ describe('/dashboard', () => {
     // Vòng sửa 2 (task-25-fix-2.md P6-P10/M-31, task-25-rereview-1.md mục 9 [NHẸ]): đổi
     // `rounded-xl` của khung 403 thành `rounded-md` vẫn xanh — không ca nào đọc class bo góc
     // của khung này.
-    expect(screen.getByText('Bạn không có quyền xem dashboard này').className).toContain('rounded-xl')
+    // Lát 2: khung 403 nay là `Card` — chữ nằm trong `CardContent` (không mang rounded-xl), lớp bo
+    // góc đứng ở Card cha (data-slot="card") — trỏ khẳng định vào đúng tổ tiên đó.
+    expect(
+      screen.getByText('Bạn không có quyền xem dashboard này').closest('[data-slot="card"]')?.className,
+    ).toContain('rounded-xl')
   })
 
   // Vòng sửa 2 (task-25-fix-2.md P2/M-01, task-25-rereview-1.md M-01 [VỪA]): `renderDashboard()`
@@ -983,9 +1009,11 @@ const KPI_SANG = (gia: number | null): KpiItem[] => [
   { code: 'B-1.4', label: 'Tổng giờ công', value: gia, unit: 'giờ' },
 ]
 
-/** Ô nền TRẮNG (`TheSoLieu`) — phần tử mang lớp nháy là chính `<section>` của thẻ. */
+/** Ô nền TRẮNG (`TheSoLieu`) — phần tử mang lớp nháy là chính `Card` của thẻ. Lát 2 dựng lại
+ *  bằng primitive `Card` (card.tsx) thay cho `<section>` tay; Card không có `asChild` nên luôn
+ *  dựng ra `<div data-slot="card">` — đổi cách tìm sang thuộc tính đó thay vì tên thẻ. */
 function oSang(container: HTMLElement): HTMLElement {
-  return container.querySelector('section')!
+  return container.querySelector('[data-slot="card"]')!
 }
 
 /** Ô trên PANEL TỐI (`BangChiSo`) — nhãn là con đầu của ô, nên bố nó chính là ô. */

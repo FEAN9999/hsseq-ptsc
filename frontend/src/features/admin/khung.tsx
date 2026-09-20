@@ -12,15 +12,28 @@
 import type { ReactNode } from 'react'
 
 import { ApiError } from '../../api/client'
+import { Card, CardContent } from '../../components/ui/card'
 import { InlineError } from '../../components/ui/InlineError'
 import { SkeletonDong } from '../../components/ui/SkeletonDong'
 
-/** Lớp ô của bảng quản trị — `whitespace-nowrap` vì cả ba bảng đều có cột mã/ngày không được xuống
- *  dòng ở 1024 zoom 125% (bài học Lát 6: hàng hai dòng so le đọc như dữ liệu hỏng). Ô nào cần xuống
- *  dòng thì tự thêm `whitespace-normal` tại chỗ. */
-export const O_BANG = 'h-9 px-3 border-b border-border text-sm whitespace-nowrap'
-export const O_TIEU_DE =
-  'h-9 px-3 border-b border-border bg-muted text-[13.5px] text-sec font-semibold text-left whitespace-nowrap'
+/** Lớp ô của bảng quản trị — chỉ còn phần `TableCell`/`TableHead` (components/ui/table.tsx) KHÔNG
+ *  tự có: cỡ ô của kho (`h-9 px-3 py-0`, thay `h-10 px-2`/`p-2` mặc định) và màu/cỡ chữ đầu cột.
+ *  `cn` là tailwind-merge nên lớp truyền vào thắng lớp nền của primitive.
+ *
+ *  `py-0` phải NÓI RA, không thừa: `TableCell` nền là `p-2`, mà tailwind-merge chỉ gỡ `p-2` khi
+ *  gặp lại đúng `p-*` — `px-3` chỉ đè được bề NGANG, nên 8px đệm trên/dưới của `p-2` lọt vào một
+ *  ô vốn chỉ cao theo `h-9`. Đo trên trình duyệt thật: dòng có chip/hai dòng chữ cao thêm tới
+ *  16px. Ô nào thật sự cần đệm dọc vẫn tự thêm (`py-2` ở ô Tài khoản của QuanTriNguoiDung.tsx).
+ *
+ *  Hai thứ đã BỎ, không phải quên:
+ *  · `whitespace-nowrap` — `TableCell`/`TableHead` đã cấp sẵn. Lý do cũ còn nguyên giá trị: cả ba
+ *    bảng đều có cột mã/ngày không được xuống dòng ở 1024 zoom 125% (bài học Lát 6: hàng hai dòng
+ *    so le đọc như dữ liệu hỏng). Ô nào cần xuống dòng vẫn tự thêm `whitespace-normal` tại chỗ.
+ *  · `border-b border-border` — viền hàng chuyển từ Ô sang DÒNG: `TableRow` mang `border-b`, còn
+ *    `TableBody` mang `[&_tr:last-child]:border-0` nên dòng cuối tự hết viền. Giữ cả hai chỗ là
+ *    viền đôi. `text-left`/`font-medium` của đầu cột cũng do `TableHead` lo. */
+export const O_BANG = 'h-9 px-3 py-0 text-sm'
+export const O_TIEU_DE = 'h-9 px-3 bg-muted text-[13.5px] text-sec font-semibold'
 
 export function TieuDeQuanTri({
   tieuDe,
@@ -63,9 +76,11 @@ export function VungDuLieu({
   // một câu tiếng Việt chứ không phải một khung trống.
   if (q.error instanceof ApiError && q.error.status === 403) {
     return (
-      <div className="rounded-xl border border-border bg-card p-8 text-center text-sm text-secondary-foreground">
-        Bạn không có quyền quản trị mục này
-      </div>
+      <Card>
+        <CardContent className="py-4 text-center text-sm text-secondary-foreground">
+          Bạn không có quyền quản trị mục này
+        </CardContent>
+      </Card>
     )
   }
   // `q.data === undefined` bắt buộc: `refetchOnWindowFocus` bật toàn cục, nên một lượt làm mới nền

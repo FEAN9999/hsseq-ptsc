@@ -36,13 +36,14 @@
 // 5. TOAST DỰNG TỪ `name_vi`, không phải từ một bảng chuỗi thứ hai: "Nộp báo cáo" → "Đã nộp báo
 //    cáo", "Duyệt" → "Đã duyệt". Chỉ HẠ CHỮ CÁI ĐẦU (không `toLowerCase()` cả câu) để tên riêng
 //    trong `name_vi` của mẫu khác không bị hạ theo.
-import { useState } from 'react'
+import { createElement, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
+import { toast } from 'sonner'
 
 import { api, ApiError, type ApiErrorItem } from '../../api/client'
 import { invalidateReportQueries } from '../../api/invalidate'
-import { useToast } from '../../components/ui/Toast'
+import { LienKetToast } from '../../components/ui/Toast'
 import { formatPeriod } from '../../lib/format'
 import type { ChuyenTrangThai, DauBaoCao } from './ReportForm'
 
@@ -160,7 +161,6 @@ export function useChuyenTrangThai(
 ): KetQuaChuyenTrangThai {
   const qc = useQueryClient()
   const navigate = useNavigate()
-  const toast = useToast()
   const [dangHoi, setDangHoi] = useState<ChuyenTrangThai | null>(null)
   const [pending, setPending] = useState(false)
 
@@ -185,9 +185,15 @@ export function useChuyenTrangThai(
       // được dọn (task-24-carry.md C2 — chờ thêm không cứu được cache sai).
       invalidateReportQueries(qc, reportId)
       if (c.action_code === 'approve') {
+        // `createElement` chứ không JSX: tệp này là `.ts`. sonner nhận thẳng một ReactElement làm
+        // `action` và dựng nguyên nó, nên link giữ được vai `link` — thứ cả e2e lẫn test đơn bám
+        // vào (`getByRole('link', { name: 'Xem dashboard' })`). Dạng `{label, onClick}` của sonner
+        // sẽ ra `<button>`, đổi vai và làm hai ca đó đỏ.
         toast(`Đã ${chuDauThanhThuong(c.name_vi)}`, {
-          label: 'Xem dashboard',
-          onClick: () => navigate('/dashboard'),
+          action: createElement(LienKetToast, {
+            nhan: 'Xem dashboard',
+            onNhan: () => navigate('/dashboard'),
+          }),
         })
       } else if (c.action_code === 'submit') {
         // Kỳ nằm trong câu vì người nhập giữ nhiều kỳ cùng lúc (spec dòng 635: "Đã nộp báo cáo

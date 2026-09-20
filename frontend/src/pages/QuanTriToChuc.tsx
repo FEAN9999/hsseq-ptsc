@@ -13,6 +13,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Briefcase, Building2, Check, Factory, HardHat } from 'lucide-react'
 
 import { api } from '../api/client'
+import { Badge } from '../components/ui/badge'
 import { TieuDeQuanTri, VungDuLieu } from '../features/admin/khung'
 
 interface NutToChuc {
@@ -74,10 +75,10 @@ function Nut({ nut, cap }: { nut: NutToChuc; cap: number }) {
             đơn vị, không phải một kết quả tốt. Bản đầu tô xanh và 22 trên 35 dòng cùng sáng lên —
             màu thành công lặp 22 lần vừa nói sai nghĩa vừa át mất chính thứ nó định làm nổi. */}
         {nut.is_reporting && (
-          <span className="inline-flex shrink-0 items-center gap-1 rounded border border-border px-1.5 py-0.5 text-xs font-medium text-sec">
-            <Check className="size-3" />
+          <Badge variant="outline" className="rounded-md text-sec">
+            <Check />
             Đầu mối
-          </span>
+          </Badge>
         )}
       </div>
       {nut.children.map((con) => (

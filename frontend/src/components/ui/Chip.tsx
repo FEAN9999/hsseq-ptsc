@@ -1,3 +1,5 @@
+import { Badge } from './badge'
+
 export type ChipKind = 'approved' | 'submitted' | 'late' | 'returned' | 'draft' | 'missing'
 
 // Nhãn tiếng Việt — bắt buộc theo CONTEXT.md, chữ trên giao diện luôn là tiếng Việt.
@@ -39,12 +41,20 @@ const KIND_BG: Record<ChipKind, string> = {
 
 // Viền riêng theo kind — kind nào mockup không có viền thì cấp border-transparent ngay tại đây
 // (không để trống: bỏ trống thì border-color mặc định là currentColor, viền sẽ ăn theo màu chữ).
+//
+// `draft` LỆCH khỏi mockup status.html một cách có chủ ý: nó có viền, mockup thì không. Lý do đo
+// được — nền của nó là `bg-muted` (oklch L 0.97), mà ở lưới /status cột kỳ ĐANG CHỌN tô
+// `bg-primary/5` ≈ L 0.96 (StatusGrid.tsx `O_KY_CHON`). Chênh 1% độ sáng: ở cỡ thật chip "Nháp"
+// đọc như CHỮ TRẦN trong khi mọi ô cạnh nó đọc như huy hiệu — người xem lưới sẽ đọc ô đó là
+// "chưa có gì" thay vì "có bản nháp". `--border` (L 0.923) tách bạch với CẢ HAI nền nên viền nhìn
+// rõ ở mọi ngữ cảnh chip này xuất hiện: lưới /status, bảng /reports, đầu form (nền `bg-card`).
+// Đây là cùng cách `missing` đã dùng, không phải một lối vẽ mới.
 const KIND_BORDER: Record<ChipKind, string> = {
   approved: 'border-transparent',
   submitted: 'border-transparent',
   late: 'border-transparent',
   returned: 'border-transparent',
-  draft: 'border-transparent',
+  draft: 'border-border',
   missing: 'border-border',
 }
 
@@ -71,18 +81,28 @@ export function Chip({
   const borderClass = outline ? 'border-current' : KIND_BORDER[kind]
   const bgClass = outline ? 'bg-transparent' : KIND_BG[kind]
 
-  const classes = [
-    'inline-block h-6 leading-[22px] px-2.5 rounded-full border text-xs font-medium whitespace-nowrap',
-    bgClass,
-    KIND_TEXT[kind],
-    borderClass,
-  ]
-    .filter(Boolean)
-    .join(' ')
-
+  // Vỏ TRÌNH BÀY là primitive `ui/badge.tsx`, không còn chuỗi utility tự vẽ (README gói bàn giao
+  // mục 12: `ui/Chip.tsx` → `Badge`). Ba bảng màu ở trên vẫn cấp qua `className` chứ KHÔNG thành
+  // variant mới trong `badge.tsx`: sáu màu này dựng trên token `--success*`/`--warning*` là phần
+  // THÊM của gói bàn giao, không thuộc bộ chuẩn shadcn, nên lần `shadcn add badge` sau sẽ nuốt
+  // mất. Cùng tiền lệ `features/report/NhacTruocDuyet.tsx` đã đặt với `Alert`.
+  //
+  // `rounded-md` (README in đậm: KHÔNG phải pill) ghi đè `rounded-4xl` mặc định của Badge.
+  //
+  // `variant="outline"` chọn vì `cn` (clsx + tailwind-merge) GỠ HẲN utility bị ghi đè khỏi chuỗi:
+  // `border-border`/`text-foreground` của variant và `border-transparent` của lớp nền Badge biến
+  // mất khi ba lớp dưới đây có mặt, nên mỗi chip vẫn chỉ còn ĐÚNG MỘT utility background-color,
+  // MỘT border-color, MỘT color ở trạng thái nghỉ — đúng bất biến mà fix S1 và vòng sửa 3 — P1
+  // phải trả giá mới có. Phần còn lại của variant (`[a]:hover:*`) biên dịch ra `:is(a):hover`, mà
+  // chip luôn là <span> (kể cả khi StatusGrid bọc nó trong <Link>), nên không bao giờ khớp.
   return (
-    <span className={classes} data-testid={testId} aria-disabled={ariaDisabled ? 'true' : undefined}>
+    <Badge
+      variant="outline"
+      className={`rounded-md ${bgClass} ${KIND_TEXT[kind]} ${borderClass}`}
+      data-testid={testId}
+      aria-disabled={ariaDisabled ? 'true' : undefined}
+    >
       {LABEL[kind]}
-    </span>
+    </Badge>
   )
 }

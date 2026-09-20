@@ -17,15 +17,25 @@ import { useState } from 'react'
 import { Search, X } from 'lucide-react'
 import { useNavigate, Link } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
 import { api, ApiError } from '../api/client'
 import { useSession } from '../app/session'
 import { useReportList, type ReportListItem } from '../features/reports/useReportList'
 import { invalidateReportQueries } from '../api/invalidate'
+import { Button } from '../components/ui/button'
+import { Card } from '../components/ui/card'
 import { Chip, type ChipKind } from '../components/ui/Chip'
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '../components/ui/empty'
 import { SkeletonDong } from '../components/ui/SkeletonDong'
 import { InlineError } from '../components/ui/InlineError'
-import { useToast } from '../components/ui/Toast'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '../components/ui/table'
 import { formatDue, formatDateTime, formatNumber, formatPeriod } from '../lib/format'
 
 const DO_DAI_GHI_CHU = 120
@@ -44,19 +54,21 @@ function kindTrangThai(state: string | null, isLate: boolean | null): ChipKind {
   return 'missing'
 }
 
-const BTN_BASE =
-  'inline-flex items-center justify-center h-[26px] px-2.5 rounded-md border text-xs font-medium whitespace-nowrap no-underline disabled:opacity-50'
-const BTN_PRIMARY = `${BTN_BASE} bg-primary border-primary text-white`
-const BTN_QUIET = `${BTN_BASE} bg-card border-border text-foreground transition-colors duration-[120ms] hover:bg-muted`
-
 // `whitespace-nowrap` trên ô dữ liệu, KHÔNG phải một bề rộng tối thiểu cho cả bảng: ở 1024 zoom
 // 125% (một trong ba thiết bị đích) sáu cột không đủ chỗ, và mặc định trình duyệt là ngắt dòng
 // TỪNG ô — đo được ở /reports "Tất cả": tên đơn vị và mốc Cập nhật mỗi cái xuống hai dòng ở những
 // dòng khác nhau, 66 dòng cao thấp lởm chởm. Cấm ngắt thì bảng tự lấy đúng bề rộng nó cần và khung
 // bọc `overflow-x-auto` cuộn ngang ĐÚNG phần thiếu — ở 1280 không cuộn một pixel nào.
-const O_BANG = 'h-9 px-3 border-b border-border text-sm whitespace-nowrap'
-const O_TIEU_DE =
-  'h-9 px-3 border-b border-border bg-muted text-[13.5px] text-sec font-semibold text-left whitespace-nowrap'
+//
+// Bản sao RIÊNG của hai hằng cùng tên trong `features/admin/khung.tsx`, cố ý không nhập chéo:
+// trang này không phải màn quản trị. Hai bản phải sửa song song.
+// Chỉ còn phần `TableCell`/`TableHead` (components/ui/table.tsx) KHÔNG tự có: `whitespace-nowrap`
+// và `text-left`/`font-medium` đã nằm sẵn trong primitive, còn `border-b border-border` chuyển
+// sang `TableRow` (dòng cuối do `TableBody` gỡ) — giữ lại ở đây là viền đôi.
+// `py-0` gỡ đệm dọc của `p-2` (nền `TableCell`): `px-3` chỉ đè được bề ngang, mà dòng bảng này
+// vốn chỉ cao theo `h-9`. Xem chú thích dài hơn ở `features/admin/khung.tsx`.
+const O_BANG = 'h-9 px-3 py-0 text-sm'
+const O_TIEU_DE = 'h-9 px-3 bg-muted text-[13.5px] text-sec font-semibold'
 
 // Cột Hành động DÍNH MÉP PHẢI — cùng khuôn cột đơn vị dính trái của features/status/StatusGrid.tsx,
 // và cùng lý do: ở 1024 zoom 125% sáu cột không vừa, khung bọc cuộn ngang, và nếu để cột này trôi
@@ -67,7 +79,6 @@ const O_DINH = 'sticky right-0 z-10 border-l border-border'
 
 function NutTaoBaoCao({ periodKey }: { periodKey: string }) {
   const queryClient = useQueryClient()
-  const hienToast = useToast()
   const navigate = useNavigate()
   const [dangTao, setDangTao] = useState(false)
 
@@ -81,8 +92,8 @@ function NutTaoBaoCao({ periodKey }: { periodKey: string }) {
       invalidateReportQueries(queryClient, id)
       // S6/S8 (vòng sửa 1): toast "Đã tạo báo cáo <kỳ>" theo bảng trạng thái thiết kế — trước đây
       // không hiện được vì location.assign xoá cả trang ngay sau đó (S1); nay điều hướng SPA nên
-      // toast (store toàn cục, không unmount theo route) hiện được cùng lúc.
-      hienToast(`Đã tạo báo cáo ${formatPeriod(periodKey)}`)
+      // toast (hàng đợi toàn cục của sonner, không unmount theo route) hiện được cùng lúc.
+      toast(`Đã tạo báo cáo ${formatPeriod(periodKey)}`)
       navigate(`/reports/${id}`)
     } catch (err) {
       setDangTao(false)
@@ -93,16 +104,16 @@ function NutTaoBaoCao({ periodKey }: { periodKey: string }) {
         navigate(`/reports/${err.existing_id}`)
         return
       }
-      hienToast(err instanceof ApiError ? err.detail : 'Không tạo được báo cáo')
+      toast(err instanceof ApiError ? err.detail : 'Không tạo được báo cáo')
     }
   }
 
   // Với người nộp, kỳ đang mở CHƯA tạo báo cáo là việc DUY NHẤT trang này mời họ làm — nút chính,
   // không phải một nút xám ngang hàng với "Xem" của các kỳ đã xong (mockup mục 07).
   return (
-    <button type="button" onClick={xuLy} disabled={dangTao} className={BTN_PRIMARY}>
+    <Button type="button" onClick={xuLy} disabled={dangTao}>
       {dangTao ? 'Đang tạo…' : 'Tạo báo cáo'}
-    </button>
+    </Button>
   )
 }
 
@@ -139,9 +150,9 @@ function OHanhDong({
   // có việc với dòng `submitted`; viewer không duyệt được nên không dòng nào là việc của họ.
   const noiBat = isAdmin ? coQuyenDuyet && row.state === 'submitted' : laMo
   return (
-    <Link to={`/reports/${row.id}`} className={noiBat ? BTN_PRIMARY : BTN_QUIET}>
-      {laMo ? 'Mở' : 'Xem'}
-    </Link>
+    <Button asChild variant={noiBat ? 'default' : 'outline'}>
+      <Link to={`/reports/${row.id}`}>{laMo ? 'Mở' : 'Xem'}</Link>
+    </Button>
   )
 }
 
@@ -171,38 +182,42 @@ function HangBaoCao({
 }) {
   const han = hanNop(row, now)
   return (
-    <tr className="group transition-colors duration-[120ms] hover:bg-muted/50">
+    // Hiệu ứng rê chuột tự viết đã BỎ — `TableRow` mang sẵn `transition-colors hover:bg-muted/50`.
+    // `group` thì GIỮ: ô dính phải tự mang nền nên phải nhắc lại vệt sáng bằng `group-hover`.
+    <TableRow className="group">
       {isAdmin && (
-        <td className={O_BANG}>
+        <TableCell className={O_BANG}>
           {/* Mã TRƯỚC tên, cùng khuôn bảng đơn vị của Dashboard (Lát 4): tên seed hiện tại chỉ
               khác nhau ở hai chữ số cuối, nên ở một bảng 66 dòng cái mắt bám được là cái mã. */}
           <span className="font-mono text-xs text-muted-foreground">{row.org_unit.code}</span>
           <span className="ml-2">{row.org_unit.name}</span>
-        </td>
+        </TableCell>
       )}
-      <td className={O_BANG} data-testid="o-ky">
+      <TableCell className={O_BANG} data-testid="o-ky">
         {formatPeriod(row.period_key)}
-      </td>
+      </TableCell>
       {/* Ô DUY NHẤT được phép xuống dòng: ghi chú Trả lại dài tới 120 ký tự, cấm ngắt ở đây là
           kéo bảng rộng ra gấp nhiều lần vì một dòng. */}
-      <td className={`${O_BANG} whitespace-normal align-middle`}>
+      <TableCell className={`${O_BANG} whitespace-normal align-middle`}>
         <Chip kind={kindTrangThai(row.state, row.is_late)} outline={row.source === 'seed'} />
         {row.state === 'returned' && row.decision_note && (
           <div className="block text-xs text-destructive leading-[1.3] mt-0.5" data-testid="ghi-chu-tra-lai">
             {ghiChuTraLai(row.decision_note)}
           </div>
         )}
-      </td>
-      <td className={O_BANG} title={han.title} data-testid="o-han-nop">
+      </TableCell>
+      <TableCell className={O_BANG} title={han.title} data-testid="o-han-nop">
         {han.text}
-      </td>
-      <td className={O_BANG} data-testid="o-cap-nhat">
+      </TableCell>
+      <TableCell className={O_BANG} data-testid="o-cap-nhat">
         {row.updated_at ? formatDateTime(row.updated_at) : <span className="text-muted-foreground">—</span>}
-      </td>
-      <td className={`${O_BANG} ${O_DINH} bg-card transition-colors duration-[120ms] group-hover:bg-muted/50`}>
+      </TableCell>
+      <TableCell
+        className={`${O_BANG} ${O_DINH} bg-card transition-colors duration-[120ms] group-hover:bg-muted/50`}
+      >
         <OHanhDong row={row} isAdmin={isAdmin} coQuyenDuyet={coQuyenDuyet} />
-      </td>
-    </tr>
+      </TableCell>
+    </TableRow>
   )
 }
 
@@ -351,51 +366,54 @@ export function Reports() {
           </EmptyHeader>
         </Empty>
       ) : (
-        <section className="overflow-hidden rounded-xl border border-border bg-card">
-          <div className="overflow-x-auto">
-            <table className="w-full border-collapse [&_tbody_tr:last-child_td]:border-b-0">
-              <thead>
-                <tr>
-                  {isAdmin && <th className={O_TIEU_DE}>Đơn vị</th>}
-                  <th className={O_TIEU_DE}>Kỳ</th>
-                  <th className={O_TIEU_DE}>Trạng thái</th>
-                  <th className={O_TIEU_DE}>Hạn nộp</th>
-                  <th className={O_TIEU_DE}>Cập nhật</th>
-                  <th className={`${O_TIEU_DE} ${O_DINH}`}>Hành động</th>
-                </tr>
-              </thead>
-              <tbody>
-                {hienThi.map((row) => (
-                  <HangBaoCao
-                    key={`${row.org_unit.code}-${row.period_key}`}
-                    row={row}
-                    isAdmin={isAdmin}
-                    coQuyenDuyet={coQuyenDuyet}
-                    now={now}
-                  />
-                ))}
-                {/* Lọc không ra dòng nào là một màn hình TRỐNG có nguyên nhân rõ và có lối thoát —
-                    khác hẳn hàng đợi rỗng ở trên (không có việc để làm). Hai cảnh này không được
-                    dùng chung một câu. */}
-                {hienThi.length === 0 && (
-                  <tr>
-                    <td colSpan={soCot} className="px-3 py-8 text-center text-sm text-muted-foreground">
-                      Không có đơn vị nào khớp “{tim.trim()}”
-                      <button
-                        type="button"
-                        onClick={() => setTim('')}
-                        className="ml-2 inline-flex cursor-pointer items-center gap-1 rounded-md border-0 bg-transparent text-secondary-foreground underline"
-                      >
-                        <X className="size-3.5" />
-                        Xoá bộ lọc
-                      </button>
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </section>
+        // Vỏ cuộn tự viết đã BỎ: `Table` tự sinh một `<div overflow-x-auto>`, giữ thêm một tầng
+        // nữa là hai vùng cuộn lồng nhau. `py-0` vì bảng đã tự có đệm dọc.
+        <Card className="py-0">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                {isAdmin && <TableHead className={O_TIEU_DE}>Đơn vị</TableHead>}
+                <TableHead className={O_TIEU_DE}>Kỳ</TableHead>
+                <TableHead className={O_TIEU_DE}>Trạng thái</TableHead>
+                <TableHead className={O_TIEU_DE}>Hạn nộp</TableHead>
+                <TableHead className={O_TIEU_DE}>Cập nhật</TableHead>
+                <TableHead className={`${O_TIEU_DE} ${O_DINH}`}>Hành động</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {hienThi.map((row) => (
+                <HangBaoCao
+                  key={`${row.org_unit.code}-${row.period_key}`}
+                  row={row}
+                  isAdmin={isAdmin}
+                  coQuyenDuyet={coQuyenDuyet}
+                  now={now}
+                />
+              ))}
+              {/* Lọc không ra dòng nào là một màn hình TRỐNG có nguyên nhân rõ và có lối thoát —
+                  khác hẳn hàng đợi rỗng ở trên (không có việc để làm). Hai cảnh này không được
+                  dùng chung một câu. */}
+              {hienThi.length === 0 && (
+                <TableRow className="hover:bg-transparent">
+                  <TableCell
+                    colSpan={soCot}
+                    className="px-3 py-8 text-center text-sm whitespace-normal text-muted-foreground"
+                  >
+                    Không có đơn vị nào khớp “{tim.trim()}”
+                    <button
+                      type="button"
+                      onClick={() => setTim('')}
+                      className="ml-2 inline-flex cursor-pointer items-center gap-1 rounded-md border-0 bg-transparent text-secondary-foreground underline"
+                    >
+                      <X className="size-3.5" />
+                      Xoá bộ lọc
+                    </button>
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </Card>
       )}
     </div>
   )
