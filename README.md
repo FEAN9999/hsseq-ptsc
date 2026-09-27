@@ -2,6 +2,29 @@
 
 Nền tảng báo cáo HSEQ nội bộ PTSC — FastAPI + Postgres (backend), React (frontend).
 
+## Tài liệu
+
+Mới vào dự án thì bắt đầu từ bài hướng dẫn. Các trang còn lại tra khi cần.
+
+| Trang | Đọc khi |
+|---|---|
+| [Vòng báo cáo đầu tiên](docs/tutorials/vong-bao-cao-dau-tien.md) | Lần đầu chạy hệ thống: dựng trên máy, nộp, trả lại, duyệt |
+| [Cách nạp số liệu thật](docs/how-to/nap-so-lieu-that.md) | Đưa số của các tháng đã qua vào bản demo |
+| [Cách thêm hoặc sửa chỉ tiêu](docs/how-to/them-hoac-sua-chi-tieu.md) | Đổi danh mục chỉ tiêu của FM01 |
+| [Cách mở, đóng và thêm kỳ báo cáo](docs/how-to/mo-dong-va-them-ky.md) | Sang tháng mới, đổi hạn nộp |
+| [Cách đổi tên đơn vị và quản lý tài khoản](docs/how-to/doi-don-vi-va-tai-khoan.md) | Thay tên tạm, đặt lại mật khẩu, thêm hoặc khoá người dùng |
+| [Cách thêm một endpoint API](docs/how-to/them-endpoint-api.md) | Viết endpoint mới đúng khuôn quyền và phạm vi |
+| [API backend](docs/reference/api.md) | Tra endpoint, tham số, mã lỗi |
+| [Mô hình dữ liệu](docs/reference/mo-hinh-du-lieu.md) | Tra bảng, cột, view lũy kế |
+| [Quyền và quy trình](docs/reference/quyen-va-quy-trinh.md) | Tra quyền, vai trò, trạng thái, tài khoản seed |
+| [Cấu hình và lệnh](docs/reference/cau-hinh-va-lenh.md) | Tra biến môi trường, cổng, lệnh |
+| [Fixture CSV](docs/reference/fixture-csv.md) | Tra định dạng và quy tắc kiểm của file số liệu |
+| [Frontend](docs/reference/frontend.md) | Tra trang, cách lưu, khoá cache |
+| [Kiến trúc](docs/explanation/kien-truc.md) | Muốn biết các phần ghép với nhau thế nào và vì sao |
+| [Lũy kế](docs/explanation/luy-ke.md) | Muốn hiểu cột "Cộng dồn" và "Lệch" |
+| [Nền tảng theo dữ liệu](docs/explanation/nen-tang-theo-du-lieu.md) | Tính thêm mẫu báo cáo thứ hai |
+| [An toàn nhập liệu](docs/explanation/an-toan-nhap-lieu.md) | Muốn biết lớp nào giữ số đúng, và chỗ nào còn hở |
+
 ## Chạy local
 
 ```bash
@@ -182,10 +205,12 @@ Trên Render, nhớ thêm `APP_ENV=demo`: thiếu biến này thì cầu chì fa
 **`frontend/vercel.json`** (đã có trong repo) khai SPA fallback — thiếu nó thì F5 (tải lại trang) ở
 một route con như `/reports/12` trả 404, vì Vercel không biết đó là một route phía client.
 
-**`VITE_API_BASE`** đặt ở biến môi trường project trên Vercel, dạng origin kèm sẵn `/api/v1` (vd.
-`https://<render-app>.onrender.com/api/v1`) — KHÔNG đặt bằng file `.env.production` trong repo (file
-đó bị đọc ở MỌI lần build production, kể cả `npm run build && npm run preview` mà local/CI dùng để
-test, nên ghi cứng URL Render vào đó sẽ khiến phép đo local vô tình gọi sang cloud).
+**`VITE_API_BASE`** khai trong `frontend/vercel.json`, mục `build.env`, giá trị
+`https://hsseq-ptsc-api.onrender.com/api/v1` (origin kèm sẵn `/api/v1`). Chỉ Vercel đọc file này
+lúc build, nên `npm run build && npm run preview` trên máy và CI không nhận giá trị đó và vẫn gọi
+`/api/v1` tương đối qua proxy của `vite.config.ts`. KHÔNG đặt biến này bằng file `.env.production`
+trong repo: file đó bị đọc ở MỌI lần build production, kể cả lần build trên máy để test, nên ghi cứng
+URL Render vào đó sẽ khiến phép đo local vô tình gọi sang cloud.
 
 **Quên đặt biến này (hoặc đặt sai hình dạng, vd. chỉ `/api/v1` — task-28-fix-2.md B4) thì ứng dụng
 hỏng ỒN ÀO khi thật sự gọi API, KHÔNG phải ngay lúc tải trang:** `frontend/src/api/client.ts`
